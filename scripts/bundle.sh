@@ -3,8 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CONFIG="${1:-release}"
-swift build -c "$CONFIG" --product Vocab
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/Vocab"
+# Dev hooks (e.g. `vocab-smoke setquery`) are compiled in only for debug or VOCAB_DEV_HOOKS=1.
+SWIFT_FLAGS=()
+[ "${VOCAB_DEV_HOOKS:-0}" = "1" ] && SWIFT_FLAGS=(-Xswiftc -DVOCAB_DEV_HOOKS)
+swift build -c "$CONFIG" --product Vocab ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"}
+BIN="$(swift build -c "$CONFIG" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} --show-bin-path)/Vocab"
 FINAL="build/Vocab.app"
 # Assemble in a staging folder, then swap it in.
 APP="build/.staging/Vocab.app"

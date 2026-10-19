@@ -1,7 +1,10 @@
-.PHONY: app debug test smoke run clean
+.PHONY: app app-dev debug test smoke run clean
 
 app:            ## Build build/Vocab.app (release)
 	scripts/bundle.sh release
+
+app-dev:        ## Release build with dev test hooks (vocab-smoke setquery)
+	VOCAB_DEV_HOOKS=1 scripts/bundle.sh release
 
 debug:
 	scripts/bundle.sh debug
