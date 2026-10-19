@@ -25,6 +25,22 @@ struct VocabApp: App {
                 Button("导出生词本为 CSV…") { book.exportCSV() }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
             }
+            CommandGroup(after: .textEditing) {
+                Button("查找") { NotificationCenter.default.post(name: .vocabFocusSearch, object: nil) }
+                    .keyboardShortcut("f", modifiers: [.command])
+                Button("搜索栏") { NotificationCenter.default.post(name: .vocabFocusSearch, object: nil) }
+                    .keyboardShortcut("l", modifiers: [.command])
+            }
+            CommandGroup(after: .toolbar) {
+                Button("放大文字") { lookup.zoomIn() }.keyboardShortcut("+", modifiers: [.command])
+                Button("放大文字 ") { lookup.zoomIn() }.keyboardShortcut("=", modifiers: [.command])
+                Button("缩小文字") { lookup.zoomOut() }.keyboardShortcut("-", modifiers: [.command])
+                Button("实际大小") { lookup.zoom = 1.0 }.keyboardShortcut("0", modifiers: [.command])
+            }
+            CommandMenu("前往") {
+                Button("后退") { lookup.back() }.keyboardShortcut("[", modifiers: [.command]).disabled(!lookup.canGoBack)
+                Button("前进") { lookup.forward() }.keyboardShortcut("]", modifiers: [.command]).disabled(!lookup.canGoForward)
+            }
         }
 
         Settings {

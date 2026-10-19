@@ -7,118 +7,212 @@ enum Mode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+extension Notification.Name {
+    static let vocabFocusSearch = Notification.Name("VocabFocusSearch")
+}
+
+/// Sidebar rows: suggestions while typing, recent lookups otherwise, plus 生词本 / 背单词.
+enum SidebarItem: Hashable {
+    case suggestion(String)   // Suggestion.ID
+    case recent(String)
+    case wordbook, review
+}
+
+/// Main window laid out like Dictionary.app: sidebar (history) + content with a dictionary
+/// tab strip; toolbar with back/forward, 小/大 and a search field.
 struct MainView: View {
     @EnvironmentObject var lookup: LookupModel
     @EnvironmentObject var book: WordbookModel
     @State private var mode: Mode = .lookup
-    @FocusState private var searchFocused: Bool
+    @State private var sidebarSelection: SidebarItem?
 
     var body: some View {
-        Group {
-            switch mode {
-            case .lookup: LookupView()
-            case .wordbook: WordbookView(onOpen: { w in mode = .lookup; lookup.search(w) })
-            case .review: ReviewView()
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 150, ideal: 190, max: 300)
+        } detail: {
+            Group {
+                switch mode {
+                case .lookup: LookupDetailView()
+                case .wordbook: WordbookView(onOpen: { w in openWord(w) })
+                case .review: ReviewView()
+                }
             }
+            .frame(minWidth: 420)
         }
+        .navigationTitle("生词")
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button { lookup.back() } label: { Image(systemName: "chevron.left") }
-                    .disabled(!lookup.canGoBack || mode != .lookup)
-                    .help("返回")
-            }
-            ToolbarItem(placement: .principal) {
-                Picker("", selection: $mode) {
-                    ForEach(Mode.allCases) { m in
-                        Text(m == .review && !book.dueItems.isEmpty ? "背单词 \(book.dueItems.count)" : m.rawValue).tag(m)
-                    }
+                ControlGroup {
+                    Button { goLookup(); lookup.back() } label: { Image(systemName: "chevron.left") }
+                        .disabled(!lookup.canGoBack).help("后退")
+                    Button { goLookup(); lookup.forward() } label: { Image(systemName: "chevron.right") }
+                        .disabled(!lookup.canGoForward).help("前进")
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 260)
+                .controlGroupStyle(.navigation)
             }
             ToolbarItem(placement: .primaryAction) {
-                if mode == .lookup {
-                    TextField("搜索", text: $lookup.query)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 220)
-                        .focused($searchFocused)
-                        .onSubmit { lookup.commit() }
-                        .onKeyPress(.downArrow) { lookup.moveSelection(1); return .handled }
-                        .onKeyPress(.upArrow) { lookup.moveSelection(-1); return .handled }
+                ControlGroup {
+                    Button { lookup.zoomOut() } label: { Text("小").font(.system(size: 11)) }.help("缩小文字 (⌘-)")
+                    Button { lookup.zoomIn() } label: { Text("大").font(.system(size: 14)) }.help("放大文字 (⌘+)")
                 }
+                .disabled(mode != .lookup)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                SearchField(text: $lookup.query,
+                            onMove: { goLookup(); lookup.moveSelection($0) },
+                            onCommit: { goLookup(); lookup.commit() })
+                    .frame(width: 200)
             }
         }
         .onChange(of: lookup.query) { _, _ in
-            if mode == .lookup { lookup.queryChanged() }
+            if lookup.suppressQueryChange { lookup.suppressQueryChange = false; return }
+            goLookup()
+            lookup.queryChanged()
         }
-        .onAppear { searchFocused = true }
+        .onChange(of: lookup.selection) { _, id in
+            if let id, mode == .lookup { sidebarSelection = .suggestion(id) }
+        }
+        .onAppear { DispatchQueue.main.async { NotificationCenter.default.post(name: .vocabFocusSearch, object: nil) } }
     }
-}
 
-struct LookupView: View {
-    @EnvironmentObject var lookup: LookupModel
-    @EnvironmentObject var book: WordbookModel
-
-    var body: some View {
-        HSplitView {
-            sidebar
-                .frame(minWidth: 150, idealWidth: 190, maxWidth: 300)
-            detail
-                .frame(minWidth: 360)
-        }
+    private var showingSuggestions: Bool {
+        !lookup.query.trimmingCharacters(in: .whitespaces).isEmpty && !lookup.suggestions.isEmpty
     }
 
     private var sidebar: some View {
         let matches = lookup.suggestions.filter { $0.kind == .match }
         let spelling = lookup.suggestions.filter { $0.kind == .spelling }
-        return List(selection: Binding(get: { lookup.selection }, set: { lookup.select($0) })) {
-            if !matches.isEmpty {
-                ForEach(matches) { s in Text(s.word).lineLimit(1).tag(s.id) }
-            }
-            if !spelling.isEmpty {
-                Section("你是不是要找：") {
-                    ForEach(spelling) { s in Text(s.word).lineLimit(1).tag(s.id) }
+        return List(selection: Binding(get: { sidebarSelection }, set: { pick($0) })) {
+            if showingSuggestions {
+                if !matches.isEmpty {
+                    Section { ForEach(matches) { s in Text(s.word).lineLimit(1).tag(SidebarItem.suggestion(s.id)) } }
                 }
+                if !spelling.isEmpty {
+                    Section("你是不是要找：") {
+                        ForEach(spelling) { s in Text(s.word).lineLimit(1).tag(SidebarItem.suggestion(s.id)) }
+                    }
+                }
+            } else if !lookup.recents.isEmpty {
+                Section("最近查询") {
+                    ForEach(lookup.recents, id: \.self) { w in Text(w).lineLimit(1).tag(SidebarItem.recent(w)) }
+                }
+            }
+            Section("生词") {
+                Label("生词本", systemImage: "star").badge(book.items.count).tag(SidebarItem.wordbook)
+                Label("背单词", systemImage: "rectangle.stack").badge(book.dueItems.count).tag(SidebarItem.review)
             }
         }
         .listStyle(.sidebar)
-        .overlay {
-            if lookup.suggestions.isEmpty && !lookup.query.isEmpty {
-                Text("无匹配").foregroundStyle(.secondary)
-            }
+        .contextMenu {
+            if !lookup.recents.isEmpty { Button("清除最近查询") { lookup.clearRecents() } }
         }
     }
 
-    private var detail: some View {
-        VStack(spacing: 0) {
-            if !lookup.entries.isEmpty {
-                HStack(spacing: 4) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 2) {
-                            tab("全部", selected: lookup.selectedDictionary == nil) { lookup.selectedDictionary = nil }
-                            ForEach(lookup.dictionariesWithResults) { d in
-                                tab(d.name, selected: lookup.selectedDictionary == d.id) { lookup.selectedDictionary = d.id }
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                    }
-                    Button {
-                        lookup.addCurrentToWordbook()
-                    } label: {
-                        Label(book.contains(lookup.searchedTerm) ? "已在生词本" : "加入生词本",
-                              systemImage: book.contains(lookup.searchedTerm) ? "star.fill" : "star")
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.trailing, 14)
-                }
-                .padding(.vertical, 6)
-                Divider()
+    private func pick(_ item: SidebarItem?) {
+        sidebarSelection = item
+        switch item {
+        case .suggestion(let id)?: mode = .lookup; lookup.select(id)
+        case .recent(let w)?: mode = .lookup; lookup.open(w)
+        case .wordbook?: mode = .wordbook
+        case .review?: mode = .review
+        case nil: break
+        }
+    }
+
+    private func goLookup() {
+        if mode != .lookup { mode = .lookup; sidebarSelection = nil }
+    }
+
+    private func openWord(_ w: String) {
+        mode = .lookup
+        sidebarSelection = .recent(w)
+        lookup.open(w)
+    }
+}
+
+/// NSSearchField in the toolbar: ↑/↓ move through suggestions, ↩ opens, ⌘F / ⌘L focus it.
+struct SearchField: NSViewRepresentable {
+    @Binding var text: String
+    var onMove: (Int) -> Void
+    var onCommit: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let f = NSSearchField()
+        f.placeholderString = "搜索"
+        f.delegate = context.coordinator
+        f.sendsSearchStringImmediately = true
+        f.focusRingType = .default
+        context.coordinator.field = f
+        context.coordinator.observer = NotificationCenter.default.addObserver(forName: .vocabFocusSearch, object: nil, queue: .main) { [weak f] _ in
+            MainActor.assumeIsolated {
+                guard let f, let w = f.window else { return }
+                w.makeFirstResponder(f)
+                f.currentEditor()?.selectAll(nil)
             }
+        }
+        return f
+    }
+
+    func updateNSView(_ f: NSSearchField, context: Context) {
+        context.coordinator.parent = self
+        if f.stringValue != text { f.stringValue = text }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: SearchField
+        weak var field: NSSearchField?
+        var observer: Any?
+        init(_ p: SearchField) { parent = p }
+        deinit { if let o = observer { NotificationCenter.default.removeObserver(o) } }
+
+        func controlTextDidChange(_ n: Notification) {
+            if let f = n.object as? NSSearchField, parent.text != f.stringValue { parent.text = f.stringValue }
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+            switch sel {
+            case #selector(NSResponder.moveDown(_:)): parent.onMove(1); return true
+            case #selector(NSResponder.moveUp(_:)): parent.onMove(-1); return true
+            case #selector(NSResponder.insertNewline(_:)): parent.onCommit(); return true
+            default: return false
+            }
+        }
+    }
+}
+
+struct LookupDetailView: View {
+    @EnvironmentObject var lookup: LookupModel
+    @EnvironmentObject var book: WordbookModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            DictionaryTabStrip(
+                dictionaries: lookup.searchedTerm.isEmpty ? DictionarySelection.enabled() : lookup.dictionariesWithResults,
+                selected: $lookup.selectedDictionary,
+                trailing: {
+                    if !lookup.entries.isEmpty {
+                        Button { lookup.addCurrentToWordbook() } label: {
+                            Image(systemName: book.contains(lookup.searchedTerm) ? "star.fill" : "star")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(book.contains(lookup.searchedTerm) ? "已在生词本" : "加入生词本 (⌘D)")
+                    }
+                })
+            Divider()
             ZStack(alignment: .bottom) {
-                EntryWebView(entries: lookup.visibleEntries,
-                             showTitles: lookup.selectedDictionary == nil,
-                             emptyMessage: lookup.searchedTerm.isEmpty ? "输入单词开始查询" : "没有找到「\(lookup.searchedTerm)」",
-                             onLookup: { lookup.search($0) })
+                if lookup.searchedTerm.isEmpty {
+                    emptyState
+                } else {
+                    EntryWebView(entries: lookup.visibleEntries,
+                                 showTitles: lookup.selectedDictionary == nil,
+                                 emptyMessage: "没有找到「\(lookup.searchedTerm)」",
+                                 zoom: lookup.zoom,
+                                 onLookup: { lookup.search($0) })
+                }
                 if let t = lookup.toast {
                     Text(t).padding(.horizontal, 14).padding(.vertical, 8)
                         .background(.regularMaterial, in: Capsule())
@@ -127,14 +221,88 @@ struct LookupView: View {
                 }
             }
         }
+        .background(Color(nsColor: .textBackgroundColor))
     }
 
-    private func tab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    /// Like Dictionary.app: a large secondary prompt centred, the current dictionary below it.
+    private var emptyState: some View {
+        let name = lookup.selectedDictionary.flatMap { id in DictionarySelection.enabled().first { $0.id == id }?.name } ?? "全部词典"
+        return VStack(spacing: 10) {
+            Text("请键入要查询的字词…")
+                .font(.system(size: 26, design: .serif))
+                .foregroundStyle(.secondary)
+            Text(name)
+                .font(.system(size: 30, weight: .medium, design: .serif))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+/// Dictionary.app-style strip: 全部 + dictionary names as small pills; what doesn't fit goes into ».
+struct DictionaryTabStrip<Trailing: View>: View {
+    let dictionaries: [DictionaryInfo]
+    @Binding var selected: String?
+    @ViewBuilder var trailing: () -> Trailing
+
+    private static func width(_ s: String) -> CGFloat {
+        (s as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width + 18
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let items: [(id: String?, name: String)] = [(nil, "全部")] + dictionaries.map { ($0.id, $0.name) }
+            let avail = geo.size.width - 24 - 60   // margins, » and the trailing button
+            let (shown, hidden) = split(items, avail)
+            HStack(spacing: 2) {
+                ForEach(shown, id: \.name) { it in pill(it.name, selected == it.id) { selected = it.id } }
+                if !hidden.isEmpty {
+                    Menu {
+                        ForEach(hidden, id: \.name) { it in
+                            Button { selected = it.id } label: {
+                                if selected == it.id { Label(it.name, systemImage: "checkmark") } else { Text(it.name) }
+                            }
+                        }
+                    } label: { Text("»").font(.system(size: 13)) }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                }
+                Spacer(minLength: 4)
+                trailing()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: geo.size.height)
+        }
+        .frame(height: 30)
+    }
+
+    private func split(_ items: [(id: String?, name: String)], _ avail: CGFloat) -> ([(id: String?, name: String)], [(id: String?, name: String)]) {
+        var used: CGFloat = 0
+        var shown: [(id: String?, name: String)] = []
+        var hidden: [(id: String?, name: String)] = []
+        for it in items {
+            let w = Self.width(it.name)
+            if hidden.isEmpty, used + w <= avail || shown.isEmpty { shown.append(it); used += w } else { hidden.append(it) }
+        }
+        // Keep the selected tab visible.
+        if let i = hidden.firstIndex(where: { $0.id == selected }), let last = shown.indices.last, last > 0 {
+            let sel = hidden.remove(at: i)
+            hidden.insert(shown.remove(at: last), at: 0)
+            shown.append(sel)
+        }
+        return (shown, hidden)
+    }
+
+    private func pill(_ title: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 13))
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(selected ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(on ? Color.primary.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -146,6 +314,7 @@ struct EntryWebView: NSViewRepresentable {
     var showTitles: Bool
     var panel = false
     var emptyMessage: String
+    var zoom: Double = 1.0
     var onLookup: (String) -> Void
 
     @MainActor final class Coordinator {
@@ -161,6 +330,7 @@ struct EntryWebView: NSViewRepresentable {
 
     func updateNSView(_ wv: WKWebView, context: Context) {
         context.coordinator.factory.onLookup = onLookup
+        if abs(wv.pageZoom - zoom) > 0.001 { wv.pageZoom = zoom }
         let token = entries.map(\.id).joined(separator: "|") + "\(showTitles)\(emptyMessage)"
         guard token != context.coordinator.token else { return }
         context.coordinator.token = token

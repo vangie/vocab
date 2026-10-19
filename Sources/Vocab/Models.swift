@@ -32,7 +32,17 @@ final class LookupModel: ObservableObject {
     /// The word whose entries are showing.
     @Published private(set) var searchedTerm = ""
     @Published var toast: String?
-    private var history: [String] = []
+    /// Back/forward stack of looked-up words.
+    @Published private(set) var nav: [String] = []
+    @Published private(set) var navIndex = -1
+    /// Recent lookups for the sidebar (most recent first, persisted).
+    @Published private(set) var recents: [String] = UserDefaults.standard.stringArray(forKey: "recentLookups") ?? []
+    /// Text zoom for entries (小/大, ⌘- / ⌘+), persisted.
+    @Published var zoom: Double = UserDefaults.standard.object(forKey: "pageZoom") as? Double ?? 1.0 {
+        didSet { UserDefaults.standard.set(zoom, forKey: "pageZoom") }
+    }
+    /// Set while back/forward or a recent click fills the search field, so typing logic doesn't re-run.
+    var suppressQueryChange = false
     private var suggestTask: Task<Void, Never>?
     private var showTask: Task<Void, Never>?
 
@@ -83,7 +93,7 @@ final class LookupModel: ObservableObject {
             if let sel = self.selectedDictionary, !r.entries.contains(where: { $0.dictionary.id == sel }) {
                 self.selectedDictionary = nil
             }
-            if record, self.history.last != self.searchedTerm { self.history.append(self.searchedTerm) }
+            if record { self.recordVisit(self.searchedTerm) }
         }
     }
 
@@ -92,8 +102,30 @@ final class LookupModel: ObservableObject {
         if let term { query = term }
         queryChanged()
         let t = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !t.isEmpty, history.last != t { history.append(t) }
+        if !t.isEmpty { recordVisit(t) }
     }
+
+    /// Open a word from history/recents: fill the field, show it, no suggestion churn.
+    func open(_ word: String, record: Bool = true) {
+        suppressQueryChange = true
+        query = word
+        suggestions = []
+        selection = nil
+        show(word, record: record)
+    }
+
+    func recordVisit(_ t: String) {
+        guard !t.isEmpty else { return }
+        if navIndex >= 0, navIndex < nav.count, nav[navIndex] == t { return }
+        if navIndex < nav.count - 1 { nav.removeSubrange((navIndex + 1)...) }
+        nav.append(t); navIndex = nav.count - 1
+        recents.removeAll { $0.caseInsensitiveCompare(t) == .orderedSame }
+        recents.insert(t, at: 0)
+        if recents.count > 50 { recents.removeLast(recents.count - 50) }
+        UserDefaults.standard.set(recents, forKey: "recentLookups")
+    }
+
+    func clearRecents() { recents = []; UserDefaults.standard.removeObject(forKey: "recentLookups") }
 
     func select(_ id: Suggestion.ID?) {
         selection = id
@@ -115,13 +147,22 @@ final class LookupModel: ObservableObject {
     }
 
     func back() {
-        guard history.count > 1 else { return }
-        history.removeLast()
-        let t = history.removeLast()
-        search(t)
+        guard canGoBack else { return }
+        navIndex -= 1
+        open(nav[navIndex], record: false)
     }
 
-    var canGoBack: Bool { history.count > 1 }
+    func forward() {
+        guard canGoForward else { return }
+        navIndex += 1
+        open(nav[navIndex], record: false)
+    }
+
+    var canGoBack: Bool { navIndex > 0 }
+    var canGoForward: Bool { navIndex >= 0 && navIndex < nav.count - 1 }
+
+    func zoomIn() { zoom = min(2.0, (zoom * 10 + 1).rounded() / 10) }
+    func zoomOut() { zoom = max(0.7, (zoom * 10 - 1).rounded() / 10) }
 
     func addCurrentToWordbook() {
         let pool = visibleEntries.isEmpty ? entries : visibleEntries

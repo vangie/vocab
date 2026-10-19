@@ -35,6 +35,7 @@ struct DictionarySettingsView: View {
     @State private var dicts: [DictionaryInfo] = []
     @State private var enabled: [String] = []
     @State private var selection: String?
+    @State private var contentHeight: CGFloat = 60
 
     var body: some View {
         GeometryReader { geo in
@@ -43,16 +44,19 @@ struct DictionarySettingsView: View {
                 DictionaryTable(dicts: $dicts, enabled: $enabled, selection: $selection,
                                 onChange: persist, onResetOrder: resetOrder, onResetPrefs: resetPrefs)
                     .frame(height: max(150, (geo.size.height - 40) * 0.4))
-                Group {
-                    if let id = selection, let d = dicts.first(where: { $0.id == id }) {
-                        DictionaryDetailView(dictionary: d).id(d.id)
-                    } else {
-                        Color.clear
-                    }
+                    .padding(.bottom, 8)
+                let tableH = max(150, (geo.size.height - 40) * 0.4)
+                let room = max(40, geo.size.height - 40 - 26 - tableH - 16)
+                if let id = selection, let d = dicts.first(where: { $0.id == id }) {
+                    // Like native: the box hugs its content (a short description is a short box),
+                    // and scrolls inside only when the content is taller than the space left.
+                    DictionaryDetailView(dictionary: d, height: $contentHeight).id(d.id)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: min(contentHeight, room))
+                        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+                        .overlay(Rectangle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
-                .overlay(Rectangle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+                Spacer(minLength: 0)
             }
             .padding(20)
         }
@@ -169,12 +173,20 @@ struct DictionaryTable: NSViewRepresentable {
                 t.lineBreakMode = .byTruncatingTail
                 return t
             }
-            let b = NSButton(checkboxWithTitle: d.name, target: self, action: #selector(toggle(_:)))
-            b.font = .systemFont(ofSize: 13)
+            // Only the checkbox square toggles; the name is a plain label so clicking it just selects.
+            let b = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggle(_:)))
             b.tag = row
             b.state = parent.enabled.contains(d.id) ? .on : .off
-            b.lineBreakMode = .byTruncatingTail
-            return b
+            b.setContentHuggingPriority(.required, for: .horizontal)
+            let label = NSTextField(labelWithString: d.name)
+            label.font = .systemFont(ofSize: 13)
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let stack = NSStackView(views: [b, label])
+            stack.orientation = .horizontal
+            stack.spacing = 4
+            stack.alignment = .centerY
+            return stack
         }
 
         @objc func toggle(_ b: NSButton) {
@@ -238,26 +250,29 @@ struct DictionaryTable: NSViewRepresentable {
 
 struct DictionaryDetailView: View {
     let dictionary: DictionaryInfo
+    @Binding var height: CGFloat
 
     var body: some View {
         let p = DictionaryPrefs(bundleURL: dictionary.bundleURL)
         if let p, p.prefsHTML != nil {
-            DictionaryPrefsWebView(prefs: p)
+            DictionaryPrefsWebView(prefs: p, height: $height)
         } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(dictionary.name).font(.headline)
                     if let c = p?.copyright { Text(c) }
                     if let m = p?.manufacturer { Text("制作：\(m)").foregroundStyle(.secondary) }
                     if let v = p?.version { Text("版本：\(v)").foregroundStyle(.secondary) }
                     let langs = DictionaryOrder.languageLabel(dictionary)
                     if !langs.isEmpty { Text("语言：\(langs)").foregroundStyle(.secondary) }
-                    Text("这个词典没有可调整的显示选项。").foregroundStyle(.secondary).padding(.top, 4)
                 }
                 .font(.system(size: 13))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
+                .background(GeometryReader { g in
+                    Color.clear.onAppear { height = g.size.height }.onChange(of: g.size.height) { _, h in height = h }
+                })
             }
         }
     }
@@ -268,13 +283,15 @@ struct DictionaryDetailView: View {
 /// text and hidden inputs ↔ key N = value.
 struct DictionaryPrefsWebView: NSViewRepresentable {
     let prefs: DictionaryPrefs
+    @Binding var height: CGFloat
 
-    func makeCoordinator() -> Coordinator { Coordinator(prefs: prefs) }
+    func makeCoordinator() -> Coordinator { Coordinator(prefs: prefs, height: $height) }
 
     func makeNSView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
         let uc = WKUserContentController()
         uc.add(context.coordinator, name: "vocabPrefs")
+        uc.add(context.coordinator, name: "vocabHeight")
         let values = (try? JSONSerialization.data(withJSONObject: prefs.effective())).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         let copyright = (try? JSONSerialization.data(withJSONObject: [prefs.copyright ?? ""])).flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
         let js = """
@@ -302,6 +319,11 @@ struct DictionaryPrefsWebView: NSViewRepresentable {
             window.webkit.messageHandlers.vocabPrefs.postMessage(out);
           }
           inputs.forEach(function(el){ el.addEventListener('change', collect); });
+          function report(){ window.webkit.messageHandlers.vocabHeight.postMessage(Math.ceil(document.body.getBoundingClientRect().height + 20)); }
+          new ResizeObserver(report).observe(document.body);
+          document.querySelectorAll('details').forEach(function(d){ d.addEventListener('toggle', report); });
+          document.querySelectorAll('img').forEach(function(i){ i.addEventListener('load', report); });
+          report();
         })();
         """
         uc.addUserScript(WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
@@ -319,9 +341,14 @@ struct DictionaryPrefsWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         let prefs: DictionaryPrefs
-        init(prefs: DictionaryPrefs) { self.prefs = prefs }
+        var height: Binding<CGFloat>
+        init(prefs: DictionaryPrefs, height: Binding<CGFloat>) { self.prefs = prefs; self.height = height }
 
         func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "vocabHeight" {
+                if let h = message.body as? NSNumber { height.wrappedValue = CGFloat(h.doubleValue) }
+                return
+            }
             guard let d = message.body as? [String: Any] else { return }
             var values = prefs.effective()
             for (k, v) in d { values[k] = "\(v)" }
