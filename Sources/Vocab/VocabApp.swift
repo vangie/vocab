@@ -30,7 +30,7 @@ struct VocabApp: App {
         Settings {
             SettingsView()
                 .environmentObject(settings)
-                .frame(width: 520, height: 460)
+                .frame(width: 600, height: 620)
         }
     }
 }
@@ -38,6 +38,13 @@ struct VocabApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         SettingsModel.shared.applyOnLaunch()
+        // Re-render the current word when dictionary order/enabled/prefs change in Settings.
+        NotificationCenter.default.addObserver(forName: .vocabDictionaryPrefsChanged, object: nil, queue: .main) { _ in
+            Task { @MainActor in
+                let m = LookupModel.shared
+                if !m.searchedTerm.isEmpty { m.show(m.searchedTerm, record: false) }
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

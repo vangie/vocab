@@ -305,26 +305,7 @@ struct SettingsView: View {
             .onAppear { settings.refreshTrust(); settings.startStatusUpdates() }
             .tabItem { Label("通用", systemImage: "gearshape") }
 
-            VStack(alignment: .leading) {
-                Text("勾选要查询的词典（默认与系统「词典」App 设置一致）").font(.caption).foregroundStyle(.secondary)
-                List(dicts) { d in
-                    Toggle(d.name, isOn: Binding(
-                        get: { enabled.contains(d.id) },
-                        set: { on in
-                            if on { enabled.append(d.id) } else { enabled.removeAll { $0 == d.id } }
-                            UserDefaults.standard.set(enabled, forKey: DictionarySelection.key)
-                        }))
-                }
-                Button("恢复为系统词典设置") {
-                    UserDefaults.standard.removeObject(forKey: DictionarySelection.key)
-                    enabled = DictionarySelection.enabled().map(\.id)
-                }
-            }
-            .padding()
-            .onAppear {
-                dicts = DictionaryService.shared.availableDictionaries()
-                enabled = DictionarySelection.enabled().map(\.id)
-            }
+            DictionarySettingsView()
             .tabItem { Label("词典", systemImage: "books.vertical") }
         }
     }

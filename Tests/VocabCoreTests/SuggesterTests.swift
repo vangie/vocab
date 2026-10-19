@@ -96,3 +96,41 @@ final class ClickSuppressorTests: XCTestCase {
         XCTAssertFalse(ClickSuppressor.shouldSuppress(secondsSinceThreeTouch: 1e9, window: 0.25))
     }
 }
+
+final class DictionaryPrefsTests: XCTestCase {
+    func testSpliceReplacesBodyKeepsHead() {
+        let r = "<html><head><style>x</style></head><body><p>old</p></body></html>"
+        let t = "<html><head/><body class=\"n\"><p>new</p></body></html>"
+        XCTAssertEqual(DictionaryPrefs.splice(rendered: r, transformed: t),
+                       "<html><head><style>x</style></head><body class=\"n\"><p>new</p></body></html>")
+    }
+
+    func testOverridesStoredOnlyWhenDifferentAndTransformApplies() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("vt-\(UUID().uuidString).dictionary")
+        let res = dir.appendingPathComponent("Contents/Resources")
+        try FileManager.default.createDirectory(at: res, withIntermediateDirectories: true)
+        let info: NSDictionary = ["CFBundleIdentifier": "test.dict", "DCSDictionaryXSL": "t.xsl",
+                                  "DCSDictionaryDefaultPrefs": ["display-zh": "1", "version": "1"]]
+        info.write(to: dir.appendingPathComponent("Contents/Info.plist"), atomically: true)
+        try """
+        <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+        <xsl:template match="@*|node()"><xsl:copy><xsl:apply-templates select="@*|node()"/></xsl:copy></xsl:template>
+        <xsl:template match="span[@class='zh']"><xsl:if test="$display-zh = '1'"><xsl:copy-of select="."/></xsl:if></xsl:template>
+        </xsl:stylesheet>
+        """.write(to: res.appendingPathComponent("t.xsl"), atomically: true, encoding: .utf8)
+        let p = try XCTUnwrap(DictionaryPrefs(bundleURL: dir))
+        let store = UserDefaults(suiteName: "vocab.tests.\(UUID().uuidString)")!
+        p.save(p.systemEffective, store)
+        XCTAssertTrue(p.vocabOverrides(store).isEmpty)
+        XCTAssertFalse(p.needsOwnTransform(store))
+        var v = p.systemEffective; v["display-zh"] = "0"
+        p.save(v, store)
+        XCTAssertEqual(p.vocabOverrides(store), ["display-zh": "0"])
+        XCTAssertTrue(p.needsOwnTransform(store))
+        let raw = "<html><head/><body><p>word <span class=\"zh\">词</span></p></body></html>"
+        let off = try XCTUnwrap(p.transform(rawXML: raw, params: p.effective(store)))
+        XCTAssertFalse(off.contains("词"))
+        let on = try XCTUnwrap(p.transform(rawXML: raw, params: p.systemEffective))
+        XCTAssertTrue(on.contains("词"))
+    }
+}

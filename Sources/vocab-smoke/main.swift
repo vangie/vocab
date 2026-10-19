@@ -136,6 +136,28 @@ case "suggest":
         print("   lookup → \(fb.word): \(Set(fb.entries.map(\.dictionary.name)).sorted().joined(separator: ", "))")
     }
 
+case "prefs":
+    // vocab-smoke prefs <dictionary name part> <word> [key=value ...]
+    //   Renders <word> with Vocab-local dictionary prefs (kept in a scratch defaults suite).
+    let svc = DictionaryService.shared
+    guard args.count > 3, let d = svc.availableDictionaries().first(where: { $0.name.contains(args[2]) || $0.shortName.contains(args[2]) }) else { fail("usage: prefs <dict> <word> [k=v ...]") }
+    let suite = UserDefaults(suiteName: "io.github.vangie.vocab.smoke")!
+    suite.removeObject(forKey: DictionaryPrefs.defaultsKey)
+    svc.prefsStore = suite
+    guard let p = DictionaryPrefs(bundleURL: d.bundleURL) else { fail("no Info.plist") }
+    print("dictionary: \(d.name) id=\(p.bundleID) prefsHTML=\(p.prefsHTML?.lastPathComponent ?? "-") xsl=\(p.xsl?.lastPathComponent ?? "-")")
+    print("defaults: \(p.defaults.sorted { $0.key < $1.key })")
+    print("Dictionary.app: \(p.applePrefs.sorted { $0.key < $1.key })")
+    var vals = p.systemEffective
+    for kv in args.dropFirst(4) { let a = kv.split(separator: "=", maxSplits: 1).map(String.init); if a.count == 2 { vals[a[0]] = a[1] } }
+    p.save(vals, suite)
+    print("vocab overrides: \(p.vocabOverrides(suite).sorted { $0.key < $1.key })  ownTransform=\(p.needsOwnTransform(suite))")
+    for e in svc.lookup(args[3], in: [d], maxPerDictionary: 1) {
+        let han = e.html.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) }.count
+        print("html \(e.html.count) chars, CJK=\(han), audio refs=\(EntryHTML.audioReferences(in: e.html).count), css inlined=\(e.html.contains("@namespace d")), dark rules=\(e.html.contains("prefers-color-scheme: dark"))")
+    }
+    suite.removeObject(forKey: DictionaryPrefs.defaultsKey)
+
 case "axpoint":
     // vocab-smoke axpoint <x> <y> [--dc]   (AX coordinates, top-left origin)
     let pt = CGPoint(x: Double(args[2])!, y: Double(args[3])!)

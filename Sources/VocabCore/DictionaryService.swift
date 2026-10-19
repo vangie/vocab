@@ -93,6 +93,9 @@ public final class DictionaryService: @unchecked Sendable {
         }
     }
 
+    /// Where Vocab-local dictionary preferences live (the app's defaults; tests can swap it).
+    nonisolated(unsafe) public var prefsStore: UserDefaults = .standard
+
     /// Every dictionary installed (system assets plus ~/Library/Dictionaries), sorted by name.
     public func availableDictionaries() -> [DictionaryInfo] {
         queue.sync {
@@ -113,9 +116,17 @@ public final class DictionaryService: @unchecked Sendable {
             for d in dictionaries {
                 guard let ref = refs[d.id] else { continue }
                 guard let recs = records(ref, term as CFString, 0, 0)?.takeRetainedValue() as [AnyObject]? else { continue }
+                // Vocab-local dictionary preferences: re-run the XSL with our values.
+                let prefs = DictionaryPrefs(bundleURL: d.bundleURL)
+                let own = (prefs?.needsOwnTransform(prefsStore) ?? false) ? prefs?.effective(prefsStore) : nil
                 for (i, r) in recs.prefix(maxPerDictionary).enumerated() {
-                    let html = copyData(r, 1)?.takeRetainedValue() as String? ?? ""
-                    let panel = copyData(r, 2)?.takeRetainedValue() as String? ?? html
+                    var html = copyData(r, 1)?.takeRetainedValue() as String? ?? ""
+                    var panel = copyData(r, 2)?.takeRetainedValue() as String? ?? html
+                    if let own, let p = prefs, let raw = copyData(r, 0)?.takeRetainedValue() as String?,
+                       let t = p.transform(rawXML: raw, params: own) {
+                        html = DictionaryPrefs.splice(rendered: html, transformed: t) ?? html
+                        panel = DictionaryPrefs.splice(rendered: panel, transformed: t) ?? panel
+                    }
                     let text = copyData(r, 3)?.takeRetainedValue() as String? ?? ""
                     let hw = headwordFn?(r)?.takeUnretainedValue() as String? ?? term
                     out.append(DictionaryEntry(
