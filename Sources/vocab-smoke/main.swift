@@ -50,6 +50,12 @@ case "review":
         print("   audio: \(m.audio?.lastPathComponent ?? "-")  types: \(m.available.map(\.rawValue).sorted())")
     }
 
+case "wordbook":
+    // vocab-smoke wordbook <path>   open (and migrate, if old) a wordbook file and print its cards
+    let st = try! WordStore(url: URL(fileURLWithPath: args[2]))
+    if let m = st.migration { print("migrated \(m.cards) cards, backup: \(m.backup?.lastPathComponent ?? "-")") }
+    for i in try! st.all() { let r = i.review; print("\(i.word)\tstate=\(r.state) S=\(r.stability.map { String($0) } ?? "nil") D=\(r.difficulty.map { String($0) } ?? "nil") reps=\(r.repetitions) lapses=\(r.lapses) due=\(r.due)") }
+
 case "dicts":
     print("active:"); for d in svc.activeDictionaries() { print("  \(d.id)\t\(d.name)\t\(d.bundleURL?.path ?? "")") }
     print("available: \(svc.availableDictionaries().count)"); if args.count > 2 { for d in svc.availableDictionaries() { print("  \(d.id)\t\(d.name)") } }

@@ -407,6 +407,14 @@ struct WordbookView: View {
 struct SettingsView: View {
     @EnvironmentObject var settings: SettingsModel
     @AppStorage(ReviewSession.capKey) private var dailyNewCap = 20
+    @AppStorage(ReviewSession.retentionKey) private var retention = 0.9
+    @AppStorage(ReviewSession.learningKey) private var learningSteps = "1m 10m"
+    @AppStorage(ReviewSession.relearningKey) private var relearningSteps = "10m"
+
+    private func normalize(_ s: inout String, fallback: String) {
+        if let st = FSRS.parseSteps(s) { s = FSRS.formatSteps(st) } else { s = fallback }
+        ReviewSession.applySchedulerSettings()
+    }
     @State private var dicts: [DictionaryInfo] = []
     @State private var enabled: [String] = []
 
@@ -431,6 +439,22 @@ struct SettingsView: View {
                         Text("每日新词上限：\(dailyNewCap)")
                     }
                     Text("每次先复习到期的单词，再学新词；当天学过的新词计入上限。").font(.caption).foregroundStyle(.secondary)
+                    LabeledContent("目标记忆率") {
+                        HStack {
+                            Slider(value: $retention, in: 0.70...0.97, step: 0.01).frame(width: 180)
+                            Text("\(Int((retention * 100).rounded()))%").monospacedDigit().frame(width: 36, alignment: .trailing)
+                        }
+                    }
+                    .onChange(of: retention) { _, _ in ReviewSession.applySchedulerSettings() }
+                    LabeledContent("学习步长") {
+                        TextField("", text: $learningSteps, prompt: Text("1m 10m")).frame(width: 120)
+                            .onSubmit { normalize(&learningSteps, fallback: "1m 10m") }
+                    }
+                    LabeledContent("重学步长") {
+                        TextField("", text: $relearningSteps, prompt: Text("10m")).frame(width: 120)
+                            .onSubmit { normalize(&relearningSteps, fallback: "10m") }
+                    }
+                    Text("FSRS-6 调度（默认参数）。记忆率越高复习越频繁；步长用 s/m/h/d，例如 1m 10m。").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("辅助功能权限") {
                     HStack {

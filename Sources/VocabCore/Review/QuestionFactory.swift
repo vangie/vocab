@@ -73,15 +73,15 @@ public final class QuestionFactory: @unchecked Sendable {
             cands += service.headwords(String(w.prefix(3)), method: 1, in: dicts, maxPerDictionary: 400)
             if w.count >= 6 { cands += service.headwords(String(w.prefix(2)) + String(w.dropFirst(3).prefix(2)), method: 1, in: dicts, maxPerDictionary: 100) }
         }
-        cands += book
+        cands += book + Confusables.partners(of: w)
         var syn = Set<String>()
         if let t = thesaurus { for e in service.lookup(word, in: [t], maxPerDictionary: 3) { syn.formUnion(Distractors.thesaurusWords(e.plainText)) } }
         var out: [(String, Gloss)] = []
         for c in Distractors.rank(target: word, candidates: cands, synonyms: syn, book: Set(book), limit: 14) {
             let g = gloss(c.word)
-            guard !g.isEmpty, g.short != target.short, !g.short.hasPrefix("/"), !g.short.contains("拼法") else { continue }
-            if GlossExtractor.overlaps(g.chinese, target.chinese) { continue }        // near-synonym: two right answers
-            if out.contains(where: { $0.1.short == g.short || GlossExtractor.overlaps($0.1.chinese, g.chinese) }) { continue }
+            guard !g.isEmpty, !g.short.hasPrefix("/"), !g.short.contains("拼法"), !g.short.contains("过去式"), !g.short.contains("过去分词"), !g.short.contains("复数"), !g.short.contains("现在分词") else { continue }
+            guard Distractors.keep(target: word, candidate: c.word, targetGloss: target, candidateGloss: g, synonyms: syn) else { continue }
+            if out.contains(where: { $0.1.short == g.short || GlossExtractor.nearIdentical($0.1.chinese, g.chinese) }) { continue }
             out.append((c.word, g))
             if out.count == want { break }
         }
@@ -131,7 +131,12 @@ public final class QuestionFactory: @unchecked Sendable {
         }
         switch type {
         case .wordToMeaning:
-            shuffle([(m.gloss.short, item.word)] + m.distractors.map { ($0.gloss.short, $0.word) })
+            // Confusables can share a short Chinese gloss (affect/effect: 影响); then show English so options differ.
+            let all = [m.gloss] + m.distractors.map(\.gloss)
+            let shorts = all.map(\.short)
+            let useEnglish = Set(shorts).count < shorts.count && all.allSatisfy { $0.english != nil }
+            func text(_ g: Gloss) -> String { useEnglish ? GlossExtractor.clip(g.english!, 80) : g.short }
+            shuffle([(text(m.gloss), item.word)] + m.distractors.map { (text($0.gloss), $0.word) })
         case .meaningToWord:
             shuffle([(item.word, m.gloss.short)] + m.distractors.map { ($0.word, $0.gloss.short) })
         case .syllables:

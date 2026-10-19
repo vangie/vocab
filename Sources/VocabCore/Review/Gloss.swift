@@ -83,6 +83,25 @@ public enum GlossExtractor {
         return Set((0..<(c.count - 1)).map { String(c[$0...$0 + 1]) })
     }
 
+    static func normalized(_ s: String) -> String {
+        s.replacingOccurrences(of: "（[^）]*）|〔[^〕]*〕|\\([^)]*\\)", with: "", options: .regularExpression)
+            .filter { $0.isLetter || $0.isNumber }.lowercased()
+    }
+
+    /// Practically the same meaning: equal after stripping brackets/punctuation, or mostly the same words.
+    public static func nearIdentical(_ a: String?, _ b: String?) -> Bool {
+        guard let a, let b, !a.isEmpty, !b.isEmpty else { return false }
+        let x = normalized(a), y = normalized(b)
+        if x == y { return true }
+        if hasCJK(x) || hasCJK(y) {
+            let p = bigrams(x), q = bigrams(y)
+            guard !p.isEmpty, !q.isEmpty else { return false }
+            return Double(p.intersection(q).count) / Double(p.union(q).count) >= 0.6
+        }
+        let p = Set(x.split(separator: " ")), q = Set(y.split(separator: " "))
+        return Double(p.intersection(q).count) / Double(max(1, p.union(q).count)) >= 0.8
+    }
+
     /// True if two Chinese glosses share a two-character word (e.g. 调整 / 调整…以适用): likely synonyms.
     public static func overlaps(_ a: String?, _ b: String?) -> Bool {
         guard let a, let b, !a.isEmpty, !b.isEmpty else { return false }

@@ -1,46 +1,75 @@
 import CMultitouch
+import SQLite3
 import XCTest
 @testable import VocabCore
 
 final class SchedulerTests: XCTestCase {
-    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    let t0 = Date(timeIntervalSince1970: 1_669_725_000)   // 2022-11-29 12:30 UTC, as in py-fsrs tests
+    let fsrs = FSRS()
 
-    func testGoodProgression() {
-        var s = ReviewState.new(now: t0)
-        s = Scheduler.next(s, rating: .good, now: t0)
-        XCTAssertEqual(s.intervalDays, 1); XCTAssertEqual(s.repetitions, 1)
-        s = Scheduler.next(s, rating: .good, now: t0)
-        XCTAssertEqual(s.intervalDays, 6)
-        s = Scheduler.next(s, rating: .good, now: t0)
-        XCTAssertEqual(s.intervalDays, 15) // 6 × 2.5
-        XCTAssertEqual(s.due, t0.addingTimeInterval(15 * 86_400))
+    /// Reference vector from the official py-fsrs test suite (FSRS-6 defaults, no fuzz):
+    /// G G G G G G A A G G G G G → intervals 0 2 11 46 163 498 0 0 2 4 7 12 21 days.
+    func testReferenceIntervals() {
+        let ratings: [ReviewRating] = [.good, .good, .good, .good, .good, .good, .forgot, .forgot, .good, .good, .good, .good, .good]
+        var c = ReviewState.new(now: t0); var t = t0; var ivl: [Int] = []
+        for g in ratings {
+            c = fsrs.next(c, rating: g, now: t)
+            ivl.append(Int(floor(c.due.timeIntervalSince(c.lastReviewed!) / 86_400)))
+            t = c.due
+        }
+        XCTAssertEqual(ivl, [0, 2, 11, 46, 163, 498, 0, 0, 2, 4, 7, 12, 21])
     }
 
-    func testForgotResetsAndRelearnsSoon() {
-        var s = ReviewState.new(now: t0)
-        s = Scheduler.next(s, rating: .good, now: t0)
-        s = Scheduler.next(s, rating: .good, now: t0)
-        s = Scheduler.next(s, rating: .forgot, now: t0)
-        XCTAssertEqual(s.repetitions, 0); XCTAssertEqual(s.lapses, 1)
-        XCTAssertEqual(s.ease, 2.3, accuracy: 1e-9)
-        XCTAssertEqual(s.due, t0.addingTimeInterval(600))
+    /// py-fsrs test_memo_state: A G G G G G reviewed after 0 0 1 3 8 21 days → S 53.62691, D 6.3574867.
+    func testReferenceMemoryState() {
+        var c = ReviewState.new(now: t0); var t = t0
+        for (g, d) in zip([ReviewRating.forgot, .good, .good, .good, .good, .good], [0.0, 0, 1, 3, 8, 21]) {
+            t = t.addingTimeInterval(d * 86_400)
+            c = fsrs.next(c, rating: g, now: t)
+        }
+        XCTAssertEqual(c.stability!, 53.62691, accuracy: 1e-4)
+        XCTAssertEqual(c.difficulty!, 6.3574867, accuracy: 1e-4)
     }
 
-    func testFuzzyLowersEaseAndGrowsSlowly() {
-        var s = ReviewState.new(now: t0)
-        s = Scheduler.next(s, rating: .fuzzy, now: t0)
-        XCTAssertEqual(s.intervalDays, 1)
-        s = Scheduler.next(s, rating: .fuzzy, now: t0)
-        XCTAssertEqual(s.intervalDays, 3)
-        s = Scheduler.next(s, rating: .fuzzy, now: t0)
-        XCTAssertEqual(s.intervalDays, 4)
-        XCTAssertEqual(s.ease, 2.05, accuracy: 1e-9)
+    /// py-fsrs test_repeated_correct_reviews: ten Easy in a row drive difficulty to 1.
+    func testRepeatedEasy() {
+        var c = ReviewState.new(now: t0)
+        for i in 0..<10 { c = fsrs.next(c, rating: .easy, now: t0.addingTimeInterval(Double(i) * 1e-6)) }
+        XCTAssertEqual(c.difficulty!, 1.0, accuracy: 1e-9)
     }
 
-    func testEaseFloor() {
-        var s = ReviewState.new(now: t0)
-        for _ in 0..<20 { s = Scheduler.next(s, rating: .forgot, now: t0) }
-        XCTAssertEqual(s.ease, Scheduler.minEase)
+    func testFirstReviewInitialValues() {
+        for g in ReviewRating.allCases {
+            let c = fsrs.next(.new(now: t0), rating: g, now: t0)
+            XCTAssertEqual(c.stability!, FSRS.defaultParameters[g.rawValue - 1], accuracy: 1e-9)
+        }
+        let good = fsrs.next(.new(now: t0), rating: .good, now: t0)
+        XCTAssertEqual(good.state, .learning); XCTAssertEqual(good.due, t0.addingTimeInterval(600))
+        let easy = fsrs.next(.new(now: t0), rating: .easy, now: t0)
+        XCTAssertEqual(easy.state, .review); XCTAssertEqual(easy.intervalDays, 8)   // S0(Easy) = 8.2956
+        XCTAssertEqual(fsrs.next(.new(now: t0), rating: .forgot, now: t0).due, t0.addingTimeInterval(60))
+        XCTAssertEqual(fsrs.next(.new(now: t0), rating: .fuzzy, now: t0).due, t0.addingTimeInterval(330))
+    }
+
+    func testDesiredRetentionAndLapse() {
+        var f = FSRS(); f.desiredRetention = 0.9
+        XCTAssertEqual(f.nextIntervalDays(10), 10)            // R = 0.9 at t = S by definition
+        f.desiredRetention = 0.8
+        XCTAssertGreaterThan(f.nextIntervalDays(10), 10)
+        var c = ReviewState(state: .review, stability: 20, difficulty: 5, intervalDays: 20, repetitions: 5, due: t0,
+                            lastReviewed: t0.addingTimeInterval(-20 * 86_400))
+        c = fsrs.next(c, rating: .forgot, now: t0)
+        XCTAssertEqual(c.state, .relearning); XCTAssertEqual(c.lapses, 1)
+        XCTAssertLessThan(c.stability!, 20)
+    }
+
+    func testMigrationFromSM2() {
+        let n = Scheduler.migrate(ease: 2.5, intervalDays: 0, repetitions: 0, lapses: 0, due: t0, lastReviewed: nil)
+        XCTAssertEqual(n.state, .new); XCTAssertNil(n.stability)
+        let r = Scheduler.migrate(ease: 2.5, intervalDays: 15, repetitions: 3, lapses: 0, due: t0, lastReviewed: t0)
+        XCTAssertEqual(r.state, .review); XCTAssertEqual(r.stability, 15); XCTAssertEqual(r.difficulty!, 5, accuracy: 1e-9)
+        let hard = Scheduler.migrate(ease: 1.3, intervalDays: 0, repetitions: 0, lapses: 2, due: t0, lastReviewed: t0)
+        XCTAssertEqual(hard.state, .relearning); XCTAssertEqual(hard.difficulty!, 9, accuracy: 1e-9)
     }
 }
 
@@ -61,9 +90,10 @@ final class WordStoreTests: XCTestCase {
         // New words are due immediately.
         XCTAssertEqual(try store.due(now: now.addingTimeInterval(5)).count, 2)
         let r = try XCTUnwrap(store.review(id: a.id, rating: .good, now: now))
-        XCTAssertEqual(r.review.intervalDays, 1)
+        XCTAssertEqual(r.review.state, .learning)                     // FSRS learning step: 10 min
+        XCTAssertEqual(try store.find(word: "appal")?.review, r.review)  // round-trips through SQLite
         XCTAssertEqual(try store.due(now: now.addingTimeInterval(5)).map(\.word), ["atlantic"])
-        XCTAssertEqual(try store.due(now: now.addingTimeInterval(86_401)).count, 2)
+        XCTAssertEqual(try store.due(now: now.addingTimeInterval(601)).count, 2)
         try store.delete(id: a.id)
         XCTAssertNil(try store.find(word: "appal"))
         XCTAssertEqual(try store.all().map(\.word), ["atlantic"])
@@ -77,12 +107,41 @@ final class WordStoreTests: XCTestCase {
         XCTAssertEqual(try s2.find(word: "quay")?.definition, "d")
     }
 
+    func testMigratesSM2DatabaseWithBackup() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("vocab-mig-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("vocab.sqlite")
+        // An old-schema (SM-2) wordbook.
+        var db: OpaquePointer?
+        sqlite3_open(url.path, &db)
+        sqlite3_exec(db, """
+        CREATE TABLE words(id INTEGER PRIMARY KEY AUTOINCREMENT, word TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          definition TEXT NOT NULL DEFAULT '', dictionary TEXT NOT NULL DEFAULT '', context TEXT, added REAL NOT NULL,
+          ease REAL NOT NULL DEFAULT 2.5, interval REAL NOT NULL DEFAULT 0, reps INTEGER NOT NULL DEFAULT 0,
+          lapses INTEGER NOT NULL DEFAULT 0, due REAL NOT NULL, last_reviewed REAL);
+        INSERT INTO words(word, added, due) VALUES('fresh', 0, 0);
+        INSERT INTO words(word, added, ease, interval, reps, due, last_reviewed) VALUES('known', 0, 2.2, 12, 3, 100, 50);
+        """, nil, nil, nil)
+        sqlite3_close(db)
+        let s = try WordStore(url: url)
+        XCTAssertEqual(s.migration?.cards, 2)
+        let backup = try XCTUnwrap(s.migration?.backup)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backup.path))
+        XCTAssertEqual(backup.deletingLastPathComponent().path, dir.path)
+        XCTAssertEqual(try s.find(word: "fresh")?.review.state, .new)
+        let k = try XCTUnwrap(s.find(word: "known")?.review)
+        XCTAssertEqual(k.state, .review); XCTAssertEqual(k.stability, 12); XCTAssertEqual(k.difficulty!, 6, accuracy: 1e-9)
+        // Second open: nothing to migrate.
+        XCTAssertNil(try WordStore(url: url).migration)
+    }
+
     func testCSV() throws {
         let store = try WordStore(url: nil)
         try store.add(word: "say \"hi\"", definition: "a, b\nc", dictionary: "D", context: nil)
         let csv = CSVExporter.csv(try store.all())
         let lines = csv.components(separatedBy: "\r\n")
-        XCTAssertEqual(lines[0], "word,definition,dictionary,context,added,due,interval_days,repetitions,lapses")
+        XCTAssertEqual(lines[0], "word,definition,dictionary,context,added,due,interval_days,repetitions,lapses,stability,difficulty,state")
         XCTAssertTrue(lines[1].hasPrefix("\"say \"\"hi\"\"\",\"a, b\nc\",D,,"))
     }
 }

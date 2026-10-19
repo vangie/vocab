@@ -44,10 +44,61 @@ public final class WordStore: @unchecked Sendable {
           reps INTEGER NOT NULL DEFAULT 0,
           lapses INTEGER NOT NULL DEFAULT 0,
           due REAL NOT NULL,
-          last_reviewed REAL
+          last_reviewed REAL,
+          stability REAL,
+          difficulty REAL,
+          state INTEGER NOT NULL DEFAULT 0,
+          step INTEGER
         );
         CREATE INDEX IF NOT EXISTS words_due ON words(due);
         """)
+        try migrateToFSRS()
+    }
+
+    /// Set when this open migrated an SM-2 wordbook to FSRS.
+    public private(set) var migration: (backup: URL?, cards: Int)?
+
+    private func columnNames() throws -> Set<String> {
+        var out = Set<String>()
+        try run("PRAGMA table_info(words)", []) { out.insert(String(cString: sqlite3_column_text($0, 1))) }
+        return out
+    }
+
+    /// SM-2 → FSRS: back the file up next to itself, add the FSRS columns and convert every card
+    /// (stability ≈ interval, difficulty from ease).
+    private func migrateToFSRS() throws {
+        guard !(try columnNames()).contains("stability") else { return }
+        var backup: URL?
+        if let url {
+            let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+            let b = url.deletingLastPathComponent()
+                .appendingPathComponent(url.deletingPathExtension().lastPathComponent + "-backup-" + f.string(from: Date()) + ".sqlite")
+            try FileManager.default.copyItem(at: url, to: b)
+            backup = b
+        }
+        try exec("BEGIN")
+        do {
+            try exec("""
+            ALTER TABLE words ADD COLUMN stability REAL;
+            ALTER TABLE words ADD COLUMN difficulty REAL;
+            ALTER TABLE words ADD COLUMN state INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE words ADD COLUMN step INTEGER;
+            """)
+            var rows: [(Int64, ReviewState)] = []
+            try run("SELECT id, ease, interval, reps, lapses, due, last_reviewed FROM words", []) { st in
+                let last = sqlite3_column_type(st, 6) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(st, 6))
+                rows.append((sqlite3_column_int64(st, 0), Scheduler.migrate(
+                    ease: sqlite3_column_double(st, 1), intervalDays: sqlite3_column_double(st, 2),
+                    repetitions: Int(sqlite3_column_int64(st, 3)), lapses: Int(sqlite3_column_int64(st, 4)),
+                    due: Date(timeIntervalSince1970: sqlite3_column_double(st, 5)), lastReviewed: last)))
+            }
+            for (id, r) in rows {
+                try run("UPDATE words SET stability=?, difficulty=?, state=?, step=? WHERE id=?",
+                        [r.stability, r.difficulty, r.state.rawValue, r.step, id])
+            }
+            try exec("COMMIT")
+            migration = (backup, rows.count)
+        } catch { try? exec("ROLLBACK"); throw error }
     }
 
     deinit { sqlite3_close(db) }
@@ -90,17 +141,21 @@ public final class WordStore: @unchecked Sendable {
         }
     }
 
-    private static let columns = "id, word, definition, dictionary, context, added, ease, interval, reps, lapses, due, last_reviewed"
+    private static let columns = "id, word, definition, dictionary, context, added, ease, interval, reps, lapses, due, last_reviewed, stability, difficulty, state, step"
 
     private static func item(_ st: OpaquePointer) -> WordItem {
         func text(_ i: Int32) -> String? { sqlite3_column_text(st, i).map { String(cString: $0) } }
         func date(_ i: Int32) -> Date? {
             sqlite3_column_type(st, i) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(st, i))
         }
+        func num(_ i: Int32) -> Double? { sqlite3_column_type(st, i) == SQLITE_NULL ? nil : sqlite3_column_double(st, i) }
         return WordItem(
             id: sqlite3_column_int64(st, 0), word: text(1) ?? "", definition: text(2) ?? "",
             dictionary: text(3) ?? "", context: text(4), added: date(5) ?? Date(),
-            review: ReviewState(ease: sqlite3_column_double(st, 6), intervalDays: sqlite3_column_double(st, 7),
+            review: ReviewState(state: CardState(rawValue: Int(sqlite3_column_int64(st, 14))) ?? .new,
+                                step: sqlite3_column_type(st, 15) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(st, 15)),
+                                stability: num(12), difficulty: num(13),
+                                intervalDays: sqlite3_column_double(st, 7),
                                 repetitions: Int(sqlite3_column_int64(st, 8)), lapses: Int(sqlite3_column_int64(st, 9)),
                                 due: date(10) ?? Date(), lastReviewed: date(11)))
     }
@@ -137,9 +192,11 @@ public final class WordStore: @unchecked Sendable {
 
     public func update(_ item: WordItem) throws {
         try run("""
-        UPDATE words SET word=?, definition=?, dictionary=?, context=?, ease=?, interval=?, reps=?, lapses=?, due=?, last_reviewed=? WHERE id=?
-        """, [item.word, item.definition, item.dictionary, item.context, item.review.ease, item.review.intervalDays,
-              item.review.repetitions, item.review.lapses, item.review.due, item.review.lastReviewed, item.id])
+        UPDATE words SET word=?, definition=?, dictionary=?, context=?, interval=?, reps=?, lapses=?, due=?, last_reviewed=?,
+          stability=?, difficulty=?, state=?, step=? WHERE id=?
+        """, [item.word, item.definition, item.dictionary, item.context, item.review.intervalDays,
+              item.review.repetitions, item.review.lapses, item.review.due, item.review.lastReviewed,
+              item.review.stability, item.review.difficulty, item.review.state.rawValue, item.review.step, item.id])
     }
 
     public func delete(id: Int64) throws {
@@ -185,11 +242,13 @@ public enum CSVExporter {
             }
             return s
         }
-        var lines = ["word,definition,dictionary,context,added,due,interval_days,repetitions,lapses"]
+        var lines = ["word,definition,dictionary,context,added,due,interval_days,repetitions,lapses,stability,difficulty,state"]
         for i in items {
             lines.append([i.word, i.definition, i.dictionary, i.context ?? "", f.string(from: i.added),
                           f.string(from: i.review.due), String(format: "%g", i.review.intervalDays),
-                          "\(i.review.repetitions)", "\(i.review.lapses)"].map(q).joined(separator: ","))
+                          "\(i.review.repetitions)", "\(i.review.lapses)",
+                          i.review.stability.map { String(format: "%.4g", $0) } ?? "", i.review.difficulty.map { String(format: "%.4g", $0) } ?? "",
+                          "\(i.review.state)"].map(q).joined(separator: ","))
         }
         return lines.joined(separator: "\r\n") + "\r\n"
     }

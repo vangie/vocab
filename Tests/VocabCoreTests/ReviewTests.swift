@@ -132,7 +132,7 @@ final class RatingAndSessionTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 100_000)
         func item(_ id: Int64, reps: Int, due: TimeInterval, added: TimeInterval) -> WordItem {
             var r = ReviewState.new(now: Date(timeIntervalSince1970: due)); r.repetitions = reps
-            if reps > 0 { r.lastReviewed = Date(timeIntervalSince1970: 0) }
+            if reps > 0 { r.lastReviewed = Date(timeIntervalSince1970: 0); r.state = .review; r.stability = 3; r.difficulty = 5 }
             return WordItem(id: id, word: "w\(id)", definition: "", dictionary: "", context: nil, added: Date(timeIntervalSince1970: added), review: r)
         }
         var mastered = item(9, reps: 3, due: 0, added: 0); mastered.review = Scheduler.retire(mastered.review, now: now)
@@ -159,5 +159,53 @@ final class RatingAndSessionTests: XCTestCase {
         XCTAssertEqual(String(d.filter { $0.kind != .extra }.map(\.char)), "accommodate")
         XCTAssertTrue(SpellingCheck.isCorrect(" Adapt ", "adapt"))
         XCTAssertEqual(ContextHint.blank("They adapted quickly to Adapt.", word: "adapt"), "They ＿＿＿ quickly to ＿＿＿.")
+    }
+}
+
+final class ConfusableTests: XCTestCase {
+    func testListSize() { XCTAssertGreaterThanOrEqual(Confusables.groups.count, 150) }
+
+    func testAffectGetsEffectDespiteSharedGloss() {
+        let r = Distractors.rank(target: "affect", candidates: ["afflict", "affix", "affront", "effect"], limit: 3).map(\.word)
+        XCTAssertEqual(r.first, "effect")
+        XCTAssertTrue(Distractors.keep(target: "affect", candidate: "effect",
+                                       targetGloss: Gloss(chinese: "影响", english: "to do something that produces an effect"),
+                                       candidateGloss: Gloss(chinese: "效应；影响；结果", english: "a change that is caused by an event"),
+                                       synonyms: ["effect"]))   // even if a thesaurus listed it
+    }
+
+    func testAdviseGetsAdvice() {
+        let r = Distractors.rank(target: "advise", candidates: ["advance", "adverse", "adverb"], limit: 3).map(\.word)
+        XCTAssertEqual(r.first, "advice")
+        XCTAssertTrue(Distractors.keep(target: "advise", candidate: "advice",
+                                       targetGloss: Gloss(chinese: "劝告，建议"), candidateGloss: Gloss(chinese: "意见，建议；忠告，劝告")))
+    }
+
+    func testAdaptStillExcludesSynonyms() {
+        let top = Distractors.rank(target: "adapt", candidates: ["adjust", "modify", "adage", "apt"],
+                                   synonyms: ["adjust", "modify"], limit: 3).map(\.word)
+        XCTAssertEqual(Array(top.prefix(2)).sorted(), ["adept", "adopt"])   // curated group adapt/adopt/adept
+        XCTAssertFalse(top.contains("adjust")); XCTAssertFalse(top.contains("modify"))
+        XCTAssertFalse(Distractors.keep(target: "adapt", candidate: "adjust",
+                                        targetGloss: Gloss(chinese: "调整…以适用"), candidateGloss: Gloss(chinese: "调整，调节"),
+                                        synonyms: ["adjust"]))
+    }
+
+    func testRelaxedGlossFilter() {
+        // Strong spelling link + partial overlap → kept; weak link + overlap → dropped; near-identical → dropped.
+        XCTAssertTrue(Distractors.keep(target: "abroad", candidate: "aboard",
+                                       targetGloss: Gloss(chinese: "在国外"), candidateGloss: Gloss(chinese: "在船上")))
+        XCTAssertFalse(Distractors.keep(target: "big", candidate: "enormous",
+                                        targetGloss: Gloss(chinese: "大的，巨大的"), candidateGloss: Gloss(chinese: "巨大的，庞大的")))
+        XCTAssertFalse(Distractors.keep(target: "hard", candidate: "harsh",
+                                        targetGloss: Gloss(chinese: "严厉的"), candidateGloss: Gloss(chinese: "（非常）严厉的")))
+    }
+
+    func testStepParsing() {
+        XCTAssertEqual(FSRS.parseSteps("1m 10m"), [60, 600])
+        XCTAssertEqual(FSRS.parseSteps("30s, 1h 1d"), [30, 3600, 86_400])
+        XCTAssertEqual(FSRS.parseSteps("5"), [300])
+        XCTAssertNil(FSRS.parseSteps("1x"))
+        XCTAssertEqual(FSRS.formatSteps([60, 600, 86_400]), "1m 10m 1d")
     }
 }

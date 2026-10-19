@@ -40,7 +40,16 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     var state: AppState { AppState.shared }
 
     /// Install on the window hosting the main view (idempotent).
+    /// Set once applicationDidFinishLaunching has returned. Before that, launch work (the trackpad
+    /// takeover waits on `defaults` and spins the run loop) can run our queued attach re-entrantly,
+    /// and installing the toolbar from inside it crashed in -[NSToolbar _loadAllPlaceholderItems].
+    static var launchFinished = false
+
     func attach(to w: NSWindow) {
+        guard Self.launchFinished else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { MainActor.assumeIsolated { self.attach(to: w) } }
+            return
+        }
         guard window !== w || w.toolbar?.identifier != "vocab.main" else { return }
         window = w
         let tb = NSToolbar(identifier: "vocab.main")

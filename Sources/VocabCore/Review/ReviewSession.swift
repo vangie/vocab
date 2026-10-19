@@ -19,7 +19,11 @@ public enum QuestionType: String, CaseIterable, Sendable, Codable {
 
 public enum CardStage: Sendable { case new, learning, mature
     public init(_ s: ReviewState) {
-        if s.repetitions == 0 { self = .new } else if s.intervalDays < 7 { self = .learning } else { self = .mature }
+        switch s.state {
+        case .new: self = .new
+        case .learning, .relearning: self = .learning
+        case .review: self = (s.stability ?? 0) < 7 ? .learning : .mature
+        }
     }
 }
 
@@ -81,7 +85,7 @@ public enum SessionPlanner {
         let fresh = live.filter(isNew).sorted { $0.added < $1.added }.prefix(room)
         return reviews + fresh
     }
-    public static func isNew(_ i: WordItem) -> Bool { i.review.repetitions == 0 && i.review.lastReviewed == nil }
+    public static func isNew(_ i: WordItem) -> Bool { i.review.state == .new }
 }
 
 /// The in-session queue: a wrong answer comes back a few cards later.

@@ -60,7 +60,12 @@ struct VocabApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        defer { MainToolbarController.launchFinished = true }
         SettingsModel.shared.applyOnLaunch()
+        ReviewSession.applySchedulerSettings()
+        if let m = WordbookModel.shared.store?.migration {
+            VocabLog.log("wordbook migrated to FSRS: \(m.cards) cards, backup \(m.backup?.lastPathComponent ?? "-")")
+        }
         #if DEBUG || VOCAB_DEV_HOOKS
         // Dev-only test hook (debug builds, or `VOCAB_DEV_HOOKS=1 make app`): `vocab-smoke setquery <text>`
         // sets the search query without the keyboard/IME. Compiled out of release builds.

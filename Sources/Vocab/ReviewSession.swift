@@ -40,6 +40,20 @@ final class ReviewSession: ObservableObject {
     private let speech = AVSpeechSynthesizer()
     private var book: WordbookModel { .shared }
 
+    static let retentionKey = "reviewDesiredRetention"
+    static let learningKey = "reviewLearningSteps"
+    static let relearningKey = "reviewRelearningSteps"
+
+    /// Push Settings › 背单词 into the FSRS scheduler the wordbook uses.
+    static func applySchedulerSettings() {
+        let d = UserDefaults.standard
+        var f = FSRS()
+        if let r = d.object(forKey: retentionKey) as? Double, (0.7...0.99).contains(r) { f.desiredRetention = r }
+        if let s = d.string(forKey: learningKey), let st = FSRS.parseSteps(s) { f.learningSteps = st }
+        if let s = d.string(forKey: relearningKey), let st = FSRS.parseSteps(s) { f.relearningSteps = st }
+        Scheduler.shared = f
+    }
+
     static var dailyNewCap: Int {
         let v = UserDefaults.standard.object(forKey: capKey) as? Int
         return max(0, v ?? 20)
@@ -70,6 +84,7 @@ final class ReviewSession: ObservableObject {
     }
 
     func start() {
+        Self.applySchedulerSettings()
         let p = plan()
         items = Dictionary(uniqueKeysWithValues: p.map { ($0.id, $0) })
         queue = ReviewQueue(ids: p.map(\.id))

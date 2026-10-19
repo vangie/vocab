@@ -68,6 +68,10 @@ public enum Distractors {
         let lowerBook = Set(book.map { $0.lowercased() })
         let properTarget = target.first?.isUppercase ?? false
         var seen = Set<String>(); var out: [Candidate] = []
+        // Curated confusables come first, whatever the other rules say.
+        for (i, p) in Confusables.partners(of: t).enumerated() where seen.insert(p).inserted {
+            out.append(Candidate(word: p, score: -100 + Double(i)))
+        }
         for c in candidates {
             let w = c.trimmingCharacters(in: .whitespaces)
             let l = w.lowercased()
@@ -90,6 +94,26 @@ public enum Distractors {
             out.append(Candidate(word: w, score: s))
         }
         return Array(out.sorted { ($0.score, $0.word) < ($1.score, $1.word) }.prefix(limit))
+    }
+
+    /// Strong look/sound-alike relationship: a near miss in spelling or the same consonant skeleton.
+    public static func looksAlike(_ a: String, _ b: String) -> Bool {
+        let d = Suggester.distance(a, b)
+        return d <= 2 || phoneticKey(a) == phoneticKey(b) || (commonPrefix(a, b) >= 3 && d <= 3)
+    }
+
+    /// Should `candidate` stay as a distractor for `target`? Curated confusables always stay.
+    /// Otherwise drop thesaurus synonyms and near-identical glosses; when the spelling link is weak,
+    /// also drop any Chinese gloss sharing a two-character word (likely a second right answer).
+    public static func keep(target: String, candidate: String, targetGloss: Gloss, candidateGloss: Gloss,
+                            synonyms: Set<String> = []) -> Bool {
+        let t = target.lowercased(), c = candidate.lowercased()
+        if Confusables.partners(of: t).contains(c) { return true }
+        if synonyms.contains(c) { return false }
+        if GlossExtractor.nearIdentical(targetGloss.chinese, candidateGloss.chinese) { return false }
+        if GlossExtractor.nearIdentical(targetGloss.english, candidateGloss.english) { return false }
+        if looksAlike(t, c) { return true }
+        return !GlossExtractor.overlaps(targetGloss.chinese, candidateGloss.chinese)
     }
 
     /// Words from a thesaurus entry's plain text ("modify, alter, make alterations to, change, …").

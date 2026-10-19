@@ -5,7 +5,8 @@
 - **同一批词典**：直接读取系统词典服务里的词典——内置词典和 `~/Library/Dictionaries` 里自己装的（如朗文 LDOCE5、麦克米伦），不复制、不转换。
 - **发音在任何视图都能播放**：词典里的发音按钮（`javascript:new Audio(...)` 或 `<audio>` + `onmousedown`）由原生 AVAudioPlayer 播放，「全部」视图里也能播。
 - **三指轻点查词**：可选接管系统的三指查词，在光标旁弹出释义，一键「加入生词本」；关掉开关即恢复系统原设置。
-- **生词本 + 间隔重复**：本地 SQLite 存储，简化 SM-2 调度，「忘了 / 模糊 / 记得」三档；可导出 CSV。
+- **生词本 + 间隔重复**：本地 SQLite 存储，FSRS-6 调度（默认参数，可调目标记忆率与学习步长）；可导出 CSV。
+- **背单词**：看词想意思、看意思选词、看词选意思、拼写、音节拆分、词根词缀混合出题，易混词做干扰项；答题快慢映射为「忘了 / 模糊 / 记得 / 简单」四档。
 - **深色模式**、中文界面。
 
 > v1 不含 AI 释义和同步，代码里留好了接口（`WordExplainer`、`WordbookSync`）。
@@ -67,7 +68,8 @@ make app                   # 之后自动用它签名
 - Reads the **same dictionaries** as the system (built-in plus `~/Library/Dictionaries`) through DictionaryServices' private `DCS*` API and renders each entry in a WKWebView with its own stylesheet.
 - Dictionary **audio plays everywhere**, including the combined "All" view: speaker clicks are routed to AVAudioPlayer.
 - Optional **three-finger tap takeover**: disables the system Look Up tap gesture (original values are saved and restored), detects taps with `MultitouchSupport`, reads the word under the pointer via the Accessibility API, and shows a Look-Up-style panel with an "add to wordbook" button.
-- **Wordbook** in SQLite, simplified SM-2 scheduling with three grades, CSV export. Dark mode. Chinese UI.
+- **Wordbook** in SQLite with FSRS-6 scheduling (default parameters, adjustable desired retention and learning steps), CSV export. Dark mode. Chinese UI.
+- **Review** mixes recall, meaning↔word multiple choice, spelling, syllable and root questions with confusable distractors; answer speed maps to four grades.
 
 Build: `make app` → `build/Vocab.app`. Tests: `make test`. Headless smoke test: `make smoke`.
 
