@@ -11,6 +11,7 @@ struct MainView: View {
     @EnvironmentObject var lookup: LookupModel
     @EnvironmentObject var book: WordbookModel
     @State private var mode: Mode = .lookup
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         Group {
@@ -40,13 +41,17 @@ struct MainView: View {
                     TextField("搜索", text: $lookup.query)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 220)
-                        .onSubmit { lookup.search() }
+                        .focused($searchFocused)
+                        .onSubmit { lookup.commit() }
+                        .onKeyPress(.downArrow) { lookup.moveSelection(1); return .handled }
+                        .onKeyPress(.upArrow) { lookup.moveSelection(-1); return .handled }
                 }
             }
         }
-        .onChange(of: lookup.query) { _, q in
-            if mode == .lookup { lookup.search(q) }
+        .onChange(of: lookup.query) { _, _ in
+            if mode == .lookup { lookup.queryChanged() }
         }
+        .onAppear { searchFocused = true }
     }
 }
 
@@ -55,6 +60,36 @@ struct LookupView: View {
     @EnvironmentObject var book: WordbookModel
 
     var body: some View {
+        HSplitView {
+            sidebar
+                .frame(minWidth: 150, idealWidth: 190, maxWidth: 300)
+            detail
+                .frame(minWidth: 360)
+        }
+    }
+
+    private var sidebar: some View {
+        let matches = lookup.suggestions.filter { $0.kind == .match }
+        let spelling = lookup.suggestions.filter { $0.kind == .spelling }
+        return List(selection: Binding(get: { lookup.selection }, set: { lookup.select($0) })) {
+            if !matches.isEmpty {
+                ForEach(matches) { s in Text(s.word).lineLimit(1).tag(s.id) }
+            }
+            if !spelling.isEmpty {
+                Section("你是不是要找：") {
+                    ForEach(spelling) { s in Text(s.word).lineLimit(1).tag(s.id) }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .overlay {
+            if lookup.suggestions.isEmpty && !lookup.query.isEmpty {
+                Text("无匹配").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var detail: some View {
         VStack(spacing: 0) {
             if !lookup.entries.isEmpty {
                 HStack(spacing: 4) {
@@ -245,9 +280,13 @@ struct SettingsView: View {
                     Toggle("接管三指查词", isOn: Binding(get: { settings.takeoverEnabled }, set: { settings.setTakeover($0) }))
                     Text("打开后：关闭系统「触控板 › 查询与数据检测器（三指轻点）」，改由「生词」弹出释义；关闭或退出「生词」时恢复你原来的系统设置。")
                         .font(.caption).foregroundStyle(.secondary)
-                    if settings.multitouchDevices > 0 {
-                        Text("已连接触控板：\(settings.multitouchDevices) 个").font(.caption)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("状态：辅助功能 \(settings.accessibilityTrusted ? "已授权 ✓" : "未授权 ✗") · 触控板 \(settings.multitouchDevices) 个 · 触摸帧 \(settings.frames)")
+                        Text("上次三指轻点：\(settings.lastTap.map { $0.formatted(date: .omitted, time: .standard) } ?? "还没有检测到")")
+                        Text("日志：~/Library/Logs/Vocab/vocab.log").foregroundStyle(.secondary)
                     }
+                    .font(.caption.monospacedDigit())
+                    .textSelection(.enabled)
                     if let e = settings.lastError { Text(e).foregroundStyle(.red).font(.caption) }
                 }
                 Section("辅助功能权限") {
@@ -263,7 +302,7 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
-            .onAppear { settings.refreshTrust() }
+            .onAppear { settings.refreshTrust(); settings.startStatusUpdates() }
             .tabItem { Label("通用", systemImage: "gearshape") }
 
             VStack(alignment: .leading) {

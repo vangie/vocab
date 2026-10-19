@@ -20,4 +20,15 @@ void vmt_set_thresholds(double max_duration, double max_movement);
 int vmt_feed_frame(int n, float cx, float cy, double timestamp);
 void vmt_reset_state(void);
 
+/// Optional diagnostics: called for frames whose touching-finger count changed.
+/// total = contacts reported, active = contacts actually touching, states = per-contact state codes.
+typedef void (*vmt_frame_logger)(int total, int active, const int *states, double timestamp);
+void vmt_set_frame_logger(vmt_frame_logger logger);
+
+/// Number of frames received since vmt_start (to confirm the callback fires).
+long vmt_frame_count(void);
+
+/// Count of contacts in a "touching" state (MakeTouch=3, Touching=4).
+int vmt_active_count(const int *states, int n);
+
 #endif

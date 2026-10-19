@@ -22,12 +22,19 @@ enum DictionarySelection {
 final class LookupModel: ObservableObject {
     static let shared = LookupModel()
 
+    /// Text in the search field.
     @Published var query = ""
+    /// Sidebar rows for the current query.
+    @Published private(set) var suggestions: [Suggestion] = []
+    @Published var selection: Suggestion.ID?
     @Published private(set) var entries: [DictionaryEntry] = []
     @Published var selectedDictionary: String? = nil   // nil = 全部
+    /// The word whose entries are showing.
     @Published private(set) var searchedTerm = ""
     @Published var toast: String?
     private var history: [String] = []
+    private var suggestTask: Task<Void, Never>?
+    private var showTask: Task<Void, Never>?
 
     var dictionariesWithResults: [DictionaryInfo] {
         var seen = Set<String>(); var out: [DictionaryInfo] = []
@@ -40,22 +47,71 @@ final class LookupModel: ObservableObject {
         return entries.filter { $0.dictionary.id == sel }
     }
 
-    func search(_ term: String? = nil) {
-        let t = (term ?? query).trimmingCharacters(in: .whitespacesAndNewlines)
-        if let term { query = term }
-        guard !t.isEmpty else { entries = []; searchedTerm = ""; return }
-        let dicts = DictionarySelection.enabled()
-        Task.detached {
-            let found = DictionaryService.shared.lookup(t, in: dicts)
-            await MainActor.run {
-                self.entries = found
-                self.searchedTerm = t
-                if let sel = self.selectedDictionary, !found.contains(where: { $0.dictionary.id == sel }) {
-                    self.selectedDictionary = nil
-                }
-                if self.history.last != t { self.history.append(t) }
+    var hasSpelling: Bool { suggestions.contains { $0.kind == .spelling } }
+
+    /// Called as the user types: debounce, then refresh the sidebar and show the top match.
+    func queryChanged() {
+        suggestTask?.cancel()
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { suggestions = []; selection = nil; entries = []; searchedTerm = ""; return }
+        suggestTask = Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            if Task.isCancelled { return }
+            let dicts = DictionarySelection.enabled()
+            let r = await Task.detached { Suggester.suggest(q, in: dicts) }.value
+            if Task.isCancelled || q != self.query.trimmingCharacters(in: .whitespacesAndNewlines) { return }
+            self.suggestions = r.all
+            if let first = r.all.first {
+                self.selection = first.id
+                self.show(first.word, record: false)
+            } else {
+                self.selection = nil
+                self.show(q, record: false)
             }
         }
+    }
+
+    /// Show the entries for a word without touching the search field.
+    func show(_ word: String, record: Bool = true) {
+        showTask?.cancel()
+        let dicts = DictionarySelection.enabled()
+        showTask = Task {
+            let r = await Task.detached { Suggester.lookupWithFallback(word, in: dicts) }.value
+            if Task.isCancelled { return }
+            self.entries = r.entries
+            self.searchedTerm = r.entries.isEmpty ? word : r.word
+            if let sel = self.selectedDictionary, !r.entries.contains(where: { $0.dictionary.id == sel }) {
+                self.selectedDictionary = nil
+            }
+            if record, self.history.last != self.searchedTerm { self.history.append(self.searchedTerm) }
+        }
+    }
+
+    /// Search for a word as if typed (links, wordbook, popup).
+    func search(_ term: String? = nil) {
+        if let term { query = term }
+        queryChanged()
+        let t = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty, history.last != t { history.append(t) }
+    }
+
+    func select(_ id: Suggestion.ID?) {
+        selection = id
+        if let s = suggestions.first(where: { $0.id == id }) { show(s.word) }
+    }
+
+    /// Up/down in the search field.
+    func moveSelection(_ delta: Int) {
+        guard !suggestions.isEmpty else { return }
+        let i = suggestions.firstIndex { $0.id == selection } ?? -1
+        let n = min(max(0, i + delta), suggestions.count - 1)
+        select(suggestions[n].id)
+    }
+
+    /// Enter in the search field.
+    func commit() {
+        if let s = suggestions.first(where: { $0.id == selection }) { show(s.word) }
+        else { show(query) }
     }
 
     func back() {
@@ -133,6 +189,23 @@ final class SettingsModel: ObservableObject {
     @Published var accessibilityTrusted = WordUnderCursor.isTrusted
     @Published var multitouchDevices = 0
     @Published var lastError: String?
+    @Published var lastTap: Date?
+    @Published var frames = 0
+    private var statusTimer: Timer?
+
+    /// Poll monitor status for the line in Settings › 通用.
+    func startStatusUpdates() {
+        statusTimer?.invalidate()
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            Task { @MainActor in
+                let s = SettingsModel.shared
+                s.accessibilityTrusted = WordUnderCursor.isTrusted
+                s.lastTap = ThreeFingerMonitor.shared.lastTap
+                s.frames = ThreeFingerMonitor.shared.frameCount
+                s.multitouchDevices = ThreeFingerMonitor.shared.deviceCount
+            }
+        }
+    }
 
     func setTakeover(_ on: Bool) {
         if on {
@@ -160,6 +233,7 @@ final class SettingsModel: ObservableObject {
     }
 
     func applyOnLaunch() {
+        VocabLog.log("launch: AXIsProcessTrusted=\(WordUnderCursor.isTrusted) takeoverEnabled=\(takeoverEnabled) bundle=\(Bundle.main.bundlePath)")
         // If we previously took over but the app did not exit cleanly, the saved originals remain.
         if takeoverEnabled { setTakeover(true) }
         else if takeover.isEngaged { takeover.restore() }

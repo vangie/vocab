@@ -124,6 +124,18 @@ case "render", "click":
         if heard.isEmpty { fail("no audio message received") }
     }
 
+case "suggest":
+    _ = NSApplication.shared
+    for q in args.dropFirst(2) {
+        let t0 = Date()
+        let r = Suggester.suggest(q, in: dicts())
+        let fb = Suggester.lookupWithFallback(q, in: dicts())
+        print("\(q)  (\(Int(Date().timeIntervalSince(t0) * 1000)) ms)")
+        print("   matches:  \(r.matches.prefix(10).joined(separator: ", "))")
+        print("   你是不是要找: \(r.spelling.joined(separator: ", "))")
+        print("   lookup → \(fb.word): \(Set(fb.entries.map(\.dictionary.name)).sorted().joined(separator: ", "))")
+    }
+
 case "multitouch":
     let n = ThreeFingerMonitor.shared.start()
     print("multitouch devices started: \(n)")

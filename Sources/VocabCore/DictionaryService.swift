@@ -48,7 +48,9 @@ public final class DictionaryService: @unchecked Sendable {
     private typealias FSet = @convention(c) () -> Unmanaged<CFSet>?
     private typealias FString = @convention(c) (CFTypeRef) -> Unmanaged<CFString>?
     private typealias FURL = @convention(c) (CFTypeRef) -> Unmanaged<CFURL>?
-    private typealias FRecords = @convention(c) (CFTypeRef, CFString, UnsafeRawPointer?, UnsafeRawPointer?) -> Unmanaged<CFArray>?
+    /// (dictionary, string, method, maxResults). method: 0 = exact (also matches inflections the
+    /// dictionary indexes), 1 = prefix, 2 = headwords that are a prefix of the string. maxResults 0 = no limit.
+    private typealias FRecords = @convention(c) (CFTypeRef, CFString, Int, Int) -> Unmanaged<CFArray>?
     private typealias FData = @convention(c) (CFTypeRef, Int) -> Unmanaged<CFString>?
 
     private let handle: UnsafeMutableRawPointer?
@@ -110,7 +112,7 @@ public final class DictionaryService: @unchecked Sendable {
             var out: [DictionaryEntry] = []
             for d in dictionaries {
                 guard let ref = refs[d.id] else { continue }
-                guard let recs = records(ref, term as CFString, nil, nil)?.takeRetainedValue() as [AnyObject]? else { continue }
+                guard let recs = records(ref, term as CFString, 0, 0)?.takeRetainedValue() as [AnyObject]? else { continue }
                 for (i, r) in recs.prefix(maxPerDictionary).enumerated() {
                     let html = copyData(r, 1)?.takeRetainedValue() as String? ?? ""
                     let panel = copyData(r, 2)?.takeRetainedValue() as String? ?? html
@@ -124,6 +126,28 @@ public final class DictionaryService: @unchecked Sendable {
             }
             return out
         }
+    }
+
+    /// Raw headwords from a DCS search (no record data copied, so it is cheap).
+    public func headwords(_ term: String, method: Int, in dictionaries: [DictionaryInfo], maxPerDictionary: Int) -> [String] {
+        let t = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return [] }
+        return queue.sync {
+            guard let records = fn("DCSCopyRecordsForSearchString", FRecords.self),
+                  let hwFn = fn("DCSRecordGetHeadword", FString.self) else { return [] }
+            var out: [String] = []
+            for d in dictionaries {
+                guard let ref = refs[d.id],
+                      let recs = records(ref, t as CFString, method, maxPerDictionary)?.takeRetainedValue() as [AnyObject]? else { continue }
+                for r in recs { if let h = hwFn(r)?.takeUnretainedValue() as String? { out.append(h) } }
+            }
+            return out
+        }
+    }
+
+    /// True if any of the dictionaries has an entry for the term (exact search).
+    public func hasEntry(_ term: String, in dictionaries: [DictionaryInfo]) -> Bool {
+        !headwords(term, method: 0, in: dictionaries, maxPerDictionary: 1).isEmpty
     }
 
     /// Paths of dictionary bundles we have seen; used to restrict which files the web view may load.

@@ -66,12 +66,36 @@ int vmt_feed_frame(int n, float cx, float cy, double ts) {
     return (maxFingers == 3 && dur < gMaxDuration && maxMove < gMaxMovement) ? 1 : 0;
 }
 
+static vmt_frame_logger gLogger;
+static long gFrames;
+static int gLastActive = -1, gLastTotal = -1;
+
+void vmt_set_frame_logger(vmt_frame_logger logger) { gLogger = logger; }
+long vmt_frame_count(void) { return gFrames; }
+
+int vmt_active_count(const int *states, int n) {
+    int a = 0;
+    for (int i = 0; i < n; i++) if (states[i] == 3 || states[i] == 4) a++;
+    return a;
+}
+
+// MultitouchSupport keeps reporting contacts while they lift off (BreakTouch, Linger,
+// OutOfRange) and may never send an empty frame, so count only touching contacts.
 static int contactCallback(MTDeviceRef dev, MTFinger *f, int n, double ts, int frame) {
     (void)dev; (void)frame;
-    float cx = 0, cy = 0;
-    for (int i = 0; i < n; i++) { cx += f[i].normalized.pos.x; cy += f[i].normalized.pos.y; }
-    if (n > 0) { cx /= n; cy /= n; }
-    if (vmt_feed_frame(n, cx, cy, ts) && gHandler) gHandler();
+    gFrames++;
+    int states[16]; int m = n < 16 ? n : 16;
+    float cx = 0, cy = 0; int active = 0;
+    for (int i = 0; i < m; i++) {
+        states[i] = f[i].state;
+        if (f[i].state == 3 || f[i].state == 4) {
+            cx += f[i].normalized.pos.x; cy += f[i].normalized.pos.y; active++;
+        }
+    }
+    if (active > 0) { cx /= active; cy /= active; }
+    if (gLogger && (active != gLastActive || n != gLastTotal)) gLogger(n, active, states, ts);
+    gLastActive = active; gLastTotal = n;
+    if (vmt_feed_frame(active, cx, cy, ts) && gHandler) gHandler();
     return 0;
 }
 
@@ -92,6 +116,7 @@ int vmt_start(vmt_tap_handler handler) {
     vmt_stop();
     gHandler = handler;
     vmt_reset_state();
+    gFrames = 0;
     gDevices = pCreateList();
     if (!gDevices) return 0;
     CFIndex count = CFArrayGetCount(gDevices);

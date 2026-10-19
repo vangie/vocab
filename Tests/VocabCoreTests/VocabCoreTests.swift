@@ -169,6 +169,12 @@ final class TapDetectorTests: XCTestCase {
         XCTAssertEqual(vmt_feed_frame(0, 0, 0, 0.15), 1)
     }
 
+    func testActiveCountIgnoresLiftingContacts() {
+        // MakeTouch=3, Touching=4 count; BreakTouch=5, Linger=6, OutOfRange=7 do not.
+        XCTAssertEqual(vmt_active_count([4, 4, 3], 3), 3)
+        XCTAssertEqual(vmt_active_count([5, 6, 7], 3), 0)
+    }
+
     func testSlowOrMovingOrTwoFingersIsNotATap() {
         _ = vmt_feed_frame(3, 0.5, 0.5, 0); XCTAssertEqual(vmt_feed_frame(0, 0, 0, 0.6), 0)
         _ = vmt_feed_frame(3, 0.5, 0.5, 0); _ = vmt_feed_frame(3, 0.6, 0.5, 0.05); XCTAssertEqual(vmt_feed_frame(0, 0, 0, 0.1), 0)

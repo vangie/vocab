@@ -10,14 +10,23 @@ final class LookupPanelController {
     private var monitors: [Any] = []
 
     func lookUpUnderCursor() {
-        guard WordUnderCursor.isTrusted else {
+        let trusted = WordUnderCursor.isTrusted
+        VocabLog.log("lookUpUnderCursor: AXIsProcessTrusted=\(trusted) mouse=\(NSEvent.mouseLocation)")
+        SettingsModel.shared.refreshTrust()
+        guard trusted else {
             WordUnderCursor.requestTrust()
             return
         }
-        guard let hit = WordUnderCursor.current() else { NSSound.beep(); return }
+        guard let hit = WordUnderCursor.current() else {
+            VocabLog.log("AX: no word under cursor (and no selection)")
+            NSSound.beep(); return
+        }
+        VocabLog.log("AX: word=\(hit.word) context=\(hit.context ?? "-")")
         let dicts = DictionarySelection.enabled()
-        let entries = DictionaryService.shared.lookup(hit.word, in: dicts)
-        show(word: hit.word, context: hit.context, entries: entries, at: NSEvent.mouseLocation)
+        // Fall back to the base form for inflected words ("appalled" → "appal").
+        let r = Suggester.lookupWithFallback(hit.word, in: dicts)
+        VocabLog.log("lookup \(hit.word) → \(r.word): \(r.entries.count) entries")
+        show(word: r.word, context: hit.context, entries: r.entries, at: NSEvent.mouseLocation)
     }
 
     func show(word: String, context: String?, entries: [DictionaryEntry], at point: NSPoint) {
@@ -45,6 +54,7 @@ final class LookupPanelController {
         }
         p.setFrameOrigin(origin)
         p.orderFrontRegardless()
+        VocabLog.log("panel shown at \(origin) visible=\(p.isVisible)")
         panel = p
         monitors.append(NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in
