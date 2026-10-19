@@ -44,6 +44,10 @@ make app                   # 之后自动用它签名
 
 之后重新授权一次辅助功能，以后重新构建就不必再授权了。也可以用 `VOCAB_SIGN_IDENTITY` 指定其他身份。
 
+### 本地图标
+
+把自己的 1024px PNG 放到 `Local/AppIcon.png`（不纳入版本库），`make app` 会用它替换默认图标。
+
 ## 项目结构
 
 | 路径 | 说明 |
@@ -68,6 +72,10 @@ make app                   # 之后自动用它签名
 Build: `make app` → `build/Vocab.app`. Tests: `make test`. Headless smoke test: `make smoke`.
 
 Uses private frameworks, so it cannot ship on the Mac App Store. MIT licensed.
+
+### Local icon
+
+Put your own 1024px PNG at `Local/AppIcon.png` (gitignored) to override the icon locally; `make app` picks it up.
 
 ### Stable signing (recommended)
 

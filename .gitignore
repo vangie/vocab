@@ -10,3 +10,6 @@ xcuserdata/
 Package.resolved
 # macOS
 .DS_Store
+.icon-work/
+# Local, untracked overrides (e.g. Local/AppIcon.png)
+Local/

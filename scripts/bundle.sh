@@ -12,7 +12,18 @@ rm -rf build/.staging
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Vocab"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-[ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/" || true
+# Local, untracked icon override: Local/AppIcon.png (1024px) wins over Resources/AppIcon.icns.
+if [ -f Local/AppIcon.png ]; then
+  SET="$(mktemp -d)/AppIcon.iconset"; mkdir -p "$SET"
+  for s in 16 32 128 256 512; do
+    sips -z $s $s Local/AppIcon.png --out "$SET/icon_${s}x${s}.png" >/dev/null
+    sips -z $((s*2)) $((s*2)) Local/AppIcon.png --out "$SET/icon_${s}x${s}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$SET" -o "$APP/Contents/Resources/AppIcon.icns"
+  echo "Icon: Local/AppIcon.png (local override)"
+elif [ -f Resources/AppIcon.icns ]; then
+  cp Resources/AppIcon.icns "$APP/Contents/Resources/"
+fi
 # Set VOCAB_SIGN_IDENTITY to a stable code-signing identity to keep the Accessibility
 # grant across rebuilds. Falls back to an ad-hoc signature,
 # in which case macOS may ask for Accessibility permission again after each rebuild.
