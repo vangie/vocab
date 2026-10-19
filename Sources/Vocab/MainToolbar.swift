@@ -81,8 +81,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         let lookupMode = state.mode == .lookup
         // ‹ › and 小|大 only do something in 词典: take them out of the toolbar elsewhere
         // (removing items keeps AppKit's layout and » overflow exact, and the AX tree honest).
-        setPresent(navID, lookupMode, after: modeID)
         setPresent(fontID, lookupMode, before: searchID)
+        setPresent(navID, lookupMode, before: lookupMode ? fontID : searchID)
         if let f = searchItem?.searchField {
             f.placeholderString = state.mode == .wordbook ? "搜索生词本" : "搜索"
             let want = state.mode == .wordbook ? state.wordFilter : lookup.query
@@ -130,7 +130,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     }
 
     func toolbarDefaultItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarTrackingSeparator, modeID, navID, .flexibleSpace, fontID, searchID]
+        [.sidebarTrackingSeparator, modeID, .flexibleSpace, navID, fontID, searchID]
     }
 
     func toolbar(_ t: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar: Bool) -> NSToolbarItem? {
@@ -143,7 +143,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
                                        target: self, action: #selector(nav(_:)))
             g.label = "后退/前进"
             g.controlRepresentation = .expanded
-            g.isNavigational = true
+            // Not isNavigational: AppKit pins navigational items to the leading edge, ahead of
+            // the mode switcher, whatever the identifier order says.
+            g.isNavigational = false
             g.autovalidates = false
             g.subitems.forEach { $0.autovalidates = false; $0.isEnabled = true }
             navGroup = g
