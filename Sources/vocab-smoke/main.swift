@@ -158,6 +158,12 @@ case "prefs":
     }
     suite.removeObject(forKey: DictionaryPrefs.defaultsKey)
 
+case "setquery":
+    // vocab-smoke setquery <text>: set the running app's search query (test hook, no IME).
+    DistributedNotificationCenter.default().postNotificationName(.init("io.github.vangie.vocab.setQuery"),
+        object: args.count > 2 ? args[2] : "", userInfo: nil, deliverImmediately: true)
+    print("posted")
+
 case "axpoint":
     // vocab-smoke axpoint <x> <y> [--dc]   (AX coordinates, top-left origin)
     let pt = CGPoint(x: Double(args[2])!, y: Double(args[3])!)

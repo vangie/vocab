@@ -86,8 +86,10 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         if let f = searchItem?.searchField {
             f.placeholderString = state.mode == .wordbook ? "搜索生词本" : "搜索"
             let want = state.mode == .wordbook ? state.wordFilter : lookup.query
-            if f.stringValue != want, f.currentEditor() == nil || state.mode != .lookup { f.stringValue = want }
-            if f.stringValue != want, f.currentEditor() == nil { f.stringValue = want }
+            // Typing writes the model immediately, so a mismatch means a programmatic change
+            // (history, recents, links, test hook): mirror it — unless an IME is composing.
+            let composing = (f.currentEditor() as? NSTextView)?.hasMarkedText() ?? false
+            if f.stringValue != want, !composing { f.stringValue = want }
         }
     }
 
@@ -206,6 +208,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
 
     func controlTextDidChange(_ n: Notification) {
         guard let f = n.object as? NSSearchField else { return }
+        // IME composition (pinyin marked text): wait for the committed text.
+        if let tv = f.currentEditor() as? NSTextView, tv.hasMarkedText() { return }
         switch state.mode {
         case .wordbook: state.wordFilter = f.stringValue
         case .review: state.mode = .lookup; lookup.query = f.stringValue

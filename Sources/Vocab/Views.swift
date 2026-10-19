@@ -82,10 +82,13 @@ struct MainView: View {
             }
             .listStyle(.sidebar)
         } else {
+            let content = SidebarContent.make(query: lookup.query, suggestionsFor: lookup.suggestionsQuery,
+                                              words: lookup.suggestions.map(\.word), recents: lookup.recents)
             let matches = lookup.suggestions.filter { $0.kind == .match }
             let spelling = lookup.suggestions.filter { $0.kind == .spelling }
             List(selection: Binding(get: { sidebarSelection }, set: { pick($0) })) {
-                if showingSuggestions {
+                switch content {
+                case .suggestions:
                     if !matches.isEmpty {
                         Section { ForEach(matches) { s in Text(s.word).lineLimit(1).tag(SidebarItem.suggestion(s.id)) } }
                     }
@@ -94,9 +97,11 @@ struct MainView: View {
                             ForEach(spelling) { s in Text(s.word).lineLimit(1).tag(SidebarItem.suggestion(s.id)) }
                         }
                     }
-                } else {
+                case .noSuggestions:
+                    Text("无建议").foregroundStyle(.secondary).selectionDisabled()
+                case .recents(let words):
                     // Like Dictionary.app: plain history, no header; the current word is a bold pill.
-                    ForEach(lookup.recents, id: \.self) { w in
+                    ForEach(words, id: \.self) { w in
                         Text(w).lineLimit(1)
                             .font(.system(size: 15, weight: sidebarSelection == .recent(w) ? .bold : .regular))
                             .tag(SidebarItem.recent(w))

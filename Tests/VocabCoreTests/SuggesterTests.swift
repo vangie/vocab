@@ -147,3 +147,17 @@ final class RecentListTests: XCTestCase {
         XCTAssertEqual(r.displayed, ["new", "c", "a", "b"])
     }
 }
+
+final class SidebarContentTests: XCTestCase {
+    func testQueryChangeReplacesListEvenWithZeroResults() {
+        let recents = ["NICAM", "NiCad", "niqab"]
+        XCTAssertEqual(SidebarContent.make(query: "nica", suggestionsFor: "nica", words: ["NiCad", "NICAM"], recents: recents),
+                       .suggestions(query: "nica", words: ["NiCad", "NICAM"]))
+        // New query, old suggestions still in memory: never show them, and never fall back to recents.
+        XCTAssertEqual(SidebarContent.make(query: "的等待", suggestionsFor: "nica", words: ["NiCad", "NICAM"], recents: recents),
+                       .noSuggestions(query: "的等待"))
+        XCTAssertEqual(SidebarContent.make(query: "的等待", suggestionsFor: "的等待", words: [], recents: recents),
+                       .noSuggestions(query: "的等待"))
+        XCTAssertEqual(SidebarContent.make(query: " ", suggestionsFor: nil, words: [], recents: recents), .recents(recents))
+    }
+}

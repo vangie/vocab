@@ -22,3 +22,19 @@ public struct RecentList: Equatable, Sendable {
     public mutating func refresh() { displayed = stored }
     public mutating func clear() { stored = []; displayed = [] }
 }
+
+/// What the 词典 sidebar shows. Recent lookups only with an empty query; any non-empty query
+/// shows exactly its own suggestions (possibly none) — never another query's list.
+public enum SidebarContent: Equatable, Sendable {
+    case recents([String])
+    case suggestions(query: String, words: [String])
+    case noSuggestions(query: String)
+
+    public static func make(query: String, suggestionsFor: String?, words: [String], recents: [String]) -> SidebarContent {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return .recents(recents) }
+        // Suggestions computed for a different (older) query are stale: don't show them.
+        guard suggestionsFor == q, !words.isEmpty else { return .noSuggestions(query: q) }
+        return .suggestions(query: q, words: words)
+    }
+}

@@ -26,6 +26,8 @@ final class LookupModel: ObservableObject {
     @Published var query = ""
     /// Sidebar rows for the current query.
     @Published private(set) var suggestions: [Suggestion] = []
+    /// The query the current `suggestions` belong to.
+    @Published private(set) var suggestionsQuery: String? = nil
     @Published var selection: Suggestion.ID?
     @Published private(set) var entries: [DictionaryEntry] = []
     @Published var selectedDictionary: String? = nil   // nil = 全部
@@ -65,6 +67,8 @@ final class LookupModel: ObservableObject {
         suggestTask?.cancel()
         recentList.refresh(); recents = recentList.displayed
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Drop the previous query's list right away; the new one arrives after the debounce.
+        if suggestionsQuery != q { suggestions = []; suggestionsQuery = nil }
         guard !q.isEmpty else { suggestions = []; selection = nil; entries = []; searchedTerm = ""; return }
         suggestTask = Task {
             try? await Task.sleep(nanoseconds: 120_000_000)
@@ -73,6 +77,7 @@ final class LookupModel: ObservableObject {
             let r = await Task.detached { Suggester.suggest(q, in: dicts) }.value
             if Task.isCancelled || q != self.query.trimmingCharacters(in: .whitespacesAndNewlines) { return }
             self.suggestions = r.all
+            self.suggestionsQuery = q
             if let first = r.all.first {
                 self.selection = first.id
                 self.show(first.word, record: false)
@@ -109,9 +114,11 @@ final class LookupModel: ObservableObject {
 
     /// Open a word from history/recents: fill the field, show it, no suggestion churn.
     func open(_ word: String, record: Bool = true) {
-        suppressQueryChange = true
+        // Only suppress when the field actually changes, or the flag would swallow the next keystroke.
+        if query != word { suppressQueryChange = true }
         query = word
         suggestions = []
+        suggestionsQuery = nil
         selection = nil
         show(word, record: record)
     }

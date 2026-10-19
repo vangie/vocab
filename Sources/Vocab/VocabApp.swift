@@ -61,6 +61,12 @@ struct VocabApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         SettingsModel.shared.applyOnLaunch()
+        // Test hook (local only): `vocab-smoke setquery <text>` types into the search field
+        // without going through the keyboard/IME, so UI tests are deterministic.
+        DistributedNotificationCenter.default().addObserver(forName: .init("io.github.vangie.vocab.setQuery"), object: nil, queue: .main) { n in
+            let q = n.object as? String ?? ""
+            Task { @MainActor in AppState.shared.mode = .lookup; LookupModel.shared.query = q }
+        }
         // Re-render the current word when dictionary order/enabled/prefs change in Settings.
         NotificationCenter.default.addObserver(forName: .vocabDictionaryPrefsChanged, object: nil, queue: .main) { _ in
             Task { @MainActor in
