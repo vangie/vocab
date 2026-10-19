@@ -37,6 +37,12 @@ struct VocabApp: App {
                 Button("缩小文字") { lookup.zoomOut() }.keyboardShortcut("-", modifiers: [.command])
                 Button("实际大小") { lookup.zoom = 1.0 }.keyboardShortcut("0", modifiers: [.command])
             }
+            CommandGroup(before: .sidebar) {
+                Button("词典") { AppState.shared.mode = .lookup }.keyboardShortcut("1", modifiers: [.command])
+                Button("生词本") { AppState.shared.mode = .wordbook }.keyboardShortcut("2", modifiers: [.command])
+                Button("背单词") { AppState.shared.mode = .review }.keyboardShortcut("3", modifiers: [.command])
+                Divider()
+            }
             CommandMenu("前往") {
                 Button("后退") { lookup.back() }.keyboardShortcut("[", modifiers: [.command]).disabled(!lookup.canGoBack)
                 Button("前进") { lookup.forward() }.keyboardShortcut("]", modifiers: [.command]).disabled(!lookup.canGoForward)
