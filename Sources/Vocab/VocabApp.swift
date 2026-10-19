@@ -30,7 +30,7 @@ struct VocabApp: App {
         Settings {
             SettingsView()
                 .environmentObject(settings)
-                .frame(width: 600, height: 620)
+                .frame(width: 760, height: 640)
         }
     }
 }

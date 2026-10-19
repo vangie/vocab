@@ -28,51 +28,34 @@ enum DictionaryOrder {
     }
 }
 
-/// Settings › 词典: reorderable list with checkboxes and a language column, and the selected
-/// dictionary's own preferences (its DCSDictionaryPrefsHTML) or description below — like Dictionary.app.
+/// Settings › 词典, laid out like Dictionary.app: label, bordered AppKit table (accent selection,
+/// alternating rows, checkbox + name, language right-aligned), and the selected dictionary's
+/// preferences in a bordered box below. Resets live in the table's context menu.
 struct DictionarySettingsView: View {
     @State private var dicts: [DictionaryInfo] = []
     @State private var enabled: [String] = []
     @State private var selection: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("将参考源拖移成你喜欢的顺序：").font(.system(size: 12))
-            List(selection: $selection) {
-                ForEach(dicts) { d in
-                    HStack(spacing: 8) {
-                        Toggle("", isOn: Binding(get: { enabled.contains(d.id) }, set: { setEnabled(d.id, $0) }))
-                            .toggleStyle(.checkbox).labelsHidden()
-                        Text(d.name).lineLimit(1)
-                        Spacer()
-                        Text(DictionaryOrder.languageLabel(d)).foregroundStyle(.secondary).font(.system(size: 11)).lineLimit(1)
+        GeometryReader { geo in
+            VStack(alignment: .leading, spacing: 8) {
+                Text("将参考源拖移成你喜欢的顺序：").font(.system(size: 13))
+                DictionaryTable(dicts: $dicts, enabled: $enabled, selection: $selection,
+                                onChange: persist, onResetOrder: resetOrder, onResetPrefs: resetPrefs)
+                    .frame(height: max(150, (geo.size.height - 40) * 0.4))
+                Group {
+                    if let id = selection, let d = dicts.first(where: { $0.id == id }) {
+                        DictionaryDetailView(dictionary: d).id(d.id)
+                    } else {
+                        Color.clear
                     }
-                    .tag(d.id)
                 }
-                .onMove { from, to in
-                    dicts.move(fromOffsets: from, toOffset: to)
-                    persist()
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+                .overlay(Rectangle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
             }
-            .listStyle(.bordered(alternatesRowBackgrounds: true))
-            .frame(minHeight: 170)
-            HStack {
-                Button("恢复为系统词典设置") {
-                    UserDefaults.standard.removeObject(forKey: DictionarySelection.key)
-                    UserDefaults.standard.removeObject(forKey: DictionaryOrder.key)
-                    reload()
-                }
-                Spacer()
-            }
-            Divider()
-            if let id = selection, let d = dicts.first(where: { $0.id == id }) {
-                DictionaryDetailView(dictionary: d).id(d.id)
-            } else {
-                Text("选择一个词典查看它的说明和设置").foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            .padding(20)
         }
-        .padding()
         .onAppear(perform: reload)
     }
 
@@ -82,9 +65,19 @@ struct DictionarySettingsView: View {
         if selection == nil { selection = dicts.first?.id }
     }
 
-    private func setEnabled(_ id: String, _ on: Bool) {
-        if on { if !enabled.contains(id) { enabled.append(id) } } else { enabled.removeAll { $0 == id } }
-        persist()
+    private func resetOrder() {
+        UserDefaults.standard.removeObject(forKey: DictionarySelection.key)
+        UserDefaults.standard.removeObject(forKey: DictionaryOrder.key)
+        reload()
+        NotificationCenter.default.post(name: .vocabDictionaryPrefsChanged, object: nil)
+    }
+
+    private func resetPrefs(_ id: String) {
+        guard let d = dicts.first(where: { $0.id == id }), let p = DictionaryPrefs(bundleURL: d.bundleURL) else { return }
+        p.reset()
+        let keep = selection; selection = nil
+        DispatchQueue.main.async { selection = keep }   // reload the prefs page
+        NotificationCenter.default.post(name: .vocabDictionaryPrefsChanged, object: p.bundleID)
     }
 
     /// Save the order, and the enabled list in that order (lookups follow it).
@@ -95,23 +88,161 @@ struct DictionarySettingsView: View {
     }
 }
 
+/// NSTableView-backed list so selection, row height, stripes and drag-reorder match AppKit exactly.
+struct DictionaryTable: NSViewRepresentable {
+    @Binding var dicts: [DictionaryInfo]
+    @Binding var enabled: [String]
+    @Binding var selection: String?
+    var onChange: () -> Void
+    var onResetOrder: () -> Void
+    var onResetPrefs: (String) -> Void
+
+    static let dragType = NSPasteboard.PasteboardType("io.github.vangie.vocab.dictionary-row")
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let table = NSTableView()
+        table.headerView = nil
+        table.usesAlternatingRowBackgroundColors = true
+        table.style = .plain
+        table.rowSizeStyle = .custom
+        table.rowHeight = 17
+        table.intercellSpacing = NSSize(width: 3, height: 2)
+        table.allowsEmptySelection = true
+        table.focusRingType = .none
+        let name = NSTableColumn(identifier: .init("name")); name.resizingMask = .autoresizingMask
+        let lang = NSTableColumn(identifier: .init("lang")); lang.width = 170; lang.resizingMask = []
+        table.addTableColumn(name); table.addTableColumn(lang)
+        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        table.dataSource = context.coordinator
+        table.delegate = context.coordinator
+        table.registerForDraggedTypes([Self.dragType])
+        table.draggingDestinationFeedbackStyle = .gap
+        let menu = NSMenu()
+        menu.delegate = context.coordinator
+        table.menu = menu
+        context.coordinator.table = table
+
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        scroll.autohidesScrollers = true
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        let c = context.coordinator
+        c.parent = self
+        guard let table = c.table else { return }
+        if c.shownIDs != dicts.map(\.id) || c.shownEnabled != enabled {
+            c.shownIDs = dicts.map(\.id); c.shownEnabled = enabled
+            table.reloadData()
+        }
+        let row = selection.flatMap { id in dicts.firstIndex { $0.id == id } } ?? -1
+        if table.selectedRow != row {
+            c.syncing = true
+            if row >= 0 { table.selectRowIndexes([row], byExtendingSelection: false) } else { table.deselectAll(nil) }
+            c.syncing = false
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
+        var parent: DictionaryTable
+        weak var table: NSTableView?
+        var shownIDs: [String] = []
+        var shownEnabled: [String] = []
+        var syncing = false
+        init(_ p: DictionaryTable) { parent = p }
+
+        func numberOfRows(in tableView: NSTableView) -> Int { parent.dicts.count }
+
+        func tableView(_ tableView: NSTableView, viewFor column: NSTableColumn?, row: Int) -> NSView? {
+            let d = parent.dicts[row]
+            if column?.identifier.rawValue == "lang" {
+                let t = NSTextField(labelWithString: DictionaryOrder.languageLabel(d))
+                t.font = .systemFont(ofSize: 13)
+                t.textColor = .secondaryLabelColor
+                t.alignment = .right
+                t.lineBreakMode = .byTruncatingTail
+                return t
+            }
+            let b = NSButton(checkboxWithTitle: d.name, target: self, action: #selector(toggle(_:)))
+            b.font = .systemFont(ofSize: 13)
+            b.tag = row
+            b.state = parent.enabled.contains(d.id) ? .on : .off
+            b.lineBreakMode = .byTruncatingTail
+            return b
+        }
+
+        @objc func toggle(_ b: NSButton) {
+            guard b.tag < parent.dicts.count else { return }
+            let id = parent.dicts[b.tag].id
+            if b.state == .on { if !parent.enabled.contains(id) { parent.enabled.append(id) } }
+            else { parent.enabled.removeAll { $0 == id } }
+            shownEnabled = parent.enabled
+            parent.onChange()
+        }
+
+        func tableViewSelectionDidChange(_ n: Notification) {
+            guard !syncing, let t = table else { return }
+            parent.selection = t.selectedRow >= 0 ? parent.dicts[t.selectedRow].id : nil
+        }
+
+        // Drag to reorder.
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+            let item = NSPasteboardItem(); item.setString(String(row), forType: DictionaryTable.dragType); return item
+        }
+        func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int,
+                       proposedDropOperation op: NSTableView.DropOperation) -> NSDragOperation {
+            if op == .on { tableView.setDropRow(row, dropOperation: .above) }
+            return .move
+        }
+        func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int,
+                       dropOperation: NSTableView.DropOperation) -> Bool {
+            guard let s = info.draggingPasteboard.pasteboardItems?.first?.string(forType: DictionaryTable.dragType),
+                  let from = Int(s) else { return false }
+            var list = parent.dicts
+            let item = list.remove(at: from)
+            let to = from < row ? row - 1 : row
+            list.insert(item, at: to)
+            parent.dicts = list
+            shownIDs = list.map(\.id)
+            tableView.reloadData()
+            tableView.selectRowIndexes([to], byExtendingSelection: false)
+            parent.onChange()
+            return true
+        }
+
+        // Right-click menu with the resets (kept out of the visible layout, like native).
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            menu.removeAllItems()
+            let order = NSMenuItem(title: "恢复默认顺序", action: #selector(resetOrder), keyEquivalent: "")
+            order.target = self
+            menu.addItem(order)
+            if let t = table, t.clickedRow >= 0 {
+                let d = parent.dicts[t.clickedRow]
+                if DictionaryPrefs(bundleURL: d.bundleURL)?.prefsHTML != nil {
+                    let it = NSMenuItem(title: "恢复此词典默认设置", action: #selector(resetPrefs(_:)), keyEquivalent: "")
+                    it.target = self; it.representedObject = d.id
+                    menu.addItem(it)
+                }
+            }
+        }
+        @objc func resetOrder() { parent.onResetOrder() }
+        @objc func resetPrefs(_ i: NSMenuItem) { if let id = i.representedObject as? String { parent.onResetPrefs(id) } }
+    }
+}
+
 struct DictionaryDetailView: View {
     let dictionary: DictionaryInfo
 
     var body: some View {
         let p = DictionaryPrefs(bundleURL: dictionary.bundleURL)
         if let p, p.prefsHTML != nil {
-            VStack(alignment: .leading, spacing: 4) {
-                DictionaryPrefsWebView(prefs: p)
-                HStack {
-                    Text("这些设置只影响「生词」，不会改动系统「词典」App。").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("恢复为「词典」App 的设置") {
-                        p.reset()
-                        NotificationCenter.default.post(name: .vocabDictionaryPrefsChanged, object: p.bundleID)
-                    }.controlSize(.small)
-                }
-            }
+            DictionaryPrefsWebView(prefs: p)
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
@@ -123,9 +254,10 @@ struct DictionaryDetailView: View {
                     if !langs.isEmpty { Text("语言：\(langs)").foregroundStyle(.secondary) }
                     Text("这个词典没有可调整的显示选项。").foregroundStyle(.secondary).padding(.top, 4)
                 }
-                .font(.system(size: 12))
+                .font(.system(size: 13))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
             }
         }
     }
@@ -149,7 +281,7 @@ struct DictionaryPrefsWebView: NSViewRepresentable {
         (function(){
           var prefs = \(values);
           var st = document.createElement('style');
-          st.textContent = ':root{color-scheme:light dark} body{font:12px -apple-system,sans-serif;background:transparent;margin:6px 2px} a{color:-apple-system-control-accent}';
+          st.textContent = ':root{color-scheme:light dark} body{font:13px -apple-system,system-ui,sans-serif;line-height:1.35;background:transparent;margin:10px;color:-apple-system-label} hr{border:0;border-top:1px solid -apple-system-separator;margin:8px 0} a{color:-apple-system-link} input,select{-webkit-appearance:auto!important;appearance:auto!important;accent-color:-apple-system-control-accent;font:inherit;margin:3px 5px 3px 0;vertical-align:-2px} input[type=checkbox],input[type=radio]{width:14px;height:14px}';
           document.head && document.head.appendChild(st);
           var c = document.getElementById('copyright'); if (c && !c.textContent.trim()) c.textContent = \(copyright)[0];
           var inputs = document.querySelectorAll('input, select');
