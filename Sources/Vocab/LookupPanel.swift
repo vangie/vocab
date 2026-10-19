@@ -33,10 +33,25 @@ final class LookupPanelController {
 
     func show(word: String, context: String?, entries: [DictionaryEntry], at point: NSPoint, anchor: NSRect? = nil) {
         closePanelOnly()
-        let size = NSSize(width: 480, height: 400)
-        // Borderless like native Look Up: no titlebar or traffic lights, rounded corners.
+        let body = NSSize(width: 440, height: 440)
+        let arrowH: CGFloat = 10
+        let size = NSSize(width: body.width, height: body.height + arrowH)
+        let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
+        // Like Look Up: directly below the word with an arrow pointing up at its centre;
+        // flip above the word (arrow pointing down) when there is no room below.
+        let a = anchor ?? NSRect(x: point.x, y: point.y - 9, width: 1, height: 18)
+        var origin = NSPoint(x: a.midX - size.width / 2, y: a.minY - size.height - 2)
+        var arrowUp = true
+        if let vf = screen?.visibleFrame {
+            if origin.y < vf.minY + 4 { origin.y = a.maxY + 2; arrowUp = false }
+            origin.x = min(max(vf.minX + 6, origin.x), vf.maxX - size.width - 6)
+            origin.y = min(max(vf.minY + 4, origin.y), vf.maxY - size.height - 4)
+        }
+        let arrowX = min(max(28, a.midX - origin.x), size.width - 28)
+
+        // Borderless like native Look Up: no titlebar or traffic lights.
         let p = LookupNSPanel(contentRect: NSRect(origin: .zero, size: size),
-                              styleMask: [.borderless, .nonactivatingPanel, .resizable],
+                              styleMask: [.borderless, .nonactivatingPanel],
                               backing: .buffered, defer: false)
         p.isFloatingPanel = true
         p.level = .floating
@@ -48,28 +63,25 @@ final class LookupPanelController {
         p.isReleasedWhenClosed = false
         p.becomesKeyOnlyIfNeeded = true
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let shape = PopoverShape.path(size: size, arrowX: arrowX, arrowH: arrowH, arrowUp: arrowUp, radius: 16)
         let bg = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
         bg.material = .popover
         bg.state = .active
         bg.blendingMode = .behindWindow
+        bg.maskImage = PopoverShape.mask(size: size, path: shape)
+        // Thin light border following the rounded body and the arrow.
         bg.wantsLayer = true
-        bg.layer?.cornerRadius = 12
-        bg.layer?.masksToBounds = true
+        let border = CAShapeLayer()
+        border.path = shape
+        border.fillColor = nil
+        border.strokeColor = NSColor.white.withAlphaComponent(0.22).cgColor
+        border.lineWidth = 1
         let host = NSHostingView(rootView: PanelView(word: word, context: context, entries: entries, close: { [weak self] in self?.close() }))
-        host.frame = bg.bounds
-        host.autoresizingMask = [.width, .height]
+        host.frame = NSRect(x: 0, y: arrowUp ? 0 : arrowH, width: body.width, height: body.height)
         bg.addSubview(host)
+        bg.layer?.addSublayer(border)
         p.contentView = bg
-        // Below and to the right of the pointer, kept on screen.
-        let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
-        // Like Look Up: below the word (or the pointer), above it if there is no room.
-        let a = anchor ?? NSRect(x: point.x, y: point.y - 9, width: 1, height: 18)
-        var origin = NSPoint(x: a.minX - 24, y: a.minY - size.height - 6)
-        if let vf = screen?.visibleFrame {
-            if origin.y < vf.minY { origin.y = a.maxY + 6 }
-            origin.x = min(max(vf.minX + 8, origin.x), vf.maxX - size.width - 8)
-            origin.y = min(max(vf.minY + 8, origin.y), vf.maxY - size.height - 8)
-        }
         p.setFrameOrigin(origin)
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: p, queue: .main) { _ in
             Task { @MainActor in HighlightOverlay.shared.hide() }
@@ -112,13 +124,64 @@ final class LookupNSPanel: NSPanel {
     override func cancelOperation(_ sender: Any?) { LookupPanelController.shared.close() }
 }
 
+/// Popover outline with an arrow at the top (or bottom) pointing at the word.
+enum PopoverShape {
+    static func path(size: NSSize, arrowX: CGFloat, arrowH: CGFloat, arrowUp: Bool, radius r: CGFloat) -> CGPath {
+        let body = CGRect(x: 0.5, y: arrowUp ? 0.5 : arrowH, width: size.width - 1, height: size.height - arrowH - 1)
+        let p = CGMutablePath()
+        let aw: CGFloat = 11
+        // Start at the left end of the top edge, go clockwise (Cocoa: y up).
+        p.move(to: CGPoint(x: body.minX + r, y: body.maxY))
+        if arrowUp {
+            p.addLine(to: CGPoint(x: arrowX - aw, y: body.maxY))
+            p.addLine(to: CGPoint(x: arrowX, y: body.maxY + arrowH - 0.5))
+            p.addLine(to: CGPoint(x: arrowX + aw, y: body.maxY))
+        }
+        p.addArc(tangent1End: CGPoint(x: body.maxX, y: body.maxY), tangent2End: CGPoint(x: body.maxX, y: body.minY), radius: r)
+        p.addArc(tangent1End: CGPoint(x: body.maxX, y: body.minY), tangent2End: CGPoint(x: body.minX, y: body.minY), radius: r)
+        if !arrowUp {
+            p.addLine(to: CGPoint(x: arrowX + aw, y: body.minY))
+            p.addLine(to: CGPoint(x: arrowX, y: body.minY - arrowH + 0.5))
+            p.addLine(to: CGPoint(x: arrowX - aw, y: body.minY))
+        }
+        p.addArc(tangent1End: CGPoint(x: body.minX, y: body.minY), tangent2End: CGPoint(x: body.minX, y: body.maxY), radius: r)
+        p.addArc(tangent1End: CGPoint(x: body.minX, y: body.maxY), tangent2End: CGPoint(x: body.maxX, y: body.maxY), radius: r)
+        p.closeSubpath()
+        return p
+    }
+
+    static func mask(size: NSSize, path: CGPath) -> NSImage {
+        NSImage(size: size, flipped: false) { _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            ctx.addPath(path); ctx.setFillColor(NSColor.black.cgColor); ctx.fillPath()
+            return true
+        }
+    }
+}
+
+/// First sense or two of an entry, for the compact Look-Up-style list.
+enum Excerpt {
+    static func make(_ e: DictionaryEntry, limit: Int = 220) -> String {
+        var t = e.plainText.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        if t.lowercased().hasPrefix(e.headword.lowercased()) { t = String(t.dropFirst(e.headword.count)).trimmingCharacters(in: .whitespaces) }
+        guard t.count > limit else { return t }
+        let cut = t.prefix(limit)
+        if let i = cut.lastIndex(where: { "。；;.".contains($0) }), cut.distance(from: cut.startIndex, to: i) > limit / 2 {
+            return String(cut[...i]) + " …"
+        }
+        return cut + "…"
+    }
+}
+
 struct PanelView: View {
     let word: String
     let context: String?
     let entries: [DictionaryEntry]
     let close: () -> Void
     @State private var added = false
-    @State private var selected: String? = nil
+    /// nil = compact overview of every dictionary; otherwise the full entry of that dictionary.
+    @State private var expanded: String? = nil
 
     private var dicts: [DictionaryInfo] {
         var seen = Set<String>(); return entries.compactMap { seen.insert($0.dictionary.id).inserted ? $0.dictionary : nil }
@@ -126,58 +189,105 @@ struct PanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(word).font(.system(size: 17, weight: .semibold))
-                Spacer()
-                Button {
-                    let pool = selected.map { s in entries.filter { $0.dictionary.id == s } } ?? entries
-                    if let e = pool.first {
-                        WordbookModel.shared.add(entry: e, word: word, context: context)
-                        added = true
-                    }
-                } label: {
-                    Label(added ? "已加入" : "加入生词本", systemImage: added ? "star.fill" : "star")
+            header
+            Divider().opacity(0.6)
+            if entries.isEmpty {
+                Text("没有找到「\(word)」").foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let id = expanded {
+                HStack {
+                    Button { expanded = nil } label: { Label("全部词典", systemImage: "chevron.left") }
+                        .buttonStyle(.borderless)
+                    Spacer()
+                    Text(dicts.first { $0.id == id }?.name ?? "").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
-                .disabled(entries.isEmpty || added)
-                Button {
-                    LookupModel.shared.search(word)
-                    NSApp.activate(ignoringOtherApps: true)
-                    close()
-                } label: { Image(systemName: "arrow.up.forward.app") }
-                .help("在「生词」中打开")
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                EntryWebView(entries: entries.filter { $0.dictionary.id == id }, showTitles: false, panel: true,
+                             emptyMessage: "没有找到「\(word)」",
+                             onLookup: { LookupModel.shared.search($0); NSApp.activate(ignoringOtherApps: true) })
+            } else {
+                overview
             }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, 14).padding(.top, 26).padding(.bottom, 6)
-            if dicts.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 2) {
-                        chip("全部", selected == nil) { selected = nil }
-                        ForEach(dicts) { d in chip(d.name, selected == d.id) { selected = d.id } }
-                    }.padding(.horizontal, 10)
-                }
-                .padding(.bottom, 4)
+            Divider().opacity(0.6)
+            footerRow("在「生词」中打开", "book") { openInMain() }
+            Divider().opacity(0.6).padding(.leading, 14)
+            footerRow("配置词典", "gearshape") {
+                close()
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
-            Divider()
-            EntryWebView(entries: selected.map { s in entries.filter { $0.dictionary.id == s } } ?? entries,
-                         showTitles: selected == nil && dicts.count > 1, panel: true,
-                         emptyMessage: "没有找到「\(word)」",
-                         onLookup: { LookupModel.shared.search($0); NSApp.activate(ignoringOtherApps: true) })
+            .padding(.bottom, 4)
         }
-        .background(.regularMaterial)
         .onAppear { added = WordbookModel.shared.contains(word) }
     }
 
-    private func chip(_ t: String, _ on: Bool, _ a: @escaping () -> Void) -> some View {
-        Button(action: a) {
-            Text(t).font(.system(size: 12)).padding(.horizontal, 7).padding(.vertical, 3)
-                .background(on ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
-        }.buttonStyle(.plain)
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(word).font(.system(size: 17, weight: .semibold))
+            Spacer()
+            Button {
+                let pool = expanded.map { s in entries.filter { $0.dictionary.id == s } } ?? entries
+                if let e = pool.first {
+                    WordbookModel.shared.add(entry: e, word: word, context: context)
+                    added = true
+                }
+            } label: {
+                Label(added ? "已加入" : "加入生词本", systemImage: added ? "star.fill" : "star")
+            }
+            .disabled(entries.isEmpty || added)
+            Button { openInMain() } label: { Image(systemName: "arrow.up.forward.app") }
+                .help("在「生词」中打开")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
+    }
+
+    private var overview: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(dicts) { d in
+                    let es = entries.filter { $0.dictionary.id == d.id }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(d.name).font(.system(size: 20, weight: .bold))
+                        Rectangle().fill(Color.primary.opacity(0.18)).frame(height: 0.5)
+                        ForEach(es.prefix(2), id: \.id) { e in
+                            Text(Excerpt.make(e)).font(.system(size: 13)).lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        Button("更多") { expanded = d.id }
+                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                            .font(.system(size: 13))
+                    }
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+    }
+
+    private func footerRow(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).frame(width: 18)
+                Text(title)
+                Spacer()
+            }
+            .font(.system(size: 13))
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openInMain() {
+        LookupModel.shared.search(word)
+        NSApp.activate(ignoringOtherApps: true)
+        close()
     }
 }
 
-
-/// Look-Up-style word highlight: opaque yellow rounded box with the word redrawn crisply in
-/// near-black on top (so the text never looks washed out), soft shadow and a short pop.
+/// Look-Up-style word highlight: flat yellow box with the word redrawn crisply in black at
+/// the original font and position, and a quick 1.2× jiggle.
 @MainActor
 final class HighlightOverlay {
     static let shared = HighlightOverlay()
@@ -187,14 +297,14 @@ final class HighlightOverlay {
         hide()
         let size = fontSize.flatMap { $0 > 4 ? $0 : nil } ?? max(9, rect.height * 0.8)
         let font = fontName.flatMap { NSFont(name: $0, size: size) } ?? NSFont.systemFont(ofSize: size, weight: .medium)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(white: 0.08, alpha: 1)]
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         let text = NSAttributedString(string: word, attributes: attrs)
         let ts = text.size()
-        let padX: CGFloat = 4, padY: CGFloat = 2
+        let padX: CGFloat = 2.5, padY: CGFloat = 0
         let boxW = max(rect.width, ts.width) + padX * 2
         let boxH = max(rect.height, ts.height) + padY * 2
-        let margin: CGFloat = 12   // room for the pop scale and shadow
-        let box = NSRect(x: rect.midX - boxW / 2, y: rect.midY - boxH / 2, width: boxW, height: boxH)
+        let margin: CGFloat = 16   // room for the pop scale and shadow
+        let box = NSRect(x: rect.minX - padX, y: rect.midY - boxH / 2, width: boxW, height: boxH)
         let frame = box.insetBy(dx: -margin, dy: -margin)
 
         let w = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -210,41 +320,34 @@ final class HighlightOverlay {
         root.wantsLayer = true
         let container = CALayer()
         container.frame = NSRect(x: margin, y: margin, width: boxW, height: boxH)
-        container.shadowColor = NSColor.black.cgColor
-        container.shadowOpacity = 0.35
-        container.shadowRadius = 3
-        container.shadowOffset = CGSize(width: 0, height: -1)
 
-        let g = CAGradientLayer()
+        // Native Look Up: flat, saturated yellow, near-square corners, no border or gradient.
+        let g = CALayer()
         g.frame = container.bounds
-        g.colors = [NSColor(srgbRed: 1.0, green: 0.894, blue: 0.302, alpha: 1).cgColor,    // #FFE44D (top)
-                    NSColor(srgbRed: 0.969, green: 0.827, blue: 0.235, alpha: 1).cgColor]  // #F7D33C (bottom)
-        g.startPoint = CGPoint(x: 0.5, y: 1); g.endPoint = CGPoint(x: 0.5, y: 0)
-        g.cornerRadius = min(5, boxH / 4)
-        g.borderWidth = 0.5
-        g.borderColor = NSColor(srgbRed: 0.80, green: 0.64, blue: 0.10, alpha: 0.9).cgColor
-        g.masksToBounds = true
+        g.backgroundColor = NSColor(srgbRed: 1, green: 1, blue: 0, alpha: 1).cgColor
+        g.cornerRadius = 1.5
         container.addSublayer(g)
 
         let t = CATextLayer()
         t.string = text
         t.contentsScale = (NSScreen.screens.first { $0.frame.intersects(rect) } ?? NSScreen.main)?.backingScaleFactor ?? 2
-        t.alignmentMode = .center
-        t.frame = CGRect(x: 0, y: (boxH - ts.height) / 2, width: boxW, height: ts.height)
+        // Same position as the original text: left edge at the word's left edge.
+        t.alignmentMode = .left
+        t.frame = CGRect(x: padX, y: (boxH - ts.height) / 2, width: boxW, height: ts.height)
         container.addSublayer(t)
 
         root.layer?.addSublayer(container)
         w.contentView = root
         w.orderFrontRegardless()
 
-        // Pop like native Look Up: 1.0 → 1.15 → 1.0 over ~0.2 s, around the centre.
+        // Native jiggle: grow to ~1.2× fast, snap back with a tiny undershoot (box and text together).
         container.anchorPoint = CGPoint(x: 0.5, y: 0.5)
         container.position = CGPoint(x: margin + boxW / 2, y: margin + boxH / 2)
         let a = CAKeyframeAnimation(keyPath: "transform.scale")
-        a.values = [1.0, 1.15, 1.0]
-        a.keyTimes = [0, 0.45, 1]
+        a.values = [1.0, 1.2, 0.97, 1.0]
+        a.keyTimes = [0, 0.4, 0.75, 1]
         a.duration = 0.2
-        a.timingFunctions = [CAMediaTimingFunction(name: .easeOut), CAMediaTimingFunction(name: .easeIn)]
+        a.timingFunctions = [CAMediaTimingFunction(name: .easeOut), CAMediaTimingFunction(name: .easeOut), CAMediaTimingFunction(name: .easeOut)]
         container.add(a, forKey: "pop")
         window = w
     }
