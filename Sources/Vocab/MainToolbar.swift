@@ -47,12 +47,11 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         tb.delegate = self
         tb.displayMode = .iconOnly
         tb.allowsUserCustomization = false
-        tb.centeredItemIdentifiers = [modeID]
         w.toolbar = tb
         w.toolbarStyle = .unified
         w.styleMask.insert(.fullSizeContentView)
-        w.title = "生词"
-        w.titleVisibility = .visible   // shown next to ‹ ›, like Dictionary.app
+        w.title = "生词"               // kept for the Window menu / Mission Control
+        w.titleVisibility = .hidden    // the mode switcher takes the title's place
         bind()
         refresh()
         VocabLog.log("toolbar attached")
@@ -70,13 +69,41 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         navGroup?.subitems[1].isEnabled = lookup.canGoForward
         modeGroup?.selectedIndex = Mode.allCases.firstIndex(of: state.mode) ?? 0
         let lookupMode = state.mode == .lookup
-        fontGroup?.subitems.forEach { $0.isEnabled = lookupMode }
+        // ‹ › and 小|大 only do something in 词典: take them out of the toolbar elsewhere
+        // (removing items keeps AppKit's layout and » overflow exact, and the AX tree honest).
+        setPresent(navID, lookupMode, after: modeID)
+        setPresent(fontID, lookupMode, before: searchID)
         if let f = searchItem?.searchField {
             f.placeholderString = state.mode == .wordbook ? "搜索生词本" : "搜索"
             let want = state.mode == .wordbook ? state.wordFilter : lookup.query
             if f.stringValue != want, f.currentEditor() == nil || state.mode != .lookup { f.stringValue = want }
             if f.stringValue != want, f.currentEditor() == nil { f.stringValue = want }
         }
+    }
+
+    private func setPresent(_ id: NSToolbarItem.Identifier, _ present: Bool,
+                            after: NSToolbarItem.Identifier? = nil, before: NSToolbarItem.Identifier? = nil) {
+        guard let tb = window?.toolbar else { return }
+        let ids = tb.items.map(\.itemIdentifier)
+        if let i = ids.firstIndex(of: id) {
+            if !present { tb.removeItem(at: i) }
+        } else if present {
+            if let a = after, let j = ids.firstIndex(of: a) { tb.insertItem(withItemIdentifier: id, at: j + 1) }
+            else if let b = before, let j = ids.firstIndex(of: b) { tb.insertItem(withItemIdentifier: id, at: j) }
+        }
+    }
+
+    /// 小 / 大 drawn as template images at distinct sizes (11 pt / 15 pt), like Dictionary.app.
+    static func glyph(_ s: String, size: CGFloat) -> NSImage {
+        let font = NSFont.systemFont(ofSize: size, weight: .regular)
+        let str = NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: NSColor.black])
+        let sz = str.size()
+        let img = NSImage(size: NSSize(width: ceil(sz.width), height: ceil(sz.height)), flipped: false) { r in
+            str.draw(at: .zero); return true
+        }
+        img.isTemplate = true
+        img.accessibilityDescription = s
+        return img
     }
 
     func focusSearch() {
@@ -93,7 +120,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     }
 
     func toolbarDefaultItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarTrackingSeparator, navID, .flexibleSpace, modeID, .flexibleSpace, fontID, searchID]
+        [.sidebarTrackingSeparator, modeID, navID, .flexibleSpace, fontID, searchID]
     }
 
     func toolbar(_ t: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar: Bool) -> NSToolbarItem? {
@@ -107,6 +134,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             g.label = "后退/前进"
             g.controlRepresentation = .expanded
             g.isNavigational = true
+            g.autovalidates = false
+            g.subitems.forEach { $0.autovalidates = false; $0.isEnabled = true }
             navGroup = g
             return g
         case modeID:
@@ -115,13 +144,19 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
                                        target: self, action: #selector(mode(_:)))
             g.label = "模式"
             g.controlRepresentation = .expanded
+            g.autovalidates = false
+            g.subitems.forEach { $0.autovalidates = false; $0.isEnabled = true }
             modeGroup = g
             return g
         case fontID:
-            let g = NSToolbarItemGroup(itemIdentifier: id, titles: ["小", "大"], selectionMode: .momentary,
+            let g = NSToolbarItemGroup(itemIdentifier: id,
+                                       images: [Self.glyph("小", size: 11), Self.glyph("大", size: 15)],
+                                       selectionMode: .momentary,
                                        labels: ["缩小文字", "放大文字"], target: self, action: #selector(font(_:)))
             g.label = "文字大小"
             g.controlRepresentation = .expanded
+            g.autovalidates = false
+            g.subitems.forEach { $0.autovalidates = false; $0.isEnabled = true }
             fontGroup = g
             return g
         case searchID:
