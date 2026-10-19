@@ -54,7 +54,17 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         w.titleVisibility = .hidden    // the mode switcher takes the title's place
         bind()
         refresh()
-        VocabLog.log("toolbar attached")
+        // Re-assert on key/reopen in case SwiftUI swaps the toolbar or resets the title.
+        NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification, object: w)
+            .sink { [weak self, weak w] _ in
+                guard let self, let w else { return }
+                if w.toolbar?.identifier != "vocab.main" || w.titleVisibility != .hidden {
+                    VocabLog.log("toolbar reasserted (was \(w.toolbar?.identifier ?? "none"), title \(w.titleVisibility == .hidden ? "hidden" : "visible"))")
+                    self.window = nil
+                    self.attach(to: w)
+                }
+            }.store(in: &bag)
+        VocabLog.log("toolbar attached: \(w.toolbar?.items.map(\.itemIdentifier.rawValue) ?? [])")
     }
 
     private func bind() {

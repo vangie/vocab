@@ -20,6 +20,8 @@ if [ -n "$SDKVER" ]; then
     && echo "Linked SDK stamped: $SDKVER (min $MINOS)"
 fi
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+# Localized app name (生词 on Chinese systems, Vocab elsewhere).
+for l in Resources/*.lproj; do [ -d "$l" ] && cp -R "$l" "$APP/Contents/Resources/"; done
 # Local, untracked icon override: Local/AppIcon.png (1024px) wins over Resources/AppIcon.icns.
 if [ -f Local/AppIcon.png ]; then
   SET="$(mktemp -d)/AppIcon.iconset"; mkdir -p "$SET"
