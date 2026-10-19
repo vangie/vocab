@@ -19,8 +19,17 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # (Auto-picking a keychain identity is deliberately avoided: an Apple Development
 # certificate without a matching provisioning setup can make LaunchServices refuse to launch.)
 IDENTITY="${VOCAB_SIGN_IDENTITY:-}"
+SIGNDIR="$HOME/Library/Application Support/Vocab/signing"
+KC="$SIGNDIR/vocab-signing.keychain-db"
+KCARGS=()
+# Local self-signed identity created by scripts/setup-signing.sh (dedicated keychain, no prompts).
+if [ -z "$IDENTITY" ] && [ -f "$KC" ] && [ -f "$SIGNDIR/pass" ]; then
+  security unlock-keychain -p "$(cat "$SIGNDIR/pass")" "$KC" >/dev/null 2>&1 || true
+  IDENTITY="Vocab Local Signing"
+  KCARGS=(--keychain "$KC")
+fi
 if [ -n "$IDENTITY" ]; then
-  codesign --force --sign "$IDENTITY" --timestamp=none "$APP"
+  codesign --force --sign "$IDENTITY" ${KCARGS[@]+"${KCARGS[@]}"} --timestamp=none "$APP"
   echo "Signed with: $IDENTITY"
 else
   codesign --force --sign - --timestamp=none "$APP"

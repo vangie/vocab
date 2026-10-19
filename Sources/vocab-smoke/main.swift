@@ -136,6 +136,33 @@ case "suggest":
         print("   lookup → \(fb.word): \(Set(fb.entries.map(\.dictionary.name)).sorted().joined(separator: ", "))")
     }
 
+case "axweb":
+    // Find visible static text in a running browser and resolve the word at its centre via AX.
+    //   vocab-smoke axweb com.google.Chrome
+    let bid = args.count > 2 ? args[2] : "com.google.Chrome"
+    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bid).first else { fail("\(bid) not running") }
+    let appEl = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    Thread.sleep(forTimeInterval: 0.5)
+    func attr(_ e: AXUIElement, _ a: String) -> CFTypeRef? { var v: CFTypeRef?; return AXUIElementCopyAttributeValue(e, a as CFString, &v) == .success ? v : nil }
+    var queue: [AXUIElement] = [appEl]; var found: [(String, CGRect)] = []; var visited = 0
+    while !queue.isEmpty, found.count < 3, visited < 4000 {
+        let e = queue.removeFirst(); visited += 1
+        if (attr(e, "AXRole") as? String) == "AXStaticText", let v = attr(e, "AXValue") as? String, v.count > 25,
+           let pv = attr(e, "AXPosition"), let sv = attr(e, "AXSize") {
+            var p = CGPoint.zero, z = CGSize.zero
+            AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &z)
+            if z.width > 40 && z.height > 8 && z.height < 40 { found.append((v, CGRect(origin: p, size: z))) }
+        }
+        if let kids = attr(e, "AXChildren") as? [AXUIElement] { queue.append(contentsOf: kids) }
+    }
+    print("visited \(visited) elements, text runs: \(found.count)")
+    for (v, r) in found {
+        let pt = CGPoint(x: r.minX + min(60, r.width / 3), y: r.midY)
+        let res = WordUnderCursor.word(atAXPoint: pt, allowDoubleClick: false)
+        print("text: \(v.prefix(50))…  at \(pt) → \(res.map { "\($0.word) via \($0.method), bounds \($0.axBounds.map { "\($0)" } ?? "-")" } ?? "nil")")
+    }
+
 case "multitouch":
     let n = ThreeFingerMonitor.shared.start()
     print("multitouch devices started: \(n)")

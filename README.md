@@ -33,6 +33,17 @@ make smoke      # 无界面冒烟测试：查词、渲染截图、播放发音
 
 三指手势通过私有框架 `MultitouchSupport` 识别，词典内容通过私有 `DCS*` 接口读取，所以本应用无法上架 App Store，系统大版本更新后可能需要适配。
 
+### 稳定签名（推荐）
+
+临时（ad-hoc）签名每次构建都会变，macOS 会因此作废「辅助功能」授权。运行一次：
+
+```sh
+scripts/setup-signing.sh   # 在独立钥匙串中创建自签名身份 "Vocab Local Signing"，不碰登录钥匙串，无弹窗
+make app                   # 之后自动用它签名
+```
+
+之后重新授权一次辅助功能，以后重新构建就不必再授权了。也可以用 `VOCAB_SIGN_IDENTITY` 指定其他身份。
+
 ## 项目结构
 
 | 路径 | 说明 |
@@ -57,3 +68,8 @@ make smoke      # 无界面冒烟测试：查词、渲染截图、播放发音
 Build: `make app` → `build/Vocab.app`. Tests: `make test`. Headless smoke test: `make smoke`.
 
 Uses private frameworks, so it cannot ship on the Mac App Store. MIT licensed.
+
+### Stable signing (recommended)
+
+Ad-hoc signatures change on every build, which invalidates the Accessibility grant. Run `scripts/setup-signing.sh` once: it creates a self-signed "Vocab Local Signing" identity in a dedicated keychain (login keychain untouched, no prompts), and `make app` then signs with it. Grant Accessibility once more; later rebuilds keep the grant. `VOCAB_SIGN_IDENTITY` overrides the identity.
+
