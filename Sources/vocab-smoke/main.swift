@@ -136,6 +136,13 @@ case "suggest":
         print("   lookup → \(fb.word): \(Set(fb.entries.map(\.dictionary.name)).sorted().joined(separator: ", "))")
     }
 
+case "axpoint":
+    // vocab-smoke axpoint <x> <y> [--dc]   (AX coordinates, top-left origin)
+    let pt = CGPoint(x: Double(args[2])!, y: Double(args[3])!)
+    WordUnderCursor.debug = true
+    let res = WordUnderCursor.word(atAXPoint: pt, allowDoubleClick: args.contains("--dc"))
+    print("\(pt) → \(res.map { "\($0.word) via \($0.method) bounds \($0.axBounds.map { "\($0)" } ?? "-")" } ?? "nil")")
+
 case "axweb":
     // Find visible static text in a running browser and resolve the word at its centre via AX.
     //   vocab-smoke axweb com.google.Chrome
@@ -145,7 +152,12 @@ case "axweb":
     AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     Thread.sleep(forTimeInterval: 0.5)
     func attr(_ e: AXUIElement, _ a: String) -> CFTypeRef? { var v: CFTypeRef?; return AXUIElementCopyAttributeValue(e, a as CFString, &v) == .success ? v : nil }
-    var queue: [AXUIElement] = [appEl]; var found: [(String, CGRect)] = []; var visited = 0
+    var roots: [AXUIElement] = [appEl]
+    if args.count > 3, let wins = attr(appEl, "AXWindows") as? [AXUIElement] {
+        roots = wins.filter { ((attr($0, "AXTitle") as? String) ?? "").contains(args[3]) }
+        print("windows matching: \(roots.count)")
+    }
+    var queue: [AXUIElement] = roots; var found: [(String, CGRect)] = []; var visited = 0
     while !queue.isEmpty, found.count < 3, visited < 4000 {
         let e = queue.removeFirst(); visited += 1
         if (attr(e, "AXRole") as? String) == "AXStaticText", let v = attr(e, "AXValue") as? String, v.count > 25,
@@ -160,7 +172,7 @@ case "axweb":
     for (v, r) in found {
         let pt = CGPoint(x: r.minX + min(60, r.width / 3), y: r.midY)
         let res = WordUnderCursor.word(atAXPoint: pt, allowDoubleClick: false)
-        print("text: \(v.prefix(50))…  at \(pt) → \(res.map { "\($0.word) via \($0.method), bounds \($0.axBounds.map { "\($0)" } ?? "-")" } ?? "nil")")
+        print("rect \(r)"); print("text: \(v.prefix(50))…  at \(pt) → \(res.map { "\($0.word) via \($0.method), bounds \($0.axBounds.map { "\($0)" } ?? "-")" } ?? "nil")")
     }
 
 case "multitouch":

@@ -76,6 +76,9 @@ public enum WordUnderCursor {
 
     // MARK: - Entry point
 
+    nonisolated(unsafe) public static var debug = false
+    static func dbg(_ s: @autoclosure () -> String) { if debug { print("  [ax] " + s()) } }
+
     public static func current() -> Result? {
         word(atAXPoint: axPoint(NSEvent.mouseLocation))
     }
@@ -179,35 +182,64 @@ public enum WordUnderCursor {
                   b.width > 0, b.height > 0 else { return nil }
             return b
         }
+        dbg("range hit=\(hit.location) len=\(hit.length) count=\(characterCount(el)) b(hit)=\(String(describing: charBounds(hit.location))) b(1)=\(String(describing: charBounds(1))) b(5)=\(String(describing: charBounds(5))) el=\(String(describing: rect(frameOf(el))))")
         if !(charBounds(hit.location)?.insetBy(dx: -1, dy: -1).contains(point) ?? false) {
             let n = characterCount(el)
-            if n > 0, let i = indexForPoint(point, count: n, bounds: charBounds) {
-                hit.location = i
-            } else if n > 0 {
-                return nil   // index is unreliable and we can't fix it: let the next strategy try
+            dbg("range: index not under point, searching \(n) chars by bounds")
+            guard n > 0, let i = indexForPoint(point, count: n, bounds: charBounds) else {
+                return nil   // never fall back to index 0: let the next strategy (double-click) try
             }
+            hit.location = i
+            dbg("range: bounds search → index \(i) \(String(describing: charBounds(i)))")
         }
+        let total = characterCount(el)
         let start = max(0, hit.location - 200)
-        var window = CFRange(location: start, length: 400)
+        // Chromium errors on ranges past the end, so clamp to the real length.
+        var window = CFRange(location: start, length: total > 0 ? min(400, total - start) : 400)
         var text = string(el, range: &window)
         if text == nil {
             window = CFRange(location: start, length: hit.location - start + 40)
             text = string(el, range: &window)
         }
+        dbg("range: text window \(window.location)+\(window.length) got \(text.map { ($0 as NSString).length } ?? -1) chars")
         guard let t = text, !t.isEmpty, let w = wordRange(in: t, at: hit.location - start) else { return nil }
         var wr = CFRange(location: start + w.range.location, length: w.range.length)
         var bounds: CGRect?
         if let rangeVal = AXValueCreate(.cfRange, &wr) {
             bounds = rect(param(el, kAXBoundsForRangeParameterizedAttribute, rangeVal))
         }
+        // Validate: the word box must contain the point and be smaller than the element.
+        if let b = bounds {
+            let elFrame = rect(frameOf(el))
+            let tooBig = elFrame.map { b.width >= $0.width * 0.95 && $0.width > 60 } ?? false
+            if !b.insetBy(dx: -2, dy: -2).contains(point) || tooBig || b.width <= 0 {
+                dbg("range: rejected \(w.word) bounds \(b)")
+                return nil
+            }
+        } else { return nil }
         return Result(word: w.word, context: w.context, axBounds: bounds, method: "range", app: app)
+    }
+
+    static func frameOf(_ el: AXUIElement) -> CFTypeRef? {
+        var v: CFTypeRef?
+        return AXUIElementCopyAttributeValue(el, "AXFrame" as CFString, &v) == .success ? v : nil
     }
 
     static func characterCount(_ el: AXUIElement) -> Int {
         var v: CFTypeRef?
-        if AXUIElementCopyAttributeValue(el, kAXNumberOfCharactersAttribute as CFString, &v) == .success, let n = v as? Int { return n }
-        if AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &v) == .success, let t = v as? String { return (t as NSString).length }
-        return 0
+        if AXUIElementCopyAttributeValue(el, kAXNumberOfCharactersAttribute as CFString, &v) == .success, let n = v as? Int, n > 0 { return n }
+        if AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &v) == .success, let t = v as? String, !t.isEmpty { return (t as NSString).length }
+        // Chromium/Electron static text: no character count and empty AXValue, but
+        // AXStringForRange works (it clamps to the real length).
+        // AXStringForRange works but errors past the end, so binary-search the length.
+        var lo = 0, hi = 20000
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            var r = CFRange(location: 0, length: mid)
+            if let t = string(el, range: &r), (t as NSString).length > 0 { lo = (t as NSString).length >= mid ? mid : (t as NSString).length; if (t as NSString).length < mid { break } }
+            else { hi = mid - 1 }
+        }
+        return lo
     }
 
     /// Find the character whose bounds contain `point`, assuming characters are laid out in
