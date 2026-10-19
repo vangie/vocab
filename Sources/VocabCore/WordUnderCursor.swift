@@ -16,6 +16,9 @@ public enum WordUnderCursor {
         public let axBounds: CGRect?
         public let method: String
         public let app: String
+        /// Source font of the word, when the app exposes it (AXAttributedStringForRange).
+        public var fontName: String? = nil
+        public var fontSize: CGFloat? = nil
 
         /// Bounds converted to Cocoa (bottom-left origin) screen coordinates.
         public var screenBounds: NSRect? {
@@ -219,7 +222,16 @@ public enum WordUnderCursor {
                 return nil
             }
         } else { return nil }
-        return Result(word: w.word, context: w.context, axBounds: bounds, method: "range", app: app)
+        var res = Result(word: w.word, context: w.context, axBounds: bounds, method: "range", app: app)
+        if let rv = AXValueCreate(.cfRange, &wr),
+           let attr = param(el, kAXAttributedStringForRangeParameterizedAttribute, rv), CFGetTypeID(attr) == CFAttributedStringGetTypeID() {
+            let a = attr as! NSAttributedString
+            if a.length > 0, let f = a.attribute(NSAttributedString.Key("AXFont"), at: 0, effectiveRange: nil) as? [String: Any] {
+                res.fontName = f["AXFontName"] as? String
+                res.fontSize = (f["AXFontSize"] as? NSNumber).map { CGFloat($0.doubleValue) }
+            }
+        }
+        return res
     }
 
     static func frameOf(_ el: AXUIElement) -> CFTypeRef? {

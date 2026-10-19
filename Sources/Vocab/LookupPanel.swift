@@ -27,7 +27,7 @@ final class LookupPanelController {
         // Fall back to the base form for inflected words ("appalled" → "appal").
         let r = Suggester.lookupWithFallback(hit.word, in: dicts)
         VocabLog.log("lookup \(hit.word) → \(r.word): \(r.entries.count) entries")
-        if let b = hit.screenBounds { HighlightOverlay.shared.show(b) }
+        if let b = hit.screenBounds { HighlightOverlay.shared.show(b, word: hit.word, fontName: hit.fontName, fontSize: hit.fontSize) }
         show(word: r.word, context: hit.context, entries: r.entries, at: NSEvent.mouseLocation, anchor: hit.screenBounds)
     }
 
@@ -176,37 +176,76 @@ struct PanelView: View {
 }
 
 
-/// Yellow rounded highlight over the tapped word, like native Look Up. Click-through.
+/// Look-Up-style word highlight: opaque yellow rounded box with the word redrawn crisply in
+/// near-black on top (so the text never looks washed out), soft shadow and a short pop.
 @MainActor
 final class HighlightOverlay {
     static let shared = HighlightOverlay()
     private var window: NSWindow?
 
-    func show(_ rect: NSRect) {
+    func show(_ rect: NSRect, word: String, fontName: String? = nil, fontSize: CGFloat? = nil) {
         hide()
-        let r = rect.insetBy(dx: -3, dy: -2)
-        let w = NSWindow(contentRect: r, styleMask: [.borderless], backing: .buffered, defer: false)
+        let size = fontSize.flatMap { $0 > 4 ? $0 : nil } ?? max(9, rect.height * 0.8)
+        let font = fontName.flatMap { NSFont(name: $0, size: size) } ?? NSFont.systemFont(ofSize: size, weight: .medium)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(white: 0.08, alpha: 1)]
+        let text = NSAttributedString(string: word, attributes: attrs)
+        let ts = text.size()
+        let padX: CGFloat = 4, padY: CGFloat = 2
+        let boxW = max(rect.width, ts.width) + padX * 2
+        let boxH = max(rect.height, ts.height) + padY * 2
+        let margin: CGFloat = 12   // room for the pop scale and shadow
+        let box = NSRect(x: rect.midX - boxW / 2, y: rect.midY - boxH / 2, width: boxW, height: boxH)
+        let frame = box.insetBy(dx: -margin, dy: -margin)
+
+        let w = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
         w.isOpaque = false
         w.backgroundColor = .clear
-        w.hasShadow = true
+        w.hasShadow = false
         w.ignoresMouseEvents = true
         w.level = .floating
-        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        let v = NSView(frame: NSRect(origin: .zero, size: r.size))
-        v.wantsLayer = true
-        v.layer?.backgroundColor = NSColor(calibratedRed: 1, green: 0.86, blue: 0.1, alpha: 0.5).cgColor
-        v.layer?.cornerRadius = min(6, r.height / 3)
-        w.contentView = v
+        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        w.appearance = NSAppearance(named: .aqua)   // text on yellow stays dark in dark mode
+
+        let root = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        root.wantsLayer = true
+        let container = CALayer()
+        container.frame = NSRect(x: margin, y: margin, width: boxW, height: boxH)
+        container.shadowColor = NSColor.black.cgColor
+        container.shadowOpacity = 0.35
+        container.shadowRadius = 3
+        container.shadowOffset = CGSize(width: 0, height: -1)
+
+        let g = CAGradientLayer()
+        g.frame = container.bounds
+        g.colors = [NSColor(srgbRed: 1.0, green: 0.894, blue: 0.302, alpha: 1).cgColor,    // #FFE44D (top)
+                    NSColor(srgbRed: 0.969, green: 0.827, blue: 0.235, alpha: 1).cgColor]  // #F7D33C (bottom)
+        g.startPoint = CGPoint(x: 0.5, y: 1); g.endPoint = CGPoint(x: 0.5, y: 0)
+        g.cornerRadius = min(5, boxH / 4)
+        g.borderWidth = 0.5
+        g.borderColor = NSColor(srgbRed: 0.80, green: 0.64, blue: 0.10, alpha: 0.9).cgColor
+        g.masksToBounds = true
+        container.addSublayer(g)
+
+        let t = CATextLayer()
+        t.string = text
+        t.contentsScale = (NSScreen.screens.first { $0.frame.intersects(rect) } ?? NSScreen.main)?.backingScaleFactor ?? 2
+        t.alignmentMode = .center
+        t.frame = CGRect(x: 0, y: (boxH - ts.height) / 2, width: boxW, height: ts.height)
+        container.addSublayer(t)
+
+        root.layer?.addSublayer(container)
+        w.contentView = root
         w.orderFrontRegardless()
-        // Short "pop": grow from 85 % to 100 %.
-        if let layer = v.layer {
-            layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            layer.position = CGPoint(x: r.width / 2, y: r.height / 2)
-            let a = CABasicAnimation(keyPath: "transform.scale")
-            a.fromValue = 0.85; a.toValue = 1.0; a.duration = 0.12
-            a.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            layer.add(a, forKey: "pop")
-        }
+
+        // Pop like native Look Up: 1.0 → 1.15 → 1.0 over ~0.2 s, around the centre.
+        container.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        container.position = CGPoint(x: margin + boxW / 2, y: margin + boxH / 2)
+        let a = CAKeyframeAnimation(keyPath: "transform.scale")
+        a.values = [1.0, 1.15, 1.0]
+        a.keyTimes = [0, 0.45, 1]
+        a.duration = 0.2
+        a.timingFunctions = [CAMediaTimingFunction(name: .easeOut), CAMediaTimingFunction(name: .easeIn)]
+        container.add(a, forKey: "pop")
         window = w
     }
 
@@ -215,3 +254,4 @@ final class HighlightOverlay {
         window = nil
     }
 }
+
