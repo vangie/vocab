@@ -134,3 +134,16 @@ final class DictionaryPrefsTests: XCTestCase {
         XCTAssertTrue(on.contains("词"))
     }
 }
+
+final class RecentListTests: XCTestCase {
+    func testDisplayedOrderStaysUntilRefresh() {
+        var r = RecentList(["a", "b", "c"])
+        r.record("c")
+        XCTAssertEqual(r.displayed, ["a", "b", "c"])   // click didn't reorder the shown list
+        XCTAssertEqual(r.stored, ["c", "a", "b"])      // but history remembers it
+        r.record("new")
+        XCTAssertEqual(r.displayed, ["a", "b", "c"])
+        r.refresh()
+        XCTAssertEqual(r.displayed, ["new", "c", "a", "b"])
+    }
+}

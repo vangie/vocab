@@ -37,6 +37,7 @@ final class LookupModel: ObservableObject {
     @Published private(set) var navIndex = -1
     /// Recent lookups for the sidebar (most recent first, persisted).
     @Published private(set) var recents: [String] = UserDefaults.standard.stringArray(forKey: "recentLookups") ?? []
+    private var recentList = RecentList(UserDefaults.standard.stringArray(forKey: "recentLookups") ?? [])
     /// Text zoom for entries (小/大, ⌘- / ⌘+), persisted.
     @Published var zoom: Double = UserDefaults.standard.object(forKey: "pageZoom") as? Double ?? 1.0 {
         didSet { UserDefaults.standard.set(zoom, forKey: "pageZoom") }
@@ -62,6 +63,7 @@ final class LookupModel: ObservableObject {
     /// Called as the user types: debounce, then refresh the sidebar and show the top match.
     func queryChanged() {
         suggestTask?.cancel()
+        recentList.refresh(); recents = recentList.displayed
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { suggestions = []; selection = nil; entries = []; searchedTerm = ""; return }
         suggestTask = Task {
@@ -119,13 +121,12 @@ final class LookupModel: ObservableObject {
         if navIndex >= 0, navIndex < nav.count, nav[navIndex] == t { return }
         if navIndex < nav.count - 1 { nav.removeSubrange((navIndex + 1)...) }
         nav.append(t); navIndex = nav.count - 1
-        recents.removeAll { $0.caseInsensitiveCompare(t) == .orderedSame }
-        recents.insert(t, at: 0)
-        if recents.count > 50 { recents.removeLast(recents.count - 50) }
-        UserDefaults.standard.set(recents, forKey: "recentLookups")
+        // Stored now, displayed order stays frozen until the next typed query.
+        recentList.record(t)
+        UserDefaults.standard.set(recentList.stored, forKey: "recentLookups")
     }
 
-    func clearRecents() { recents = []; UserDefaults.standard.removeObject(forKey: "recentLookups") }
+    func clearRecents() { recentList.clear(); recents = []; UserDefaults.standard.removeObject(forKey: "recentLookups") }
 
     func select(_ id: Suggestion.ID?) {
         selection = id

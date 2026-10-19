@@ -25,7 +25,7 @@ struct MainView: View {
     @EnvironmentObject var book: WordbookModel
     @ObservedObject var state = AppState.shared
     @State private var sidebarSelection: SidebarItem?
-    @State private var columns: NavigationSplitViewVisibility = .all
+    @State private var columns: NavigationSplitViewVisibility = .detailOnly   // empty query at launch: collapsed
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
@@ -44,7 +44,12 @@ struct MainView: View {
         }
         .background(WindowToolbarInstaller())
         .navigationTitle("生词")
-        .onChange(of: lookup.query) { _, _ in
+        .onChange(of: lookup.query) { _, q in
+            // Like Dictionary.app: empty field collapses the sidebar, typing brings it back.
+            if state.mode == .lookup {
+                let want: NavigationSplitViewVisibility = q.trimmingCharacters(in: .whitespaces).isEmpty ? .detailOnly : .all
+                if columns != want { withAnimation { columns = want } }
+            }
             if lookup.suppressQueryChange { lookup.suppressQueryChange = false; return }
             if state.mode != .lookup { return }
             lookup.queryChanged()
@@ -54,7 +59,8 @@ struct MainView: View {
         }
         .onChange(of: state.mode) { _, m in
             // 背单词 needs no list: hide the sidebar there, like a focused mode.
-            columns = m == .review ? .detailOnly : .all
+            columns = m == .review ? .detailOnly
+                : m == .lookup && lookup.query.trimmingCharacters(in: .whitespaces).isEmpty ? .detailOnly : .all
             sidebarSelection = m == .wordbook ? .scope(state.wordScope) : nil
         }
         .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NotificationCenter.default.post(name: .vocabFocusSearch, object: nil) } }
