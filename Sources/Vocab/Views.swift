@@ -387,7 +387,10 @@ struct WordbookView: View {
                 TableColumn("释义") { Text($0.definition).lineLimit(2).help($0.definition) }
                 TableColumn("来源") { Text($0.dictionary).foregroundStyle(.secondary) }.width(min: 60, ideal: 120)
                 TableColumn("加入时间") { Text($0.added, format: .dateTime.year().month().day()) }.width(90)
-                TableColumn("下次复习") { Text($0.review.due, format: .relative(presentation: .named)) }.width(100)
+                TableColumn("下次复习") { w in
+                    if Scheduler.isMastered(w.review) { Text("已掌握").foregroundStyle(.secondary) }
+                    else { Text(w.review.due, format: .relative(presentation: .named)) }
+                }.width(100)
             }
             .contextMenu(forSelectionType: Int64.self) { ids in
                 Button("查词") { if let id = ids.first, let w = book.items.first(where: { $0.id == id }) { onOpen(w.word) } }
@@ -401,68 +404,9 @@ struct WordbookView: View {
     }
 }
 
-struct ReviewView: View {
-    @EnvironmentObject var book: WordbookModel
-    @State private var revealed = false
-    @State private var entries: [DictionaryEntry] = []
-
-    var body: some View {
-        VStack(spacing: 18) {
-            if let item = book.dueItems.first {
-                Text("待复习 \(book.dueItems.count)").foregroundStyle(.secondary).padding(.top, 20)
-                Text(item.word).font(.system(size: 44, weight: .semibold, design: .serif))
-                if let c = item.context, !c.isEmpty {
-                    Text(c).italic().foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 40)
-                }
-                if revealed {
-                    EntryWebView(entries: entries, showTitles: false, panel: true,
-                                 emptyMessage: item.definition, onLookup: { _ in })
-                        .frame(maxWidth: 720)
-                        .overlay(alignment: .topTrailing) {
-                            if entries.isEmpty { EmptyView() }
-                        }
-                    HStack(spacing: 16) {
-                        ForEach(ReviewRating.allCases, id: \.self) { r in
-                            Button("\(r.label)  \(r.rawValue)") { rate(item, r) }
-                                .keyboardShortcut(KeyEquivalent(Character("\(r.rawValue)")), modifiers: [])
-                                .controlSize(.large)
-                        }
-                    }
-                    .padding(.bottom, 24)
-                } else {
-                    Spacer()
-                    Button("显示释义（空格）") { reveal(item) }
-                        .keyboardShortcut(.space, modifiers: [])
-                        .controlSize(.large)
-                        .padding(.bottom, 40)
-                }
-            } else {
-                Spacer()
-                Image(systemName: "checkmark.circle").font(.system(size: 48)).foregroundStyle(.green)
-                Text("今天没有要复习的单词").font(.title3)
-                Text("生词本共 \(book.items.count) 个").foregroundStyle(.secondary)
-                Spacer()
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { book.reload() }
-    }
-
-    private func reveal(_ item: WordItem) {
-        let dicts = DictionarySelection.enabled()
-        entries = Array(DictionaryService.shared.lookup(item.word, in: dicts).filter { $0.dictionary.name == item.dictionary }.prefix(2))
-        revealed = true
-    }
-
-    private func rate(_ item: WordItem, _ r: ReviewRating) {
-        book.rate(item, r)
-        revealed = false
-        entries = []
-    }
-}
-
 struct SettingsView: View {
     @EnvironmentObject var settings: SettingsModel
+    @AppStorage(ReviewSession.capKey) private var dailyNewCap = 20
     @State private var dicts: [DictionaryInfo] = []
     @State private var enabled: [String] = []
 
@@ -481,6 +425,12 @@ struct SettingsView: View {
                     .font(.caption.monospacedDigit())
                     .textSelection(.enabled)
                     if let e = settings.lastError { Text(e).foregroundStyle(.red).font(.caption) }
+                }
+                Section("背单词") {
+                    Stepper(value: $dailyNewCap, in: 0...200, step: 5) {
+                        Text("每日新词上限：\(dailyNewCap)")
+                    }
+                    Text("每次先复习到期的单词，再学新词；当天学过的新词计入上限。").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("辅助功能权限") {
                     HStack {

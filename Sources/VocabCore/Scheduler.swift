@@ -5,9 +5,10 @@ public enum ReviewRating: Int, CaseIterable, Sendable {
     case forgot = 1   // 忘了
     case fuzzy = 2    // 模糊
     case good = 3     // 记得
+    case easy = 4     // 简单
 
     public var label: String {
-        switch self { case .forgot: "忘了"; case .fuzzy: "模糊"; case .good: "记得" }
+        switch self { case .forgot: "忘了"; case .fuzzy: "模糊"; case .good: "记得"; case .easy: "简单" }
     }
 }
 
@@ -33,6 +34,17 @@ public enum Scheduler {
     public static let minEase = 1.3
     public static let relearnDelay: TimeInterval = 10 * 60
 
+    /// 斩 / 已掌握: a retired card is scheduled a century out and never planned again.
+    public static let masteredInterval: Double = 36_500
+    public static func isMastered(_ s: ReviewState) -> Bool { s.intervalDays >= masteredInterval }
+    public static func retire(_ s: ReviewState, now: Date) -> ReviewState {
+        var n = s
+        n.lastReviewed = now; n.repetitions += 1
+        n.intervalDays = masteredInterval
+        n.due = now.addingTimeInterval(masteredInterval * 86_400)
+        return n
+    }
+
     public static func next(_ s: ReviewState, rating: ReviewRating, now: Date) -> ReviewState {
         var n = s
         n.lastReviewed = now
@@ -50,6 +62,13 @@ public enum Scheduler {
             case 0: n.intervalDays = 1
             case 1: n.intervalDays = 3
             default: n.intervalDays = max(s.intervalDays + 1, (s.intervalDays * 1.2).rounded())
+            }
+        case .easy:
+            n.ease = s.ease + 0.15
+            switch s.repetitions {
+            case 0: n.intervalDays = 4
+            case 1: n.intervalDays = 8
+            default: n.intervalDays = max(s.intervalDays + 2, (s.intervalDays * s.ease * 1.3).rounded())
             }
         case .good:
             switch s.repetitions {

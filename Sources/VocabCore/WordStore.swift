@@ -157,6 +157,17 @@ public final class WordStore: @unchecked Sendable {
         return it
     }
 
+    /// 斩: mark a word as mastered so it leaves the review rotation (kept in the wordbook).
+    @discardableResult
+    public func retire(id: Int64, now: Date = Date()) throws -> WordItem? {
+        var item: WordItem?
+        try run("SELECT \(Self.columns) FROM words WHERE id = ?", [id]) { item = Self.item($0) }
+        guard var it = item else { return nil }
+        it.review = Scheduler.retire(it.review, now: now)
+        try update(it)
+        return it
+    }
+
     public func count() throws -> Int {
         var n = 0
         try run("SELECT COUNT(*) FROM words", []) { n = Int(sqlite3_column_int64($0, 0)) }

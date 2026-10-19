@@ -14,6 +14,7 @@ let args = CommandLine.arguments
 let svc = DictionaryService.shared
 func dicts(_ only: String? = nil) -> [DictionaryInfo] {
     var list = svc.activeDictionaries()
+    if let only, let d = svc.availableDictionaries().first(where: { $0.id == only }) { return [d] }
     let avail = svc.availableDictionaries()
     for id in ["LDOCE5", "Macmillan2", "Longman5"] where !list.contains(where: { $0.id == id }) {
         if let d = avail.first(where: { $0.id == id }) { list.append(d) }
@@ -27,9 +28,31 @@ func fail(_ s: String) -> Never { FileHandle.standardError.write(Data((s + "\n")
 guard args.count >= 2 else { fail("usage: vocab-smoke dicts|lookup|play|render|click|multitouch …") }
 
 switch args[1] {
+case "plain":
+    for e in svc.lookup(args[2], in: dicts(args.count > 3 ? args[3] : nil)) { print("=== [\(e.dictionary.id)] \(e.headword)\n\(e.plainText.prefix(600))") }
+
+case "html":
+    for e in svc.lookup(args[2], in: dicts(args.count > 3 ? args[3] : nil)) { print("=== [\(e.dictionary.id)]\n\(e.html)") }
+
+case "review":
+    // vocab-smoke review <word>…   materials for each question type (gloss, syllables, roots, distractors)
+    let active = svc.activeDictionaries()
+    let ote = svc.availableDictionaries().first { $0.id == "com.apple.dictionary.OTE" }
+    let f = QuestionFactory(dicts: active, thesaurus: ote, book: [])
+    for w in args.dropFirst(2) {
+        let t0 = Date()
+        let m = f.materials(for: w)
+        print("== \(w)  [\(String(format: "%.2f", Date().timeIntervalSince(t0)))s]")
+        print("   gloss: \(m.gloss.chinese ?? "-") | \(m.gloss.english ?? "-")")
+        print("   syllables: \(m.syllables.joined(separator: "·")) (\(m.syllablesFromDictionary ? "dictionary" : "system"))")
+        print("   roots: \(m.morphemes.prefix(3).map { "\($0.morpheme.display)=\($0.morpheme.meaning)" }.joined(separator: ", "))")
+        print("   distractors: \(m.distractors.map { "\($0.word) (\($0.gloss.short))" }.joined(separator: "; "))")
+        print("   audio: \(m.audio?.lastPathComponent ?? "-")  types: \(m.available.map(\.rawValue).sorted())")
+    }
+
 case "dicts":
     print("active:"); for d in svc.activeDictionaries() { print("  \(d.id)\t\(d.name)\t\(d.bundleURL?.path ?? "")") }
-    print("available: \(svc.availableDictionaries().count)")
+    print("available: \(svc.availableDictionaries().count)"); if args.count > 2 { for d in svc.availableDictionaries() { print("  \(d.id)\t\(d.name)") } }
 
 case "lookup":
     let entries = svc.lookup(args[2], in: dicts())
