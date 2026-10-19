@@ -31,4 +31,7 @@ long vmt_frame_count(void);
 /// Count of contacts in a "touching" state (MakeTouch=3, Touching=4).
 int vmt_active_count(const int *states, int n);
 
+/// Seconds since a frame last had three or more touching contacts (huge if never).
+double vmt_seconds_since_three_touch(void);
+
 #endif

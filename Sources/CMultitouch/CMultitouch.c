@@ -32,6 +32,10 @@ static void (*pStop)(MTDeviceRef);
 static vmt_tap_handler gHandler;
 static CFMutableArrayRef gDevices;
 static double gMaxDuration = 0.35;
+static volatile double gLastThreeTouch = 0;
+double vmt_seconds_since_three_touch(void) {
+    return gLastThreeTouch == 0 ? 1e9 : CFAbsoluteTimeGetCurrent() - gLastThreeTouch;
+}
 static double gMaxMovement = 0.03;
 
 // Gesture state.
@@ -95,6 +99,7 @@ static int contactCallback(MTDeviceRef dev, MTFinger *f, int n, double ts, int f
     if (active > 0) { cx /= active; cy /= active; }
     if (gLogger && (active != gLastActive || n != gLastTotal)) gLogger(n, active, states, ts);
     gLastActive = active; gLastTotal = n;
+    if (active >= 3) gLastThreeTouch = CFAbsoluteTimeGetCurrent();
     if (vmt_feed_frame(active, cx, cy, ts) && gHandler) gHandler();
     return 0;
 }

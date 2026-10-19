@@ -140,6 +140,7 @@ case "axpoint":
     // vocab-smoke axpoint <x> <y> [--dc]   (AX coordinates, top-left origin)
     let pt = CGPoint(x: Double(args[2])!, y: Double(args[3])!)
     WordUnderCursor.debug = true
+    WordUnderCursor.forceFallback = args.contains("--force-fallback")
     let res = WordUnderCursor.word(atAXPoint: pt, allowDoubleClick: args.contains("--dc"))
     print("\(pt) → \(res.map { "\($0.word) via \($0.method) bounds \($0.axBounds.map { "\($0)" } ?? "-")" } ?? "nil")")
 

@@ -77,6 +77,8 @@ public enum WordUnderCursor {
     // MARK: - Entry point
 
     nonisolated(unsafe) public static var debug = false
+    /// Smoke testing: skip the AX text paths and go straight to the selection/double-click fallback.
+    nonisolated(unsafe) public static var forceFallback = false
     static func dbg(_ s: @autoclosure () -> String) { if debug { print("  [ax] " + s()) } }
 
     public static func current() -> Result? {
@@ -110,8 +112,8 @@ public enum WordUnderCursor {
             return allowDoubleClick ? selectionFallback(app: appName, point: pt, element: nil) : nil
         }
         let r0 = role(el) ?? "?"
-        if let r = wordViaTextMarkers(el, point: pt, app: appName) { return r }
-        if let r = wordViaRanges(el, point: pt, app: appName) { return r }
+        if !forceFallback, let r = wordViaTextMarkers(el, point: pt, app: appName) { return r }
+        if !forceFallback, let r = wordViaRanges(el, point: pt, app: appName) { return r }
         VocabLog.log("AX: element role=\(r0) in \(appName) gave no text (markers and ranges failed)")
         return allowDoubleClick ? selectionFallback(app: appName, point: pt, element: el) : nil
     }
@@ -327,7 +329,7 @@ public enum WordUnderCursor {
 
     static func isInsideLink(_ el: AXUIElement) -> Bool {
         var e: AXUIElement? = el
-        for _ in 0..<6 {
+        for _ in 0..<12 {
             guard let x = e else { return false }
             if role(x) == "AXLink" { return true }
             e = parent(x)
@@ -351,7 +353,9 @@ public enum WordUnderCursor {
         if let s = focusedSelectedText() {
             return Result(word: s, context: nil, axBounds: nil, method: "selection", app: app)
         }
-        if let el = element {
+        // Without an element we can't rule out a link under the pointer: never click blind.
+        guard let el = element else { VocabLog.log("AX: skip double-click fallback (no element)"); return nil }
+        do {
             let r = role(el) ?? ""
             if isInsideLink(el) || ["AXButton", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuItem", "AXImage"].contains(r) {
                 VocabLog.log("AX: skip double-click fallback over \(r)")
@@ -375,6 +379,7 @@ public enum WordUnderCursor {
             for type in [CGEventType.leftMouseDown, .leftMouseUp] {
                 let e = CGEvent(mouseEventSource: src, mouseType: type, mouseCursorPosition: axPt, mouseButton: .left)
                 e?.setIntegerValueField(.mouseEventClickState, value: Int64(click))
+                e?.setIntegerValueField(.eventSourceUserData, value: ClickSuppressor.ownMarker)
                 e?.post(tap: .cghidEventTap)
             }
         }

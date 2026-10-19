@@ -222,7 +222,9 @@ final class SettingsModel: ObservableObject {
             multitouchDevices = n
             ThreeFingerMonitor.shared.onTap = { LookupPanelController.shared.lookUpUnderCursor() }
             takeover.engage()
+            ClickSuppressor.shared.start()
         } else {
+            ClickSuppressor.shared.stop()
             ThreeFingerMonitor.shared.stop()
             multitouchDevices = 0
             takeover.restore()

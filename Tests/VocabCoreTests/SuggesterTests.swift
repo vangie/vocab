@@ -87,3 +87,12 @@ final class WordUnderCursorTests: XCTestCase {
         XCTAssertNil(WordUnderCursor.indexForPoint(CGPoint(x: 500, y: 500), count: 20, bounds: b))
     }
 }
+
+final class ClickSuppressorTests: XCTestCase {
+    func testSuppressOnlyRightAfterThreeFingerContact() {
+        XCTAssertTrue(ClickSuppressor.shouldSuppress(secondsSinceThreeTouch: 0.0, window: 0.25))
+        XCTAssertTrue(ClickSuppressor.shouldSuppress(secondsSinceThreeTouch: 0.2, window: 0.25))
+        XCTAssertFalse(ClickSuppressor.shouldSuppress(secondsSinceThreeTouch: 0.5, window: 0.25))
+        XCTAssertFalse(ClickSuppressor.shouldSuppress(secondsSinceThreeTouch: 1e9, window: 0.25))
+    }
+}
