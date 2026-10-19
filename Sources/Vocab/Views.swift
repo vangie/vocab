@@ -88,9 +88,12 @@ struct MainView: View {
                             ForEach(spelling) { s in Text(s.word).lineLimit(1).tag(SidebarItem.suggestion(s.id)) }
                         }
                     }
-                } else if !lookup.recents.isEmpty {
-                    Section("最近查询") {
-                        ForEach(lookup.recents, id: \.self) { w in Text(w).lineLimit(1).tag(SidebarItem.recent(w)) }
+                } else {
+                    // Like Dictionary.app: plain history, no header; the current word is a bold pill.
+                    ForEach(lookup.recents, id: \.self) { w in
+                        Text(w).lineLimit(1)
+                            .font(.system(size: 15, weight: sidebarSelection == .recent(w) ? .bold : .regular))
+                            .tag(SidebarItem.recent(w))
                     }
                 }
             }
@@ -219,18 +222,25 @@ struct LookupDetailView: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
-    /// Like Dictionary.app: a large secondary prompt centred, the current dictionary below it.
+    /// Like Dictionary.app: the prompt near the top, then the current dictionary — or, in 全部,
+    /// every enabled dictionary, one per line — centred.
     private var emptyState: some View {
-        let name = lookup.selectedDictionary.flatMap { id in DictionarySelection.enabled().first { $0.id == id }?.name } ?? "全部词典"
-        return VStack(spacing: 10) {
-            Text("请键入要查询的字词…")
-                .font(.system(size: 26, design: .serif))
-                .foregroundStyle(.secondary)
-            Text(name)
-                .font(.system(size: 30, weight: .medium, design: .serif))
-                .foregroundStyle(.tertiary)
+        let enabled = DictionarySelection.enabled()
+        let names = lookup.selectedDictionary.flatMap { id in enabled.first { $0.id == id }.map { [$0.name] } } ?? enabled.map(\.name)
+        return ScrollView {
+            VStack(spacing: 14) {
+                Text("请键入要查询的字词…")
+                    .font(.system(size: 26, design: .serif))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 10)
+                ForEach(names, id: \.self) { n in
+                    Text(n).font(.system(size: 22, design: .serif)).foregroundStyle(.tertiary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 120)
+            .padding(.bottom, 40)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
     }
 }
@@ -295,8 +305,8 @@ struct DictionaryTabStrip<Trailing: View>: View {
             Text(title)
                 .font(.system(size: 12))
                 .lineLimit(1)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(on ? Color.primary.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .padding(.horizontal, 9).padding(.vertical, 3)
+                .background(on ? Color.primary.opacity(0.14) : .clear, in: Capsule())
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -11,6 +11,14 @@ APP="build/.staging/Vocab.app"
 rm -rf build/.staging
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Vocab"
+# SwiftPM records the deployment target (14.0) as the linked SDK version, so AppKit treats the
+# app as pre-macOS 26 and keeps the old (non-Liquid-Glass) controls. Stamp the real SDK version.
+SDKVER="$(xcrun --show-sdk-version 2>/dev/null || true)"
+MINOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Resources/Info.plist 2>/dev/null || echo 14.0)"
+if [ -n "$SDKVER" ]; then
+  xcrun vtool -set-build-version macos "$MINOS" "$SDKVER" -replace -output "$APP/Contents/MacOS/Vocab" "$APP/Contents/MacOS/Vocab" >/dev/null 2>&1 \
+    && echo "Linked SDK stamped: $SDKVER (min $MINOS)"
+fi
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Local, untracked icon override: Local/AppIcon.png (1024px) wins over Resources/AppIcon.icns.
 if [ -f Local/AppIcon.png ]; then

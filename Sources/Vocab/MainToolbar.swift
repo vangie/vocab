@@ -50,7 +50,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         tb.centeredItemIdentifiers = [modeID]
         w.toolbar = tb
         w.toolbarStyle = .unified
-        w.titleVisibility = .hidden
+        w.styleMask.insert(.fullSizeContentView)
+        w.title = "生词"
+        w.titleVisibility = .visible   // shown next to ‹ ›, like Dictionary.app
         bind()
         refresh()
         VocabLog.log("toolbar attached")
@@ -87,11 +89,11 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     // MARK: NSToolbarDelegate
 
     func toolbarAllowedItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, navID, .flexibleSpace, modeID, fontID, searchID]
+        [.sidebarTrackingSeparator, navID, .flexibleSpace, modeID, fontID, searchID]
     }
 
     func toolbarDefaultItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, navID, .flexibleSpace, modeID, .flexibleSpace, fontID, searchID]
+        [.sidebarTrackingSeparator, navID, .flexibleSpace, modeID, .flexibleSpace, fontID, searchID]
     }
 
     func toolbar(_ t: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar: Bool) -> NSToolbarItem? {
