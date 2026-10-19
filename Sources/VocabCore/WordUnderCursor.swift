@@ -170,6 +170,23 @@ public enum WordUnderCursor {
               CFGetTypeID(rv) == AXValueGetTypeID() else { return nil }
         var hit = CFRange()
         guard AXValueGetValue(rv as! AXValue, .cfRange, &hit), hit.location >= 0 else { return nil }
+        // Chromium/Electron answer AXRangeForPosition with location 0 regardless of the point,
+        // which made every tap pick the first word of the line. Verify the index against
+        // AXBoundsForRange and, if it doesn't contain the point, locate the character by bounds.
+        let charBounds: (Int) -> CGRect? = { i in
+            var r = CFRange(location: i, length: 1)
+            guard let v = AXValueCreate(.cfRange, &r), let b = rect(param(el, kAXBoundsForRangeParameterizedAttribute, v)),
+                  b.width > 0, b.height > 0 else { return nil }
+            return b
+        }
+        if !(charBounds(hit.location)?.insetBy(dx: -1, dy: -1).contains(point) ?? false) {
+            let n = characterCount(el)
+            if n > 0, let i = indexForPoint(point, count: n, bounds: charBounds) {
+                hit.location = i
+            } else if n > 0 {
+                return nil   // index is unreliable and we can't fix it: let the next strategy try
+            }
+        }
         let start = max(0, hit.location - 200)
         var window = CFRange(location: start, length: 400)
         var text = string(el, range: &window)
@@ -186,6 +203,38 @@ public enum WordUnderCursor {
         return Result(word: w.word, context: w.context, axBounds: bounds, method: "range", app: app)
     }
 
+    static func characterCount(_ el: AXUIElement) -> Int {
+        var v: CFTypeRef?
+        if AXUIElementCopyAttributeValue(el, kAXNumberOfCharactersAttribute as CFString, &v) == .success, let n = v as? Int { return n }
+        if AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &v) == .success, let t = v as? String { return (t as NSString).length }
+        return 0
+    }
+
+    /// Find the character whose bounds contain `point`, assuming characters are laid out in
+    /// reading order (top-to-bottom lines, left-to-right). Binary search, then a short local scan.
+    public static func indexForPoint(_ point: CGPoint, count: Int, bounds: (Int) -> CGRect?) -> Int? {
+        func before(_ r: CGRect) -> Bool {   // character lies entirely before the point
+            if r.maxY <= point.y { return true }
+            if r.minY > point.y { return false }
+            return r.maxX <= point.x
+        }
+        var lo = 0, hi = count - 1, probes = 0
+        while lo < hi, probes < 64 {
+            probes += 1
+            let mid = (lo + hi) / 2
+            var m = mid
+            var b = bounds(m)
+            while b == nil, m < hi { m += 1; b = bounds(m) }   // skip invisible chars (newlines)
+            guard let r = b else { hi = mid; continue }
+            if r.contains(point) { return m }
+            if before(r) { lo = m + 1 } else { hi = mid }
+        }
+        for i in max(0, lo - 2)...min(count - 1, lo + 2) {
+            if let r = bounds(i), r.insetBy(dx: -1, dy: -1).contains(point) { return i }
+        }
+        return nil
+    }
+
     static func string(_ el: AXUIElement, range: inout CFRange) -> String? {
         guard let rv = AXValueCreate(.cfRange, &range) else { return nil }
         return param(el, kAXStringForRangeParameterizedAttribute, rv) as? String
@@ -200,16 +249,35 @@ public enum WordUnderCursor {
         let ns = text as NSString
         guard ns.length > 0 else { return nil }
         let off = min(max(0, utf16Offset), ns.length - 1)
-        var found: (String, NSRange)?
-        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { sub, r, _, stop in
-            if NSLocationInRange(off, r), let sub { found = (sub, r); stop.pointee = true }
-        }
-        guard let (w, r) = found else { return nil }
+        guard let r = tokenRange(in: text, at: off) else { return nil }
+        let w = ns.substring(with: r)
         var sentence: String?
         ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .bySentences) { sub, sr, _, stop in
             if NSLocationInRange(off, sr) { sentence = sub?.trimmingCharacters(in: .whitespacesAndNewlines); stop.pointee = true }
         }
         return (w, r, sentence)
+    }
+
+    /// Word boundaries via CFStringTokenizer with the text's own language, so Chinese is
+    /// segmented into words (还有 / 好消息) rather than whole runs or single characters.
+    public static func tokenRange(in text: String, at utf16Offset: Int) -> NSRange? {
+        let cf = text as CFString
+        let len = CFStringGetLength(cf)
+        guard len > 0 else { return nil }
+        let off = min(max(0, utf16Offset), len - 1)
+        let whole = CFRange(location: 0, length: len)
+        let lang = CFStringTokenizerCopyBestStringLanguage(cf, whole) as String?
+        let locale = CFLocaleCreate(nil, CFLocaleIdentifier((lang ?? "en") as CFString))
+        let tok = CFStringTokenizerCreate(nil, cf, whole, kCFStringTokenizerUnitWordBoundary, locale)
+        for probe in [off, off - 1] where probe >= 0 {
+            CFStringTokenizerGoToTokenAtIndex(tok, probe)
+            let r = CFStringTokenizerGetCurrentTokenRange(tok)
+            guard r.location != kCFNotFound, r.length > 0 else { continue }
+            let ns = NSRange(location: r.location, length: r.length)
+            let t = (text as NSString).substring(with: ns)
+            if t.unicodeScalars.contains(where: { CharacterSet.letters.union(.decimalDigits).contains($0) }) { return ns }
+        }
+        return nil
     }
 
     // MARK: - Helpers

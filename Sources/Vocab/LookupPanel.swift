@@ -34,18 +34,32 @@ final class LookupPanelController {
     func show(word: String, context: String?, entries: [DictionaryEntry], at point: NSPoint, anchor: NSRect? = nil) {
         closePanelOnly()
         let size = NSSize(width: 480, height: 400)
-        let p = NSPanel(contentRect: NSRect(origin: .zero, size: size),
-                        styleMask: [.nonactivatingPanel, .titled, .closable, .resizable, .fullSizeContentView, .utilityWindow],
-                        backing: .buffered, defer: false)
+        // Borderless like native Look Up: no titlebar or traffic lights, rounded corners.
+        let p = LookupNSPanel(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.borderless, .nonactivatingPanel, .resizable],
+                              backing: .buffered, defer: false)
         p.isFloatingPanel = true
         p.level = .floating
-        p.titleVisibility = .hidden
-        p.titlebarAppearsTransparent = true
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        p.isMovableByWindowBackground = true
         p.hidesOnDeactivate = false
         p.isReleasedWhenClosed = false
         p.becomesKeyOnlyIfNeeded = true
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        p.contentView = NSHostingView(rootView: PanelView(word: word, context: context, entries: entries, close: { [weak self] in self?.close() }))
+        let bg = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        bg.material = .popover
+        bg.state = .active
+        bg.blendingMode = .behindWindow
+        bg.wantsLayer = true
+        bg.layer?.cornerRadius = 12
+        bg.layer?.masksToBounds = true
+        let host = NSHostingView(rootView: PanelView(word: word, context: context, entries: entries, close: { [weak self] in self?.close() }))
+        host.frame = bg.bounds
+        host.autoresizingMask = [.width, .height]
+        bg.addSubview(host)
+        p.contentView = bg
         // Below and to the right of the pointer, kept on screen.
         let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
         // Like Look Up: below the word (or the pointer), above it if there is no room.
@@ -69,6 +83,10 @@ final class LookupPanelController {
                 if !panel.frame.contains(NSEvent.mouseLocation) { self.close() }
             }
         } as Any)
+        // Esc while another app is frontmost (the panel doesn't activate us).
+        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            if e.keyCode == 53 { Task { @MainActor in self?.close() } }
+        } as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             if e.keyCode == 53 { self?.close(); return nil }
             return e
@@ -86,6 +104,12 @@ final class LookupPanelController {
         panel?.close()
         panel = nil
     }
+}
+
+/// Borderless panels can't become key by default; allow it so Esc and the web view work.
+final class LookupNSPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override func cancelOperation(_ sender: Any?) { LookupPanelController.shared.close() }
 }
 
 struct PanelView: View {

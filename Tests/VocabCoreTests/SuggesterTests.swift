@@ -55,3 +55,35 @@ final class SuggesterTests: XCTestCase {
         XCTAssertTrue(Suggester.suggest("appalled", in: d, guesses: { _ in [] }).matches.contains("appal"))
     }
 }
+
+final class WordUnderCursorTests: XCTestCase {
+    func testChineseTokenizerPicksWordAtOffset() {
+        let t = "还有个好消息：刚才重新编译装图标"
+        let ns = t as NSString
+        XCTAssertEqual(WordUnderCursor.word(in: t, at: 0)?.word, "还有")
+        let w = WordUnderCursor.word(in: t, at: ns.range(of: "消息").location)?.word ?? ""
+        XCTAssertTrue(w.contains("消息"), w)
+        let w2 = WordUnderCursor.word(in: t, at: ns.range(of: "编译").location + 1)?.word ?? ""
+        XCTAssertTrue(w2.contains("编译"), w2)
+        XCTAssertNotEqual(w2, "还有")
+    }
+
+    func testEnglishOffsetToWord() {
+        let t = "The quick brown fox."
+        XCTAssertEqual(WordUnderCursor.word(in: t, at: 11)?.word, "brown")
+        XCTAssertEqual(WordUnderCursor.word(in: t, at: 18)?.word, "fox")
+    }
+
+    func testIndexForPointFindsCharacterByBounds() {
+        // Two lines of 10 chars, 10pt wide, 20pt tall; index 9 is a zero-size newline.
+        let rects: [CGRect?] = (0..<20).map { i in
+            if i == 9 { return nil }
+            return CGRect(x: CGFloat(i % 10) * 10, y: CGFloat(i / 10) * 20, width: 10, height: 20)
+        }
+        let b: (Int) -> CGRect? = { rects[$0] }
+        XCTAssertEqual(WordUnderCursor.indexForPoint(CGPoint(x: 35, y: 10), count: 20, bounds: b), 3)
+        XCTAssertEqual(WordUnderCursor.indexForPoint(CGPoint(x: 72, y: 30), count: 20, bounds: b), 17)
+        XCTAssertEqual(WordUnderCursor.indexForPoint(CGPoint(x: 2, y: 2), count: 20, bounds: b), 0)
+        XCTAssertNil(WordUnderCursor.indexForPoint(CGPoint(x: 500, y: 500), count: 20, bounds: b))
+    }
+}
