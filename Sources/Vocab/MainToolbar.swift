@@ -12,7 +12,6 @@ final class AppState: ObservableObject {
     @Published var wordScope: WordbookScope = .all
     /// Sidebar grouping in 生词本 (wordbook, tag or source).
     @Published var wordGroup: WordGroup = .all
-    @Published var wordFamiliarity: Familiarity? = nil
     /// Table scroll offset, kept while the user looks a word up and comes back.
     var wordTableScroll: CGFloat?
     var wordSortKey: String = UserDefaults.standard.string(forKey: "wordSortKey") ?? "added" {

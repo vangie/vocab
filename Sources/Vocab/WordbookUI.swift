@@ -13,8 +13,15 @@ enum WordGroup: Hashable {
 
 /// Which words of the group the table shows (scope bar, left).
 enum WordbookScope: String, CaseIterable, Identifiable {
-    case all = "全部", due = "待复习", recent = "最近加入"
+    case all = "全部", due = "待复习", new = "新词", learning = "学习中", familiar = "熟悉", retired = "已斩"
     var id: String { rawValue }
+    /// The familiarity level this scope shows, if it is one.
+    var familiarity: Familiarity? {
+        switch self {
+        case .new: .new; case .learning: .learning; case .familiar: .familiar; case .retired: .retired
+        case .all, .due: nil
+        }
+    }
 }
 
 extension WordItem {
@@ -255,7 +262,7 @@ struct WordbookView: View {
         switch state.wordScope {
         case .all: base = book.items
         case .due: base = book.dueItems
-        case .recent: base = book.items.filter { $0.added > Date().addingTimeInterval(-7 * 86400) }
+        default: base = book.items.filter { $0.familiarity == state.wordScope.familiarity }
         }
         switch state.wordGroup {
         case .all: break
@@ -263,7 +270,6 @@ struct WordbookView: View {
         case .tag(let t): base = base.filter { $0.tags.contains { $0.caseInsensitiveCompare(t) == .orderedSame } }
         case .source(let s): base = base.filter { $0.sourceGroup == s }
         }
-        if let f = state.wordFamiliarity { base = base.filter { $0.familiarity == f } }
         let q = state.wordFilter.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty {
             base = base.filter {
@@ -330,18 +336,10 @@ struct WordbookView: View {
     private func barContent(count: Int, rows: [WordItem], compact: Bool) -> some View {
         HStack(spacing: compact ? 6 : 10) {
             Picker("", selection: $state.wordScope) {
-                ForEach(WordbookScope.allCases) { s in Text(compact ? String(s.rawValue.prefix(s == .recent ? 2 : 3)) : s.rawValue).tag(s) }
+                ForEach(WordbookScope.allCases) { s in Text(s.rawValue).tag(s) }
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
-            Menu {
-                Picker("", selection: $state.wordFamiliarity) {
-                    Text("全部熟悉度").tag(Familiarity?.none)
-                    Divider()
-                    ForEach(Familiarity.allCases) { f in Text(f.title).tag(Familiarity?.some(f)) }
-                }
-                .pickerStyle(.inline).labelsHidden()
-            } label: { Text(state.wordFamiliarity?.title ?? (compact ? "熟悉度" : "全部熟悉度")) }
-            .fixedSize().help("按熟悉度筛选")
+            .help("待复习：现在到期的单词；其余按熟悉度筛选")
             Spacer(minLength: 4)
             if !compact { Text("\(count) 个").foregroundStyle(.secondary).lineLimit(1).fixedSize() }
             Menu {
