@@ -216,6 +216,12 @@ struct LookupDetailView: View {
                         .buttonStyle(.borderless)
                         .help(book.contains(lookup.searchedTerm) ? "已在生词本" : "加入生词本 (⌘D)")
                     }
+                    Button { AppState.shared.settingsTab = "dictionary"; AppState.shared.settingsRequest += 1 } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .buttonStyle(.borderless)
+                    .focusable(false)
+                    .help("配置词典…")
                 })
             Divider()
             ZStack(alignment: .bottom) {
@@ -275,7 +281,7 @@ struct DictionaryTabStrip<Trailing: View>: View {
     var body: some View {
         GeometryReader { geo in
             let items: [(id: String?, name: String)] = [(nil, "全部")] + dictionaries.map { ($0.id, $0.displayName) }
-            let avail = geo.size.width - 24 - 60   // margins, » and the trailing button
+            let avail = geo.size.width - 24 - 84   // margins, », star and gear
             let (shown, hidden) = split(items, avail)
             HStack(spacing: 2) {
                 ForEach(shown, id: \.name) { it in pill(it.name, selected == it.id) { selected = it.id } }
