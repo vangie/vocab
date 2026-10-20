@@ -154,14 +154,14 @@ final class ReviewSession: ObservableObject {
         let p = plan()
         items = Dictionary(uniqueKeysWithValues: p.map { ($0.id, $0) })
         queue = ReviewQueue(ids: p.map(\.id))
-        stats = Stats(); answeredOnce = []; previousType = nil
+        stats = Stats(); answeredOnce = []; previousType = nil; lastActivity = Date()
         let dicts = DictionarySelection.enabled()
         let thesaurus = DictionaryService.shared.availableDictionaries().first { $0.id == "com.apple.dictionary.OTE" }
         factory = QuestionFactory(dicts: dicts, thesaurus: thesaurus, book: book.items.map(\.word))
         loadCurrent()
     }
 
-    func end() { cancelAutoAdvance(); phase = .summary; question = nil; book.reload() }
+    func end() { activity(); lastActivity = nil; cancelAutoAdvance(); phase = .summary; question = nil; book.reload() }
     func reset() { phase = .idle; question = nil; refreshPreview() }
 
     private func loadCurrent() {
@@ -201,6 +201,20 @@ final class ReviewSession: ObservableObject {
 
     private var loadToken = 0
 
+    // MARK: 今日学习时长
+    static let studyGoalKey = "dailyStudyGoalMinutes"
+    static var studyGoalMinutes: Int { max(1, UserDefaults.standard.object(forKey: studyGoalKey) as? Int ?? 15) }
+    private var lastActivity: Date?
+    /// Called on every interaction in a session; time since the previous one counts unless idle (> 60 s).
+    private func activity() {
+        let now = Date()
+        if let l = lastActivity {
+            var log = DailyLog.load(); log.addStudy(now.timeIntervalSince(l), at: now); log.save()
+            today = log.today(now)
+        }
+        lastActivity = now
+    }
+
     private func present(_ q: ReviewQuestion, token: Int) {
         guard token == loadToken, phase == .loading else { return }   // a newer load superseded this one
         guard queue.current == q.itemID else {
@@ -224,6 +238,7 @@ final class ReviewSession: ObservableObject {
     /// 认识吗: 认识 → 斩 (written to the wordbook as retired), 不认识 → learn it now.
     func answerCheck(known: Bool) {
         guard phase == .check, let id = queue.current else { return }
+        activity()
         checkWord = nil
         if known {
             if let rid = materialize(id) { _ = try? book.store?.retire(id: rid) }
@@ -256,12 +271,14 @@ final class ReviewSession: ObservableObject {
     /// Recall (mature cards only): the user must rate 1 忘了 · 2 模糊 · 3 记得.
     func selfRate(_ r: ReviewRating) {
         guard phase == .asking, question?.type == .recall, revealed else { return }
+        activity()
         apply(r, correct: r != .forgot)
         next()
     }
 
     private func finish(correct: Bool) {
         guard let q = question else { return }
+        activity()
         let secs = Date().timeIntervalSince(askedAt)
         let r = RatingMap.rating(correct: correct, seconds: secs, type: q.type, length: q.word.count)
         apply(r, correct: correct)
@@ -338,6 +355,7 @@ final class ReviewSession: ObservableObject {
 
     func next() {
         cancelAutoAdvance()
+        activity()
         guard phase == .answered || phase == .asking else { return }
         if queue.finished { end() } else { loadCurrent() }
     }
@@ -346,6 +364,7 @@ final class ReviewSession: ObservableObject {
     func retire() {
         guard let q = question, phase == .asking || phase == .answered else { return }
         cancelAutoAdvance()   // else the countdown would skip the next card
+        activity()
         // Retiring overwrites the review state just written by the answer (Scheduler.retire).
         if let rid = materialize(q.itemID) { _ = try? book.store?.retire(id: rid) }
         if phase == .asking { queue.retire() }

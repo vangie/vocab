@@ -463,20 +463,23 @@ private struct PlanDashboard: View {
     static let newColor = Color(red: 0.98, green: 0.07, blue: 0.31)      // Activity "move" pink-red
     static let reviewColor = Color(red: 0.25, green: 0.82, blue: 0.30)   // calmer system-like green
     static let totalColor = Color(red: 0.0, green: 0.74, blue: 0.90)     // slightly deeper cyan
+    static let timeColor = Color(red: 0.0, green: 0.78, blue: 0.98)      // Activity "stand"-style blue
 
     private func frac(_ a: Int, _ b: Int) -> Double { b > 0 ? Double(a) / Double(b) : (a > 0 ? 1 : 0) }
 
     var body: some View {
         let o = session.overall, t = session.today
-        let rings = ActivityRings(values: [frac(t.newDone, t.newQuota), frac(t.reviewsDone, t.reviewTarget), o.fraction],
-                                  colors: [Self.newColor, Self.reviewColor, Self.totalColor])
+        let goal = ReviewSession.studyGoalMinutes
+        let minutes = Int(t.studySeconds / 60)
+        let rings = ActivityRings(values: [frac(t.newDone, t.newQuota), frac(t.reviewsDone, t.reviewTarget),
+                                           t.studySeconds / Double(goal * 60)],
+                                  colors: [Self.newColor, Self.reviewColor, Self.timeColor])
             .frame(width: 210, height: 210)
             .accessibilityHidden(true)
         let stats = VStack(alignment: .leading, spacing: 20) {
             StatRow(label: "今日新词", value: t.newDone, total: t.newQuota, color: Self.newColor)
             StatRow(label: "今日复习", value: t.reviewsDone, total: t.reviewTarget, color: Self.reviewColor)
-            StatRow(label: "总进度", value: o.learned, total: o.total, color: Self.totalColor,
-                    detail: "已掌握 \(o.mastered.formatted())")
+            StatRow(label: "今日学习", value: minutes, total: goal, color: Self.timeColor, unit: "分钟")
         }
         .fixedSize()
         VStack(spacing: 32) {
@@ -489,6 +492,8 @@ private struct PlanDashboard: View {
                 HStack(spacing: 12) { targetPill; streakPill }
                 VStack(spacing: 8) { targetPill; streakPill }
             }
+            Text("总进度 \(o.learned.formatted())/\(o.total.formatted()) · 已掌握 \(o.mastered.formatted())")
+                .font(.callout).foregroundStyle(.secondary).monospacedDigit()
         }
     }
 
@@ -532,6 +537,7 @@ private struct PlanDashboard: View {
 private struct StatRow: View {
     let label: String, value: Int, total: Int, color: Color
     var detail: String? = nil
+    var unit: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
@@ -541,7 +547,7 @@ private struct StatRow: View {
             }
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value.formatted()).font(.system(size: 34, weight: .semibold, design: .rounded)).foregroundStyle(color)
-                Text("/\(total.formatted())").font(.system(size: 20, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+                Text("/\(total.formatted())\(unit.map { " " + $0 } ?? "")").font(.system(size: 20, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
             }
             .monospacedDigit()
         }
