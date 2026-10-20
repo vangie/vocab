@@ -55,7 +55,7 @@ private struct StartScreen: View {
                 if p.reviews + p.new == 0 {
                     Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
                 } else {
-                    Button("开始（还剩 \(max(0, session.today.newQuota - session.today.newDone)) 新词 · \(max(0, session.today.reviewTarget - session.today.reviewsDone)) 复习）") { session.start() }
+                    Button("开始") { session.start() }
                         .keyboardShortcut(.defaultAction).controlSize(.large).padding(.top, 4)
                     Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.tertiary)
                 }
