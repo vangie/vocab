@@ -269,9 +269,18 @@ struct PanelView: View {
     }
 
     private func openInMain() {
+        // Switch to 词典 (ReviewSession.shared keeps any 记词 session, so returning resumes it).
+        AppState.shared.mode = .lookup
         LookupModel.shared.search(word)
-        NSApp.activate(ignoringOtherApps: true)
         close()
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
+            if w.isMiniaturized { w.deminiaturize(nil) }
+            w.makeKeyAndOrderFront(nil)
+        } else {
+            // Main window was closed: a reopen event makes SwiftUI recreate it.
+            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: .init())
+        }
     }
 }
 
