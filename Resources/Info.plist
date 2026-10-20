@@ -32,6 +32,8 @@
 	<true/>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>「生词」读取浏览器当前网页的地址，记录生词的出处。</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

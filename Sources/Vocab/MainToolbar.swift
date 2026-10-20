@@ -3,12 +3,6 @@ import Combine
 import SwiftUI
 import VocabCore
 
-/// Which of the three peer functions the main window shows.
-enum WordbookScope: String, CaseIterable, Identifiable {
-    case all = "全部", due = "待复习", recent = "最近加入"
-    var id: String { rawValue }
-}
-
 @MainActor
 final class AppState: ObservableObject {
     static let shared = AppState()
@@ -16,6 +10,17 @@ final class AppState: ObservableObject {
     /// Search text used to filter the wordbook in 生词本 mode.
     @Published var wordFilter = ""
     @Published var wordScope: WordbookScope = .all
+    /// Sidebar grouping in 生词本 (wordbook, tag or source).
+    @Published var wordGroup: WordGroup = .all
+    @Published var wordFamiliarity: Familiarity? = nil
+    /// Table scroll offset, kept while the user looks a word up and comes back.
+    var wordTableScroll: CGFloat?
+    var wordSortKey: String = UserDefaults.standard.string(forKey: "wordSortKey") ?? "added" {
+        didSet { UserDefaults.standard.set(wordSortKey, forKey: "wordSortKey") }
+    }
+    var wordSortAscending: Bool = UserDefaults.standard.object(forKey: "wordSortAscending") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(wordSortAscending, forKey: "wordSortAscending") }
+    }
 }
 
 /// Real NSToolbar on the main window so AppKit handles layout and the » overflow:

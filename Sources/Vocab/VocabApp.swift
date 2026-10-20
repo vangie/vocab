@@ -23,7 +23,14 @@ struct VocabApp: App {
             CommandMenu("单词") {
                 Button("加入生词本") { lookup.addCurrentToWordbook() }
                     .keyboardShortcut("d", modifiers: [.command])
-                Button("导出生词本为 CSV…") { book.exportCSV() }
+                Menu("导入到生词本") {
+                    Button("CSV…") { book.importCSV() }
+                    Button("Kindle 生词本（vocab.db）…") { book.importKindle() }
+                }
+                Menu("导出生词本") {
+                    Button("CSV…") { book.exportCSV() }
+                    Button("Anki 卡片包（.apkg）…") { book.exportAnki() }
+                }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             CommandGroup(after: .textEditing) {
@@ -63,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defer { MainToolbarController.launchFinished = true }
         SettingsModel.shared.applyOnLaunch()
         ReviewSession.applySchedulerSettings()
+        if let m = WordbookModel.shared.store?.migrationV2 {
+            VocabLog.log("wordbook upgraded to schema 2: \(m.words) words, backup \(m.backup?.lastPathComponent ?? "-")")
+        }
         if let m = WordbookModel.shared.store?.migration {
             VocabLog.log("wordbook migrated to FSRS: \(m.cards) cards, backup \(m.backup?.lastPathComponent ?? "-")")
         }

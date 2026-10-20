@@ -28,10 +28,14 @@ final class LookupPanelController {
         let r = Suggester.lookupWithFallback(hit.word, in: dicts)
         VocabLog.log("lookup \(hit.word) → \(r.word): \(r.entries.count) entries")
         if let b = hit.screenBounds { HighlightOverlay.shared.show(b, word: hit.word, fontName: hit.fontName, fontSize: hit.fontSize) }
-        show(word: r.word, context: hit.context, entries: r.entries, at: NSEvent.mouseLocation, anchor: hit.screenBounds)
+        // Where the word was met (app, and page URL/title in browsers), probed before our panel covers it.
+        let source = SourceProbe.source(atAXPoint: WordUnderCursor.axPoint(NSEvent.mouseLocation))
+        VocabLog.log("source: app=\(source.app ?? "-") url=\(source.url == nil ? "-" : "yes")")
+        WordbookModel.shared.recordLookup(word: r.word, context: hit.context, surface: hit.word, source: source)
+        show(word: r.word, context: hit.context, surface: hit.word, source: source, entries: r.entries, at: NSEvent.mouseLocation, anchor: hit.screenBounds)
     }
 
-    func show(word: String, context: String?, entries: [DictionaryEntry], at point: NSPoint, anchor: NSRect? = nil) {
+    func show(word: String, context: String?, surface: String? = nil, source: WordSource? = nil, entries: [DictionaryEntry], at point: NSPoint, anchor: NSRect? = nil) {
         closePanelOnly()
         let body = NSSize(width: 440, height: 440)
         let arrowH: CGFloat = 10
@@ -77,7 +81,7 @@ final class LookupPanelController {
         border.fillColor = nil
         border.strokeColor = NSColor.white.withAlphaComponent(0.22).cgColor
         border.lineWidth = 1
-        let host = NSHostingView(rootView: PanelView(word: word, context: context, entries: entries, close: { [weak self] in self?.close() }))
+        let host = NSHostingView(rootView: PanelView(word: word, context: context, surface: surface, source: source, entries: entries, close: { [weak self] in self?.close() }))
         host.frame = NSRect(x: 0, y: arrowUp ? 0 : arrowH, width: body.width, height: body.height)
         bg.addSubview(host)
         bg.layer?.addSublayer(border)
@@ -177,6 +181,8 @@ enum Excerpt {
 struct PanelView: View {
     let word: String
     let context: String?
+    var surface: String? = nil
+    var source: WordSource? = nil
     let entries: [DictionaryEntry]
     let close: () -> Void
     @State private var added = false
@@ -228,7 +234,7 @@ struct PanelView: View {
             Button {
                 let pool = expanded.map { s in entries.filter { $0.dictionary.id == s } } ?? entries
                 if let e = pool.first {
-                    WordbookModel.shared.add(entry: e, word: word, context: context)
+                    WordbookModel.shared.add(entry: e, word: word, context: context, surface: surface, source: source)
                     added = true
                 }
             } label: {

@@ -15,7 +15,6 @@ extension Notification.Name {
 enum SidebarItem: Hashable {
     case suggestion(String)   // Suggestion.ID
     case recent(String)
-    case scope(WordbookScope)
 }
 
 /// Main window laid out like Dictionary.app. The AppKit toolbar (MainToolbar.swift) switches
@@ -61,7 +60,7 @@ struct MainView: View {
             // 背单词 needs no list: hide the sidebar there, like a focused mode.
             columns = m == .review ? .detailOnly
                 : m == .lookup && lookup.query.trimmingCharacters(in: .whitespaces).isEmpty ? .detailOnly : .all
-            sidebarSelection = m == .wordbook ? .scope(state.wordScope) : nil
+            sidebarSelection = nil
         }
         .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NotificationCenter.default.post(name: .vocabFocusSearch, object: nil) } }
     }
@@ -72,15 +71,7 @@ struct MainView: View {
 
     @ViewBuilder private var sidebar: some View {
         if state.mode == .wordbook {
-            List(selection: Binding(get: { sidebarSelection }, set: { pick($0) })) {
-                Section("生词本") {
-                    ForEach(WordbookScope.allCases) { sc in
-                        Label(sc.rawValue, systemImage: sc == .all ? "star" : sc == .due ? "clock" : "calendar")
-                            .badge(count(sc)).tag(SidebarItem.scope(sc))
-                    }
-                }
-            }
-            .listStyle(.sidebar)
+            WordbookSidebar()
         } else {
             let content = SidebarContent.make(query: lookup.query, suggestionsFor: lookup.suggestionsQuery,
                                               words: lookup.suggestions.map(\.word), recents: lookup.recents)
@@ -115,20 +106,11 @@ struct MainView: View {
         }
     }
 
-    private func count(_ sc: WordbookScope) -> Int {
-        switch sc {
-        case .all: return book.items.count
-        case .due: return book.dueItems.count
-        case .recent: return book.items.filter { $0.added > Date().addingTimeInterval(-7 * 86400) }.count
-        }
-    }
-
     private func pick(_ item: SidebarItem?) {
         sidebarSelection = item
         switch item {
         case .suggestion(let id)?: lookup.select(id)
         case .recent(let w)?: lookup.open(w)
-        case .scope(let sc)?: state.wordScope = sc
         case nil: break
         }
     }
@@ -352,55 +334,6 @@ struct EntryWebView: NSViewRepresentable {
         context.coordinator.token = token
         let url = EntryWebViewFactory.pageURL(for: entries, showTitles: showTitles, panel: panel, emptyMessage: emptyMessage)
         wv.load(URLRequest(url: url))
-    }
-}
-
-struct WordbookView: View {
-    @EnvironmentObject var book: WordbookModel
-    var onOpen: (String) -> Void
-    @ObservedObject var state = AppState.shared
-    @State private var selection = Set<Int64>()
-
-    private var rows: [WordItem] {
-        let base: [WordItem]
-        switch state.wordScope {
-        case .all: base = book.items
-        case .due: base = book.dueItems
-        case .recent: base = book.items.filter { $0.added > Date().addingTimeInterval(-7 * 86400) }
-        }
-        let f = state.wordFilter.trimmingCharacters(in: .whitespaces)
-        return f.isEmpty ? base : base.filter { $0.word.localizedCaseInsensitiveContains(f) || $0.definition.localizedCaseInsensitiveContains(f) }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(state.wordScope.rawValue).font(.headline)
-                Spacer()
-                Text("共 \(book.items.count) 个，待复习 \(book.dueItems.count) 个").foregroundStyle(.secondary)
-                Button("删除") { book.delete(selection); selection = [] }.disabled(selection.isEmpty)
-                Button("导出 CSV…") { book.exportCSV() }.disabled(book.items.isEmpty)
-            }
-            .padding(10)
-            Table(rows, selection: $selection) {
-                TableColumn("单词") { Text($0.word).fontWeight(.semibold) }.width(min: 80, ideal: 120)
-                TableColumn("释义") { Text($0.definition).lineLimit(2).help($0.definition) }
-                TableColumn("来源") { Text($0.dictionary).foregroundStyle(.secondary) }.width(min: 60, ideal: 120)
-                TableColumn("加入时间") { Text($0.added, format: .dateTime.year().month().day()) }.width(90)
-                TableColumn("下次复习") { w in
-                    if Scheduler.isMastered(w.review) { Text("已掌握").foregroundStyle(.secondary) }
-                    else { Text(w.review.due, format: .relative(presentation: .named)) }
-                }.width(100)
-            }
-            .contextMenu(forSelectionType: Int64.self) { ids in
-                Button("查词") { if let id = ids.first, let w = book.items.first(where: { $0.id == id }) { onOpen(w.word) } }
-                Button("删除") { book.delete(ids) }
-            } primaryAction: { ids in
-                if let id = ids.first, let w = book.items.first(where: { $0.id == id }) { onOpen(w.word) }
-            }
-            .overlay { if book.items.isEmpty { Text("生词本还是空的。查词时点「加入生词本」或按 ⌘D。").foregroundStyle(.secondary) } }
-        }
-        .onAppear { book.reload() }
     }
 }
 

@@ -186,51 +186,6 @@ final class LookupModel: ObservableObject {
 }
 
 @MainActor
-final class WordbookModel: ObservableObject {
-    static let shared = WordbookModel()
-    @Published private(set) var items: [WordItem] = []
-    @Published private(set) var dueItems: [WordItem] = []
-    let store: WordStore?
-
-    init() {
-        store = try? WordStore(url: WordStore.defaultURL())
-        reload()
-    }
-
-    func reload() {
-        items = (try? store?.all()) ?? []
-        dueItems = (try? store?.due()) ?? []
-    }
-
-    func add(entry: DictionaryEntry, word: String, context: String?) {
-        _ = try? store?.add(word: word, definition: entry.snippet, dictionary: entry.dictionary.name, context: context)
-        reload()
-    }
-
-    func contains(_ word: String) -> Bool { (try? store?.find(word: word)) != nil }
-
-    func delete(_ ids: Set<Int64>) {
-        for id in ids { try? store?.delete(id: id) }
-        reload()
-    }
-
-    func rate(_ item: WordItem, _ r: ReviewRating) {
-        _ = try? store?.review(id: item.id, rating: r)
-        reload()
-    }
-
-    func exportCSV() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.commaSeparatedText]
-        panel.nameFieldStringValue = "生词本.csv"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        // UTF-8 BOM so Excel/Numbers detect Chinese correctly.
-        let data = Data([0xEF, 0xBB, 0xBF]) + Data(CSVExporter.csv(items).utf8)
-        try? data.write(to: url)
-    }
-}
-
-@MainActor
 final class SettingsModel: ObservableObject {
     static let shared = SettingsModel()
     private let takeover = TrackpadTakeover()

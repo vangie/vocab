@@ -43,7 +43,7 @@ public enum WordUnderCursor {
 
     static var primaryHeight: CGFloat { NSScreen.screens.first?.frame.maxY ?? 0 }
 
-    static func axPoint(_ p: NSPoint) -> CGPoint { CGPoint(x: p.x, y: primaryHeight - p.y) }
+    public static func axPoint(_ p: NSPoint) -> CGPoint { CGPoint(x: p.x, y: primaryHeight - p.y) }
 
     public static func cocoaRect(fromAX r: CGRect) -> NSRect {
         NSRect(x: r.minX, y: primaryHeight - r.maxY, width: r.width, height: r.height)
