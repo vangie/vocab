@@ -3,7 +3,7 @@ import VocabCore
 import WebKit
 
 enum Mode: String, CaseIterable, Identifiable {
-    case lookup = "查词", wordbook = "生词本", review = "背单词"
+    case lookup = "词典", words = "记词"
     var id: String { rawValue }
 }
 
@@ -35,8 +35,8 @@ struct MainView: View {
             Group {
                 switch state.mode {
                 case .lookup: LookupDetailView()
-                case .wordbook: WordbookView(onOpen: { w in openWord(w) })
-                case .review: ReviewView()
+                case .words:
+                    if state.wordGroup == .today { ReviewView() } else { WordbookView(onOpen: { w in openWord(w) }) }
                 }
             }
             .frame(minWidth: 420)
@@ -57,8 +57,9 @@ struct MainView: View {
             if let id, state.mode == .lookup { sidebarSelection = .suggestion(id) }
         }
         .onChange(of: state.mode) { _, m in
-            // 背单词 needs no list: hide the sidebar there, like a focused mode.
-            columns = m == .review ? .detailOnly
+            // 记词 opens on 今日 (rings + 开始), with the wordbook sidebar.
+            if m == .words { state.wordGroup = .today }
+            columns = m == .words ? .all
                 : m == .lookup && lookup.query.trimmingCharacters(in: .whitespaces).isEmpty ? .detailOnly : .all
             sidebarSelection = nil
         }
@@ -70,7 +71,7 @@ struct MainView: View {
     }
 
     @ViewBuilder private var sidebar: some View {
-        if state.mode == .wordbook {
+        if state.mode == .words {
             WordbookSidebar()
         } else {
             let content = SidebarContent.make(query: lookup.query, suggestionsFor: lookup.suggestionsQuery,
@@ -390,7 +391,7 @@ struct SettingsView: View {
             .tag("dictionary")
 
             PlanSettingsView()
-            .tabItem { Label("背单词", systemImage: "rectangle.stack") }
+            .tabItem { Label("记词", systemImage: "rectangle.stack") }
             .tag("review")
         }
     }

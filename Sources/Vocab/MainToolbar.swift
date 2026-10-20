@@ -11,7 +11,7 @@ final class AppState: ObservableObject {
     @Published var wordFilter = ""
     @Published var wordScope: WordbookScope = .all
     /// Sidebar grouping in 生词本 (wordbook, tag or source).
-    @Published var wordGroup: WordGroup = .all
+    @Published var wordGroup: WordGroup = .today
     /// Selected Settings tab ("general" / "dictionary" / "review").
     @Published var settingsTab = "general"
     /// Bumped to ask the main window to open Settings (SwiftUI's openSettings).
@@ -102,13 +102,13 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         let lookupMode = state.mode == .lookup
         // ‹ › and 小|大 only do something in 词典: take them out of the toolbar elsewhere
         // (removing items keeps AppKit's layout and » overflow exact, and the AX tree honest).
-        setPresentAtStart(newBookID, state.mode == .wordbook)
+        setPresentAtStart(newBookID, state.mode == .words)
         setPresent(fontID, lookupMode, before: searchID)
-        setPresent(studyID, state.mode == .review, before: searchID)
+        setPresent(studyID, state.mode == .words, before: searchID)
         setPresent(navID, lookupMode, before: lookupMode ? fontID : searchID)
         if let f = searchItem?.searchField {
-            f.placeholderString = state.mode == .wordbook ? "搜索生词本" : "搜索"
-            let want = state.mode == .wordbook ? state.wordFilter : lookup.query
+            f.placeholderString = state.mode == .words ? "搜索单词" : "搜索"
+            let want = state.mode == .words ? state.wordFilter : lookup.query
             // Typing writes the model immediately, so a mismatch means a programmatic change
             // (history, recents, links, test hook): mirror it — unless an IME is composing.
             let composing = (f.currentEditor() as? NSTextView)?.hasMarkedText() ?? false
@@ -190,8 +190,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             navGroup = g
             return g
         case modeID:
-            let g = NSToolbarItemGroup(itemIdentifier: id, titles: Mode.allCases.map { $0 == .lookup ? "词典" : $0.rawValue },
-                                       selectionMode: .selectOne, labels: ["词典", "生词本", "背单词"],
+            let g = NSToolbarItemGroup(itemIdentifier: id, titles: Mode.allCases.map(\.rawValue),
+                                       selectionMode: .selectOne, labels: Mode.allCases.map(\.rawValue),
                                        target: self, action: #selector(mode(_:)))
             g.label = "模式"
             g.controlRepresentation = .expanded
@@ -283,8 +283,10 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         // IME composition (pinyin marked text): wait for the committed text.
         if let tv = f.currentEditor() as? NSTextView, tv.hasMarkedText() { return }
         switch state.mode {
-        case .wordbook: state.wordFilter = f.stringValue
-        case .review: state.mode = .lookup; lookup.query = f.stringValue
+        case .words:
+            state.wordFilter = f.stringValue
+            // Searching from 今日 shows matches across all words.
+            if state.wordGroup == .today && !f.stringValue.isEmpty { state.wordGroup = .all }
         case .lookup: lookup.query = f.stringValue
         }
     }

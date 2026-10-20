@@ -5,6 +5,8 @@ import VocabCore
 
 /// Sidebar grouping in 生词本 mode: a wordbook, a tag or a source. Filters live in the bar above the table.
 enum WordGroup: Hashable {
+    /// 今日: the ring start page and the quiz.
+    case today
     case all
     case book(Int64)
     case tag(String)
@@ -125,7 +127,7 @@ final class WordbookModel: ObservableObject {
 
     /// 新建生词本 (toolbar, ⇧⌘N, File menu): ask for a name, then show the new book.
     func promptNewBook() {
-        AppState.shared.mode = .wordbook
+        AppState.shared.mode = .words
         guard let n = WordTable.Coordinator.ask("新建生词本", "名称", ""), let b = createBook(n) else { return }
         AppState.shared.wordGroup = .book(b.id)
     }
@@ -197,12 +199,18 @@ final class WordbookModel: ObservableObject {
 
 struct WordbookSidebar: View {
     @EnvironmentObject var book: WordbookModel
+    @ObservedObject private var session = ReviewSession.shared
     @ObservedObject var state = AppState.shared
     @State private var renaming: Wordbook?
     @State private var newName = ""
 
     var body: some View {
         List(selection: Binding(get: { state.wordGroup }, set: { if let g = $0 { state.wordGroup = g } })) {
+            Section {
+                Label("今日", systemImage: "flame")
+                    .badge(session.preview.reviews + session.preview.new)
+                    .tag(WordGroup.today)
+            }
             Section("生词本") {
                 Label("所有单词", systemImage: "tray.full").badge(book.items.count).tag(WordGroup.all)
                 ForEach(book.books) { b in
@@ -296,7 +304,7 @@ struct WordbookView: View {
         default: base = book.items.filter { $0.familiarity == state.wordScope.familiarity }
         }
         switch state.wordGroup {
-        case .all: break
+        case .all, .today: break
         case .book(let id): base = base.filter { $0.bookID == id }
         case .tag(let t): base = base.filter { $0.tags.contains { $0.caseInsensitiveCompare(t) == .orderedSame } }
         case .source(let s): base = base.filter { $0.bookID != nil && $0.sourceGroup == s }
@@ -316,7 +324,7 @@ struct WordbookView: View {
 
     private var groupTitle: String {
         switch state.wordGroup {
-        case .all: return "所有单词"
+        case .all, .today: return "所有单词"
         case .book(let id): return book.books.first { $0.id == id }?.name ?? "生词本"
         case .tag(let t): return t
         case .source(let s): return s

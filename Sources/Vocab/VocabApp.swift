@@ -53,8 +53,7 @@ struct VocabApp: App {
             }
             CommandGroup(before: .sidebar) {
                 Button("词典") { AppState.shared.mode = .lookup }.keyboardShortcut("1", modifiers: [.command])
-                Button("生词本") { AppState.shared.mode = .wordbook }.keyboardShortcut("2", modifiers: [.command])
-                Button("背单词") { AppState.shared.mode = .review }.keyboardShortcut("3", modifiers: [.command])
+                Button("记词") { AppState.shared.mode = .words }.keyboardShortcut("2", modifiers: [.command])
                 Divider()
             }
             CommandMenu("前往") {
