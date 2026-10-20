@@ -153,6 +153,16 @@ final class RatingAndSessionTests: XCTestCase {
         XCTAssertEqual(QuestionPicker.pick(stage: .new, available: [.recall], previous: .recall, using: &rng), .recall)
     }
 
+    func testSyllablesNeverAsked() {
+        var rng = SystemRandomNumberGenerator()
+        let all = Set(QuestionType.allCases)
+        for stage in [CardStage.new, .learning, .mature] {
+            XCTAssertNil(QuestionPicker.weights(stage)[.syllables])
+            for _ in 0..<300 { XCTAssertNotEqual(QuestionPicker.pick(stage: stage, available: all, previous: nil, using: &rng), .syllables) }
+            XCTAssertNotEqual(QuestionPicker.pick(stage: stage, available: [.syllables, .spelling], previous: nil, using: &rng), .syllables)
+        }
+    }
+
     func testRecallOnlyForMatureAndRare() {
         var rng = SystemRandomNumberGenerator()
         let all = Set(QuestionType.allCases)
@@ -163,7 +173,7 @@ final class RatingAndSessionTests: XCTestCase {
         // A new card with recall + spelling only falls back to an objective type.
         XCTAssertEqual(QuestionPicker.pick(stage: .new, available: [.recall, .spelling], previous: nil, using: &rng), .spelling)
         // Mature: recall share stays ≤ 15%, also when few types are available.
-        for avail: Set<QuestionType> in [all, [.recall, .spelling], [.recall, .syllables]] {
+        for avail: Set<QuestionType> in [all, [.recall, .spelling], [.recall, .roots]] {
             var n = 0
             for _ in 0..<4000 where QuestionPicker.pick(stage: .mature, available: avail, previous: nil, using: &rng) == .recall { n += 1 }
             XCTAssertLessThan(Double(n) / 4000, 0.18, "\(avail)")

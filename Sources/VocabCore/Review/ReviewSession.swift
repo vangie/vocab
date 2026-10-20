@@ -5,7 +5,7 @@ public enum QuestionType: String, CaseIterable, Sendable, Codable {
     case meaningToWord   // 看意思选词
     case wordToMeaning   // 看词选意思
     case spelling        // 拼写
-    case syllables       // 音节拆分
+    case syllables       // 音节拆分 — retired: never generated (kept so old stats still decode)
     case roots           // 词根
 
     public var label: String {
@@ -55,19 +55,19 @@ public enum QuestionPicker {
     public static let maxRecallShare = 0.15
     public static func weights(_ stage: CardStage) -> [QuestionType: Double] {
         switch stage {
-        case .new: [.wordToMeaning: 3, .meaningToWord: 2, .syllables: 1]
-        case .learning: [.meaningToWord: 2, .wordToMeaning: 1.5, .syllables: 1, .roots: 1.5, .spelling: 1.5]
-        case .mature: [.spelling: 3, .meaningToWord: 1.5, .roots: 1, .syllables: 0.5, .recall: 1]
+        case .new: [.wordToMeaning: 3, .meaningToWord: 2]
+        case .learning: [.meaningToWord: 2, .wordToMeaning: 1.5, .roots: 1.5, .spelling: 1.5]
+        case .mature: [.spelling: 3, .meaningToWord: 1.5, .roots: 1, .recall: 0.9]
         }
     }
     /// Objective fallbacks when a card's stage weights have nothing available.
-    static let fallback: [QuestionType] = [.wordToMeaning, .meaningToWord, .spelling, .syllables, .roots]
+    static let fallback: [QuestionType] = [.wordToMeaning, .meaningToWord, .spelling, .roots]
 
     /// `available` lists the types this card can support (roots need a match, choices need distractors…).
     /// Avoids repeating the previous type so the session interleaves.
     public static func pick<R: RandomNumberGenerator>(stage: CardStage, available: Set<QuestionType>,
                                                        previous: QuestionType?, using rng: inout R) -> QuestionType {
-        var w = weights(stage).filter { available.contains($0.key) }
+        var w = weights(stage).filter { available.contains($0.key) && $0.key != .syllables }
         if w.count > 1, let p = previous { w[p] = nil }
         // Keep recall rare relative to what this card can actually be asked.
         if let r = w[.recall] {

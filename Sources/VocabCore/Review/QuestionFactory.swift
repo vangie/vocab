@@ -31,7 +31,7 @@ public struct WordMaterials: Sendable {
         let haveMeaning = !gloss.isEmpty
         if haveMeaning { s.insert(.spelling) }
         if haveMeaning && distractors.count >= 3 { s.formUnion([.meaningToWord, .wordToMeaning]) }
-        if Hyphenation.options(correct: syllables) != nil { s.insert(.syllables) }
+        // 音节拆分 is no longer asked.
         if !morphemes.isEmpty { s.insert(.roots) }
         return s
     }
