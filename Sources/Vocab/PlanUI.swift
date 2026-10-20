@@ -212,7 +212,7 @@ struct PlanSheet: View {
                     }
                     projection
                 }
-                Section("词汇量测试") {
+                Section("词汇量") {
                     if let r = model.results.first {
                         LabeledContent("上次结果", value: "约 \(r.estimate) 词（\(r.low)–\(r.high)）")
                         LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
@@ -227,7 +227,7 @@ struct PlanSheet: View {
                         Text("先测一下词汇量：认识的常用词会被斩掉，不用再背。").foregroundStyle(.secondary)
                     }
                     HStack {
-                        Button(model.results.isEmpty ? "开始测试…" : "重新测试…") { testing = true }
+                        Button(model.results.isEmpty ? "开始测试" : "重新测试") { testing = true }
                         Spacer()
                         if let b = model.lastBatch {
                             Button("撤销「\(b.label)」") { model.undoLastBatch(); refresh() }

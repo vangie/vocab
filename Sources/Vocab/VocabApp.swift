@@ -37,7 +37,6 @@ struct VocabApp: App {
             }
             CommandMenu("学习") {
                 Button("背诵计划…") { AppState.shared.openPlan() }.keyboardShortcut("p", modifiers: [.command, .option])
-                Button("词汇量测试…") { AppState.shared.openTest() }.keyboardShortcut("y", modifiers: [.command, .option])
             }
             CommandGroup(after: .textEditing) {
                 Button("查找") { NotificationCenter.default.post(name: .vocabFocusSearch, object: nil) }

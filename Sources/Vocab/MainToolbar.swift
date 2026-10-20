@@ -12,11 +12,9 @@ final class AppState: ObservableObject {
     @Published var wordScope: WordbookScope = .all
     /// Sidebar grouping in 生词本 (wordbook, tag or source).
     @Published var wordGroup: WordGroup = .all
-    /// 背诵计划 / 词汇量测试 sheets (menu bar, toolbar pull-down, first visit).
+    /// 背诵计划 sheet (menu bar, toolbar pull-down, first visit).
     @Published var showPlan = false
-    @Published var showTest = false
-    func openPlan() { mode = .review; showTest = false; showPlan = true }
-    func openTest() { mode = .review; showPlan = false; showTest = true }
+    func openPlan() { mode = .review; showPlan = true }
     /// Table scroll offset, kept while the user looks a word up and comes back.
     var wordTableScroll: CGFloat?
     var wordSortKey: String = UserDefaults.standard.string(forKey: "wordSortKey") ?? "added" {
@@ -225,16 +223,19 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             it.visibilityPriority = .high
             return it
         case studyID:
-            let it = NSMenuToolbarItem(itemIdentifier: id)
-            it.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "学习选项")
-            it.label = "学习"
-            it.toolTip = "背诵计划、词汇量测试"
-            it.showsIndicator = false
-            let m = NSMenu()
-            let a = NSMenuItem(title: "背诵计划…", action: #selector(openPlan), keyEquivalent: ""); a.target = self
-            let b = NSMenuItem(title: "词汇量测试…", action: #selector(openTest), keyEquivalent: ""); b.target = self
-            m.addItem(a); m.addItem(b)
-            it.menu = m
+            let it = NSToolbarItem(itemIdentifier: id)
+            let b = NSButton(title: "计划", image: NSImage(systemSymbolName: "calendar", accessibilityDescription: nil)!,
+                             target: self, action: #selector(openPlan))
+            b.bezelStyle = .toolbar
+            b.imagePosition = .imageLeading
+            b.toolTip = "背诵计划 (⌥⌘P)"
+            it.view = b
+            it.label = "计划"
+            it.toolTip = b.toolTip
+            // Shown in » when the window is too narrow.
+            let m = NSMenuItem(title: "计划", action: #selector(openPlan), keyEquivalent: ""); m.target = self
+            m.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: nil)
+            it.menuFormRepresentation = m
             it.autovalidates = false
             return it
         case searchID:
@@ -265,7 +266,6 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     }
 
     @objc private func openPlan() { state.openPlan() }
-    @objc private func openTest() { state.openTest() }
 
     @objc private func newBook(_ sender: Any?) { WordbookModel.shared.promptNewBook() }
 

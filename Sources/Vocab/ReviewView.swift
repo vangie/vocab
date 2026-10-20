@@ -20,7 +20,6 @@ struct ReviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { session.refreshPreview() }
         .sheet(isPresented: $state.showPlan, onDismiss: { session.refreshPreview() }) { PlanSheet() }
-        .sheet(isPresented: $state.showTest, onDismiss: { session.refreshPreview() }) { VocabTestSheet() }
     }
 }
 
