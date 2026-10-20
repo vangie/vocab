@@ -62,7 +62,7 @@ private struct StartScreen: View {
                         Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .padding(.top, 32)
+                .padding(.top, 18)   // + the stack's 14 pt = 32 pt below the pills
             } else if p.reviews + p.new == 0 {
                 Image(systemName: "checkmark.circle").font(.system(size: 46, weight: .light)).foregroundStyle(.green)
                 Text("今天没有要复习的单词").font(.title3)
