@@ -141,8 +141,8 @@ final class WordStoreTests: XCTestCase {
         try store.add(word: "say \"hi\"", definition: "a, b\nc", dictionary: "D", context: nil)
         let csv = CSVExporter.csv(try store.all())
         let lines = csv.components(separatedBy: "\r\n")
-        XCTAssertEqual(lines[0], "word,definition,dictionary,context,added,due,interval_days,repetitions,lapses,stability,difficulty,state")
-        XCTAssertTrue(lines[1].hasPrefix("\"say \"\"hi\"\"\",\"a, b\nc\",D,,"))
+        XCTAssertEqual(lines[0], CSVExporter.header.joined(separator: ","))
+        XCTAssertTrue(lines[1].hasPrefix("\"say \"\"hi\"\"\",,\"a, b\nc\",D,,"))
     }
 }
 

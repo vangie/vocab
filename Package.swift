@@ -13,7 +13,7 @@ let package = Package(
         .target(
             name: "VocabCore",
             dependencies: ["CMultitouch"],
-            linkerSettings: [.linkedLibrary("sqlite3")]
+            linkerSettings: [.linkedLibrary("sqlite3"), .linkedLibrary("z")]
         ),
         .executableTarget(name: "Vocab", dependencies: ["VocabCore"]),
         .executableTarget(name: "vocab-smoke", dependencies: ["VocabCore"]),
