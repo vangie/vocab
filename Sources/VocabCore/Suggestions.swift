@@ -122,6 +122,7 @@ public enum Suggester {
     public static func suggest(_ query: String, in dicts: [DictionaryInfo],
                                service: DictionaryService = .shared,
                                guesses: (String) -> [String] = spellingGuesses) -> Result {
+        let dicts = dicts.filter { !$0.isNetwork }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return Result(matches: [], spelling: []) }
         var raw = service.headwords(q, method: 0, in: dicts, maxPerDictionary: 5)   // exact + indexed inflections
@@ -161,6 +162,7 @@ public enum Suggester {
     /// Entries for a word, falling back to its lemma (for taps on inflected words).
     public static func lookupWithFallback(_ word: String, in dicts: [DictionaryInfo],
                                           service: DictionaryService = .shared) -> (word: String, entries: [DictionaryEntry]) {
+        let dicts = dicts.filter { !$0.isNetwork }
         let e = service.lookup(word, in: dicts)
         if !e.isEmpty { return (word, e) }
         if let l = lemma(word) {

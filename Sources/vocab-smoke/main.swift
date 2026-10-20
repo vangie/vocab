@@ -153,6 +153,34 @@ case "render", "click":
         if heard.isEmpty { fail("no audio message received") }
     }
 
+case "profile":
+    // vocab-smoke profile word…  — per-dictionary timings using the app's enabled set.
+    _ = NSApplication.shared
+    func ms(_ t: Date) -> Int { Int(Date().timeIntervalSince(t) * 1000) }
+    var t = Date()
+    _ = svc.activeDictionaries(); print("activeDictionaries: \(ms(t)) ms")
+    t = Date(); let all = svc.availableDictionaries(); print("availableDictionaries: \(ms(t)) ms (\(all.count))")
+    let ids = (UserDefaults(suiteName: "io.github.vangie.vocab")?.array(forKey: "enabledDictionaryIDs") as? [String]) ?? []
+    let en = ids.compactMap { id in all.first { $0.id == id } }
+    for q in args.dropFirst(2) {
+        print("== \(q)")
+        for d in en {
+            t = Date(); let h0 = svc.headwords(q, method: 0, in: [d], maxPerDictionary: 5).count; let a = ms(t)
+            t = Date(); let h1 = svc.headwords(q, method: 1, in: [d], maxPerDictionary: 40).count; let b = ms(t)
+            t = Date(); let p = svc.headwords(String(q.prefix(1)), method: 1, in: [d], maxPerDictionary: 4000).count; let c = ms(t)
+            t = Date(); let e = svc.lookup(q, in: [d]); let l = ms(t)
+            let kb = e.reduce(0) { $0 + $1.html.utf8.count } / 1024
+            print("\(d.shortName): exact \(a)ms(\(h0)) prefix \(b)ms(\(h1)) pool \(c)ms(\(p)) lookup \(l)ms(\(e.count) rec, \(kb) KB)")
+            fflush(stdout)
+        }
+        t = Date(); let r = Suggester.suggest(q, in: en); print("suggest total: \(ms(t)) ms spelling=\(r.spelling.count)")
+        t = Date(); let fb = Suggester.lookupWithFallback(q, in: en); print("lookupWithFallback total: \(ms(t)) ms"); fflush(stdout)
+        t = Date(); MainActor.assumeIsolated { _ = EntryWebViewFactory.pageURL(for: fb.entries, showTitles: true, emptyMessage: "") }; print("page build (\(fb.entries.count) entries): \(ms(t)) ms")
+        let sem = DispatchSemaphore(value: 0); t = Date()
+        Task.detached { let o = await WikipediaClient.fetch(q); if case .found(let ti, _, _) = o { print("wikipedia: found \(ti)", terminator: "") } else { print("wikipedia: \(o)", terminator: "") }; sem.signal() }
+        sem.wait(); print(" in \(ms(t)) ms"); fflush(stdout)
+    }
+
 case "suggest":
     _ = NSApplication.shared
     for q in args.dropFirst(2) {

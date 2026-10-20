@@ -7,7 +7,18 @@ import VocabCore
 enum DictionarySelection {
     static let key = "enabledDictionaryIDs"
 
+    /// Cached: DCSGetActiveDictionaries costs ~20 ms and this is read on every keystroke/render.
+    nonisolated(unsafe) private static var cache: [DictionaryInfo]?
+    private static let lock = NSLock()
+    static func invalidate() { lock.lock(); cache = nil; lock.unlock() }
+
     static func enabled() -> [DictionaryInfo] {
+        lock.lock(); defer { lock.unlock() }
+        if let cache { return cache }
+        let v = compute(); cache = v; return v
+    }
+
+    private static func compute() -> [DictionaryInfo] {
         let svc = DictionaryService.shared
         let active = svc.activeDictionaries()
         guard let ids = UserDefaults.standard.array(forKey: key) as? [String] else { return active }
@@ -71,7 +82,7 @@ final class LookupModel: ObservableObject {
         if suggestionsQuery != q { suggestions = []; suggestionsQuery = nil }
         guard !q.isEmpty else { suggestions = []; selection = nil; entries = []; searchedTerm = ""; return }
         suggestTask = Task {
-            try? await Task.sleep(nanoseconds: 120_000_000)
+            try? await Task.sleep(nanoseconds: 150_000_000)
             if Task.isCancelled { return }
             let dicts = DictionarySelection.enabled()
             let r = await Task.detached { Suggester.suggest(q, in: dicts) }.value
@@ -94,6 +105,8 @@ final class LookupModel: ObservableObject {
     /// Settings › 词典 changed (toggle, reorder, prefs) or a dictionary was installed: refresh the
     /// tab strip, the sidebar suggestions and the shown entry right away.
     func dictionariesChanged() {
+        DictionarySelection.invalidate()
+        entryCache.removeAll(); entryCacheOrder.removeAll()
         dictionariesVersion += 1
         if let sel = selectedDictionary, !DictionarySelection.enabled().contains(where: { $0.id == sel }) { selectedDictionary = nil }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -112,23 +125,58 @@ final class LookupModel: ObservableObject {
         if !term.isEmpty { show(term, record: false) }
     }
 
+    /// Local (DCS) results per word, newest last; small LRU so back/forward and re-typing are instant.
+    private var entryCache: [String: (word: String, entries: [DictionaryEntry])] = [:]
+    private var entryCacheOrder: [String] = []
+    private var wikiCache: [String: DictionaryEntry?] = [:]
+    private var wikiTask: Task<Void, Never>?
+
     /// Show the entries for a word without touching the search field.
+    /// Local dictionaries come first (milliseconds); Wikipedia is fetched separately and appended.
     func show(_ word: String, record: Bool = true) {
-        showTask?.cancel()
+        showTask?.cancel(); wikiTask?.cancel()
         let dicts = DictionarySelection.enabled()
+        let wiki = dicts.first { $0.isNetwork }
         showTask = Task {
-            let r = await Task.detached { Suggester.lookupWithFallback(word, in: dicts) }.value
+            let t0 = Date()
+            let r: (word: String, entries: [DictionaryEntry])
+            if let c = self.entryCache[word] { r = c } else {
+                r = await Task.detached(priority: .userInitiated) { Suggester.lookupWithFallback(word, in: dicts) }.value
+                if Task.isCancelled { return }
+                self.entryCache[word] = r; self.entryCacheOrder.append(word)
+                if self.entryCacheOrder.count > 50 { self.entryCache[self.entryCacheOrder.removeFirst()] = nil }
+            }
             if Task.isCancelled { return }
-            self.entries = r.entries
-            self.searchedTerm = r.entries.isEmpty ? word : r.word
-            if let sel = self.selectedDictionary, !r.entries.contains(where: { $0.dictionary.id == sel }) {
+            VocabLog.log("lookup \(word): local \(r.entries.count) entries in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+            let term = r.entries.isEmpty ? word : r.word
+            var shown = r.entries
+            if let wiki {
+                if let cached = self.wikiCache[term] { if let e = cached { shown.append(e) } }
+                else { shown.append(WikipediaClient.statusEntry("正在查询维基百科…", dictionary: wiki, term: term)) }
+            }
+            self.entries = shown
+            self.searchedTerm = term
+            if let sel = self.selectedDictionary, !shown.contains(where: { $0.dictionary.id == sel }) {
                 self.selectedDictionary = nil
             }
-            if record { self.recordVisit(self.searchedTerm) }
+            if record { self.recordVisit(term) }
+            if let wiki, self.wikiCache[term] == nil { self.fetchWikipedia(term, wiki, local: r.entries) }
         }
     }
 
-    /// Search for a word as if typed (links, wordbook, popup).
+    private func fetchWikipedia(_ term: String, _ wiki: DictionaryInfo, local: [DictionaryEntry]) {
+        wikiTask = Task {
+            let t0 = Date()
+            let o = await WikipediaClient.fetch(term)
+            if Task.isCancelled || self.searchedTerm != term { return }
+            let e = WikipediaClient.entry(o, dictionary: wiki, term: term)
+            VocabLog.log("wikipedia \(term): \(e == nil ? "not found" : (e!.plainText == "无法连接维基百科" ? "failed" : "found")) in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+            if case .failed = o {} else { self.wikiCache[term] = .some(e) }
+            self.entries = local + (e.map { [$0] } ?? [])
+            if let sel = self.selectedDictionary, !self.entries.contains(where: { $0.dictionary.id == sel }) { self.selectedDictionary = nil }
+        }
+    }
+
     func search(_ term: String? = nil) {
         if let term { query = term }
         queryChanged()
