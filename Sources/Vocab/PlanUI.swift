@@ -58,6 +58,17 @@ final class PlanModel: ObservableObject {
         }
     }
 
+    /// How a source is described in the plan: word lists by size; a wordbook as 未学 / 共
+    /// (only its not-yet-studied words are new-word material — the rest are in review).
+    func sizeLabel(_ id: PlanSourceID) -> String {
+        switch id {
+        case .list: return "\(size(id).formatted()) 词"
+        case .book(let b):
+            let total = book.items.filter { $0.bookID == b }.count
+            return "未学 \(size(id)) / 共 \(total) 词"
+        }
+    }
+
     private func queues(liveItems: [WordItem]) -> [PlanMixer.Queue] {
         plan.sources.filter { $0.enabled && $0.ratio > 0 }.map { s in
             switch s.id {
@@ -232,7 +243,7 @@ struct PlanSettingsView: View {
                             Image(systemName: src.id.isBook ? "book.closed" : "text.book.closed").foregroundStyle(.secondary)
                                 .accessibilityHidden(true)
                             Text(model.title(src.id))
-                            Text("\(model.size(src.id)) 词").foregroundStyle(.secondary).monospacedDigit()
+                            Text(model.sizeLabel(src.id)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).fixedSize()
                             Spacer()
                             Button { remove(i) } label: { Image(systemName: "minus.circle") }
                                 .buttonStyle(.borderless).help("移除")
@@ -247,7 +258,7 @@ struct PlanSettingsView: View {
                             let lists = rest.filter { !model.plan.sources[$0].id.isBook }
                             if !books.isEmpty {
                                 Section("生词本") {
-                                    ForEach(books, id: \.self) { i in Button("\(model.title(model.plan.sources[i].id))（\(model.size(model.plan.sources[i].id)) 词）") { add(i) } }
+                                    ForEach(books, id: \.self) { i in Button("\(model.title(model.plan.sources[i].id))（\(model.sizeLabel(model.plan.sources[i].id))）") { add(i) } }
                                 }
                             }
                             Section("词书") {
