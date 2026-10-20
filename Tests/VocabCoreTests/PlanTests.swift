@@ -200,7 +200,7 @@ final class PlanTests: XCTestCase {
         let fixedDesign = 59   // old 2-round design: 40 + 10 words + 15% pseudowords
         for t in [1500.0, 4000, 9000] {
             var errs: [Double] = [], counts: [Int] = []
-            for seed in 1...7 {
+            for seed in 1...15 {
                 let (r, truth) = simulate(threshold: t, seed: UInt64(seed) * 7919 + UInt64(t))
                 let est = Double(r.result().estimate)
                 errs.append(abs(est - truth) / truth); counts.append(r.items.count)
@@ -220,16 +220,16 @@ final class PlanTests: XCTestCase {
         let bluffer = Double(simulate(threshold: 4000, meaningOK: 0.25, seed: 11).0.result().estimate)
         XCTAssertLessThan(bluffer, honest * 0.6)
         let all = simulate(threshold: 1e9, claimPseudo: 1, seed: 3).0.result()
-        XCTAssertEqual(all.falseAlarm, 1); XCTAssertEqual(all.estimate, 0)
+        XCTAssertEqual(all.pseudoYes, 1); XCTAssertEqual(all.reliability, 2)
     }
 
     func testAdaptiveStartsMidAndSteps() {
         var rng = SeededRNG(5)
         var r = VocabTestRun(candidates: Self.cands, pseudo: ["px"], using: &rng)
         XCTAssertEqual(Double(r.current!.rank!), 3000, accuracy: 4)
-        r.answer(true); XCTAssertEqual(Double(r.current!.rank!), 6000, accuracy: 4)     // known → harder
+        r.answer(true); let next = r.current!.rank!; XCTAssertGreaterThan(next, 3300)     // known → harder
         r.answer(false); XCTAssertNotNil(r.current?.rank)
-        r.undo(); XCTAssertEqual(Double(r.current!.rank!), 6000, accuracy: 4)
+        r.undo(); XCTAssertEqual(r.current!.rank!, next)
         XCTAssertEqual(r.answered, 1)
     }
 

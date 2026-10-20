@@ -34,7 +34,7 @@ final class HanziTests: XCTestCase {
         XCTAssertLessThan(HanziTestScoring.verified(correct: 2, of: 10), 0.2)   // ≈ guessing
     }
 
-    func simulateHanzi(threshold t: Double, slope: Double = 3, checkOK: Double = 1, meaningOK: Double = 1, seed: UInt64) -> (HanziTestRun, Double) {
+    func simulateHanzi(threshold t: Double, slope: Double = 3, checkOK: Double = 1, meaningOK: Double = 1, claimPseudo: Double = 0, seed: UInt64) -> (HanziTestRun, Double) {
         let list = HanziList.shared!
         var rng = SeededRNG(seed)
         var run = HanziTestRun(list: list, using: &rng)
@@ -44,6 +44,7 @@ final class HanziTests: XCTestCase {
                 let ok = Double.random(in: 0..<1, using: &rng) < (it.checkKind == .meaning ? meaningOK : checkOK)
                 run.answerCheck(ok ? it.correct.first! : "x"); continue
             }
+            if it.isPseudo { run.answer(Double.random(in: 0..<1, using: &rng) < claimPseudo); continue }
             run.answer(Double.random(in: 0..<1, using: &rng) < Adaptive.sigma(log(Double(it.rank)), mu: log(t), s: slope))
         }
         return (run, truth)
@@ -53,14 +54,26 @@ final class HanziTests: XCTestCase {
         let fixedDesign = 50   // old 2-round design: 40 + 10 characters (plus spot-checks)
         for t in [800.0, 2500, 4500] {
             var errs: [Double] = [], counts: [Int] = []
-            for seed in 1...7 {
+            for seed in 1...15 {
                 let (r, truth) = simulateHanzi(threshold: t, seed: UInt64(seed) * 104729 + UInt64(t))
-                errs.append(abs(Double(r.result().estimate) - truth) / truth); counts.append(r.items.count)
+                errs.append(abs(Double(r.result().estimate) - truth) / truth); counts.append(r.items.filter { !$0.isPseudo }.count)
             }
             print("SIM \(t): median err \(errs.sorted()[errs.count / 2]) items \(counts.min()!)–\(counts.max()!) mean \(Double(counts.reduce(0,+))/Double(counts.count))")
             XCTAssertLessThan(errs.sorted()[errs.count / 2], 0.10, "threshold \(t): \(errs)")
             XCTAssertLessThan(counts.max()!, fixedDesign, "threshold \(t): \(counts)")
         }
+    }
+
+    func testPseudoCharacters() {
+        XCTAssertGreaterThan(HanziPseudo.shared.count, 100)
+        let (honest, _) = simulateHanzi(threshold: 2500, seed: 5)
+        let ps = honest.items.filter(\.isPseudo)
+        XCTAssertGreaterThan(ps.count, 2); XCTAssertTrue(ps.allSatisfy { !$0.check && $0.char.count == 2 })
+        XCTAssertEqual(honest.result().reliability, 0)
+        let (liar, _) = simulateHanzi(threshold: 2500, claimPseudo: 1, seed: 5)
+        XCTAssertEqual(liar.result().reliability, 2)
+        XCTAssertLessThan(Double(liar.result().estimate), Double(honest.result().estimate) * 0.85)
+        XCTAssertNotNil(honest.result().crossCheck)
     }
 
     func testSpotChecksMixAndDiscount() {

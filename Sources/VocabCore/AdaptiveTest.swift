@@ -1,82 +1,105 @@
 import Foundation
 
-/// Adaptive yes/no size test over frequency rank (shared by 词汇量 and 识字量).
+/// Adaptive yes/no size test over frequency rank (shared by 词汇量 and 识字量), Rasch / 1PL IRT.
 ///
-/// Model: P(know | rank r) = γ + (1 − γ − λ) · σ(−s · (ln r − μ)), a logistic in log-rank with
-/// threshold e^μ (the rank where recognition drops through 50%) and slope s; γ/λ absorb the odd
-/// lucky yes / slip. μ and s are fitted by grid posterior (weak priors) after every answer.
-/// Selection: a ×2 / ÷2 staircase from the start rank until the first reversal, then items around
-/// the fitted threshold (alternating just below / above it, which also pins the slope).
-/// Stop: ≥ minItems and the estimate moved < 4% over the last 8 answers, or maxItems.
-/// Estimate: Σ over the candidate items of σ(…) at their rank (corrected by the caller).
+/// Item difficulty from frequency: b = k · (ln rank − ln r₀) (k = 3 logits per e-fold of rank,
+/// r₀ = 3000 for English / 1500 for characters, so θ = 0 means "recognition drops through 50% at r₀").
+/// P(认识 | θ, b) = γ + (1 − γ − λ) · σ(θ − b), γ/λ = 2%/3% absorb lucky yeses and slips.
+/// θ is estimated by EAP on a grid (prior N(0, 2²)); the next item is the unused one whose b is
+/// nearest θ̂ (maximum information for Rasch). Stop when SE(θ) < 0.40 after ≥ 15 items, or at 40.
+/// Size = Σ over candidate items of σ(θ − bᵢ); the interval uses θ ± 1.96·SE.
 public enum Adaptive {
     public static let guess = 0.02, lapse = 0.03
-    public static let slopes: [Double] = [1, 1.5, 2, 2.5, 3, 4, 5, 7]
-    public static let minItems = 24, maxItems = 40
-    static let offsets: [Double] = [0, -0.4, 0.4, -0.2, 0.2]
+    public static let k = 3.0
+    public static let minItems = 15, maxItems = 40
+    public static let seTarget = 0.40
+    static let grid: [Double] = stride(from: -10.0, through: 10.0, by: 0.02).map { $0 }
 
     public struct Fit: Equatable, Sendable {
-        public var mu: Double, slope: Double, sdMu: Double
-        public var threshold: Double { exp(mu) }
+        /// θ̂ (EAP) and its posterior SD.
+        public var theta: Double, se: Double
+        /// Reference ln-rank (θ = 0 ↔ 50% at this rank).
+        public var x0: Double
+        /// The 50% rank.
+        public var threshold: Double { exp(x0 + theta / Adaptive.k) }
+        public var mu: Double { x0 + theta / Adaptive.k }
+        public var slope: Double { Adaptive.k }
+        public var sdMu: Double { se / Adaptive.k }
     }
 
     @inline(__always) public static func sigma(_ x: Double, mu: Double, s: Double) -> Double { 1 / (1 + exp(s * (x - mu))) }
-    static func pResp(_ x: Double, mu: Double, s: Double) -> Double { guess + (1 - guess - lapse) * sigma(x, mu: mu, s: s) }
+    @inline(__always) static func difficulty(_ x: Double, x0: Double) -> Double { k * (x - x0) }
+    static func pResp(theta: Double, b: Double) -> Double { guess + (1 - guess - lapse) / (1 + exp(b - theta)) }
 
-    /// Observations: x = ln rank, y ∈ [0, 1] (soft labels allowed: a partly verified 认识).
-    public static func fit(_ obs: [(x: Double, y: Double)], xMax: Double) -> Fit {
-        let mus = stride(from: -0.5, through: xMax + 1.0, by: 0.025).map { $0 }
-        let priorMu = xMax * 0.6, priorSD = 2.5
-        var post = [[Double]](repeating: [Double](repeating: 0, count: slopes.count), count: mus.count)
-        var best = -Double.infinity
-        for (i, mu) in mus.enumerated() {
-            for (j, s) in slopes.enumerated() {
-                var ll = -pow(mu - priorMu, 2) / (2 * priorSD * priorSD) - pow(log(s / 2.5), 2) / (2 * 0.5 * 0.5)
-                for o in obs {
-                    let p = pResp(o.x, mu: mu, s: s)
-                    ll += o.y * log(p) + (1 - o.y) * log(1 - p)
-                }
-                post[i][j] = ll; best = max(best, ll)
+    /// EAP over θ. Observations: x = ln rank, y ∈ [0, 1] (soft labels allowed).
+    public static func fit(_ obs: [(x: Double, y: Double)], x0: Double) -> Fit {
+        var logp = grid.map { -$0 * $0 / (2 * 4.0) }
+        for o in obs {
+            let b = difficulty(o.x, x0: x0)
+            for i in grid.indices {
+                let p = pResp(theta: grid[i], b: b)
+                logp[i] += o.y * log(p) + (1 - o.y) * log(1 - p)
             }
         }
+        let m = logp.max()!
         var z = 0.0, m1 = 0.0, m2 = 0.0
-        var sw = [Double](repeating: 0, count: slopes.count)
-        for i in mus.indices {
-            for j in slopes.indices {
-                let w = exp(post[i][j] - best)
-                z += w; m1 += w * mus[i]; m2 += w * mus[i] * mus[i]; sw[j] += w
-            }
-        }
+        for i in grid.indices { let w = exp(logp[i] - m); z += w; m1 += w * grid[i]; m2 += w * grid[i] * grid[i] }
         let mean = m1 / z
-        let sd = max(0, m2 / z - mean * mean).squareRoot()
-        let s = slopes[sw.indices.max { sw[$0] < sw[$1] }!]
-        return Fit(mu: mean, slope: s, sdMu: sd)
+        return Fit(theta: mean, se: max(0, m2 / z - mean * mean).squareRoot(), x0: x0)
     }
 
-    /// Expected number of known items among `ranks` under the fit, with an optional per-item correction.
+    /// Expected number of known items among `ranks`, with an optional per-item correction.
     public static func expected(_ ranks: [Int], mu: Double, s: Double, correct: (Double) -> Double = { $0 }) -> Double {
         ranks.reduce(0) { $0 + correct(sigma(log(Double(max(1, $1))), mu: mu, s: s)) }
     }
 
-    /// Next target ln-rank. `history` = answered real items in order (x, said known).
-    public static func nextTarget(history: [(x: Double, known: Bool)], fit: Fit?, startX: Double, xMax: Double) -> Double {
-        guard let last = history.last else { return startX }
-        let reversed = history.contains { $0.known != history[0].known }
-        if !reversed || fit == nil {
-            return min(xMax, max(0, last.x + (last.known ? log(2.0) : -log(2.0))))
-        }
-        let k = history.count
-        let off = offsets[k % offsets.count] * (2.5 / fit!.slope)
-        return min(xMax, max(0, fit!.mu + off))
+    /// Next target ln-rank: where b = θ̂ (start at x0 before any answer).
+    public static func nextTarget(fit: Fit?, x0: Double, xMax: Double) -> Double {
+        guard let f = fit else { return x0 }
+        return min(xMax, max(0, f.mu))
     }
 
-    /// Converged: enough items and the estimate stable (±5%) over the last 6 answers.
-    public static func shouldStop(estimates: [Double], answered: Int) -> Bool {
+    public static func shouldStop(fit: Fit?, answered: Int) -> Bool {
         if answered >= maxItems { return true }
-        guard answered >= minItems, estimates.count >= 8 else { return false }
-        let tail = estimates.suffix(8)
-        let hi = tail.max()!, lo = tail.min()!
-        return hi - lo <= 0.04 * max(hi, 50)
+        guard let f = fit, answered >= minItems else { return false }
+        return f.se < seTarget
+    }
+
+    /// Mild pseudo-item correction: the false-alarm rate is shrunk toward 0 (as if 2 extra rejected
+    /// pseudo-items had been seen) before the correction for guessing P' = (P − f)/(1 − f).
+    public static func shrunkFalseAlarm(yes: Int, of n: Int) -> Double { n == 0 ? 0 : Double(yes) / Double(n + 2) }
+
+    /// Answer reliability from pseudo-items: 0 good, 1 fair, 2 low.
+    public static func reliability(falseAlarm f: Double, pseudoSeen n: Int) -> Int {
+        guard n >= 3 else { return 0 }
+        return f <= 0.1 ? 0 : f <= 0.25 ? 1 : 2
+    }
+
+    /// Wang Xiaoling-style stratified cross-check: Σ band size × (yes rate in band), unasked bands
+    /// interpolated from neighbours (1 below the first asked, 0 above the last).
+    public static func stratified(_ bands: [VocabBand], asked: [Int: (Int, Int)]) -> Int {
+        let rates: [Double?] = bands.indices.map { i in asked[i].flatMap { $0.0 > 0 ? Double($0.1) / Double($0.0) : nil } }
+        var total = 0.0
+        for i in bands.indices {
+            var r = rates[i]
+            if r == nil {
+                let lo = (0..<i).reversed().first { rates[$0] != nil }.flatMap { rates[$0] } ?? 1
+                let hi = ((i + 1)..<bands.count).first { rates[$0] != nil }.flatMap { rates[$0] } ?? 0
+                r = (lo + hi) / 2
+            }
+            total += r! * Double(bands[i].size)
+        }
+        return Int(total.rounded())
+    }
+
+    /// 「约 8,200（7,400–9,100）」: 2–3 significant figures.
+    public static func roundSize(_ n: Int) -> Int {
+        n >= 10000 ? (n + 50) / 100 * 100 : n >= 1000 ? (n + 50) / 100 * 100 : n >= 100 ? (n + 5) / 10 * 10 : n
+    }
+    public static func sizeText(_ e: Int, _ lo: Int, _ hi: Int) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.locale = Locale(identifier: "en_US")
+        func s(_ n: Int) -> String { f.string(from: NSNumber(value: roundSize(n))) ?? "\(n)" }
+        return "约 \(s(e))（\(s(lo))–\(s(hi))）"
     }
 
     /// Index into `xs` (sorted ascending) of the unused item nearest `target`.

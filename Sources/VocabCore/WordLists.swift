@@ -118,7 +118,20 @@ public final class WordLists: @unchecked Sendable {
     }
 
     /// Pronounceable non-words, verified absent from all of ECDICT when the extract was built.
+    /// Wuggy-generated pseudowords (scripts/wuggy-pseudowords.py), one per line.
+    public static let wuggyPseudowords: [String]? = {
+        var url = Bundle.main.url(forResource: "pseudowords-en", withExtension: "txt")
+        if url == nil {
+            let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Resources/Data/pseudowords-en.txt")
+            if FileManager.default.fileExists(atPath: repo.path) { url = repo }
+        }
+        guard let u = url, let t = try? String(contentsOf: u, encoding: .utf8) else { return nil }
+        return t.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("#") }
+    }()
+
     public func pseudowords() -> [String] {
+        if let w = Self.wuggyPseudowords, w.count >= 100 { return w }
         var out: [String] = []
         query("SELECT word FROM pseudowords ORDER BY word") { out.append(String(cString: sqlite3_column_text($0, 0))) }
         return out

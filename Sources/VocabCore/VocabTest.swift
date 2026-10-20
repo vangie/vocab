@@ -43,6 +43,13 @@ public struct VocabTestResult: Equatable, Sendable, Codable {
     public var knownBands: [Int]
     /// Bands that get a quick 认识吗 check when their words first come up in the plan.
     public var checkBands: [Int]
+    /// Answer reliability from pseudo-items (0 good, 1 fair, 2 low); nil for old results.
+    public var reliability: Int? = nil
+    /// Stratified (per-band yes-rate) estimate, shown as a cross-check.
+    public var crossCheck: Int? = nil
+    /// Share of pseudo-items claimed known (raw), when a test had them.
+    public var pseudoYes: Double? = nil
+    public var sizeText: String { Adaptive.sizeText(estimate, low, high) }
 }
 
 public enum VocabTestScoring {
@@ -115,8 +122,8 @@ public enum VocabTestScoring {
     }
 }
 
-/// Adaptive 词汇量 test (see `Adaptive`): starts around rank 3000, ~15% pseudowords interleaved;
-/// the pseudoword false-alarm rate corrects the fitted curve (P → (P − f)/(1 − f)).
+/// Adaptive 词汇量 test (Rasch, see `Adaptive`): θ = 0 at rank 3000, ~14% pseudowords interleaved;
+/// a mildly shrunk pseudoword false-alarm rate corrects the curve (P → (P − f)/(1 − f)).
 public struct VocabTestRun: Sendable {
     /// Right gloss + 3 distractor glosses for a word (the quiz's confusable-word logic), or nil.
     public typealias MeaningMaker = @Sendable (String) -> (right: String, choices: [String])?
@@ -131,7 +138,6 @@ public struct VocabTestRun: Sendable {
     private let ranksByBand: [[Int]]
     private var pseudo: [String]
     private var used = Set<Int>()
-    private var estimates: [Double] = []
     private var stopped = false
     public private(set) var items: [VocabTestItem] = []
     public static let startRank = 3000
@@ -169,7 +175,7 @@ public struct VocabTestRun: Sendable {
     private func currentFit() -> Adaptive.Fit? {
         let r = real
         guard !r.isEmpty else { return nil }
-        return Adaptive.fit(r.map { (log(Double($0.rank ?? 1)), Self.label($0, verified: verified)) }, xMax: xMax)
+        return Adaptive.fit(r.map { (log(Double($0.rank ?? 1)), Self.label($0, verified: verified)) }, x0: log(Double(Self.startRank)))
     }
 
     /// Share of meaning checks passed, guess-corrected (1 when none asked yet).
@@ -190,8 +196,7 @@ public struct VocabTestRun: Sendable {
         if realCount > 0, realCount % Self.pseudoEvery == 0, items.last?.band != nil, !pseudo.isEmpty {
             items.append(VocabTestItem(word: pseudo.removeFirst(), band: nil)); return
         }
-        let hist = real.map { (x: log(Double($0.rank ?? 1)), known: $0.known! && $0.checkCorrect != false) }
-        let target = Adaptive.nextTarget(history: hist, fit: currentFit(), startX: log(Double(Self.startRank)), xMax: xMax)
+        let target = Adaptive.nextTarget(fit: currentFit(), x0: log(Double(Self.startRank)), xMax: xMax)
         guard let i = Adaptive.nearest(target, in: xs, used: used) else { stopped = true; return }
         used.insert(i)
         items.append(VocabTestItem(word: words[i], band: bandOf(ranks[i]), rank: ranks[i]))
@@ -228,8 +233,7 @@ public struct VocabTestRun: Sendable {
 
     private mutating func advance() {
         guard let i = items.indices.last else { return }
-        if items[i].band != nil { estimates.append(Double(result().estimate)) }
-        if items[i].band != nil && Adaptive.shouldStop(estimates: estimates, answered: answeredReal) { stopped = true; return }
+        if items[i].band != nil && Adaptive.shouldStop(fit: currentFit(), answered: answeredReal) { stopped = true; return }
         appendNext()
     }
 
@@ -243,7 +247,6 @@ public struct VocabTestRun: Sendable {
             if last.band == nil { pseudo.insert(last.word, at: 0) }
         }
         guard let i = items.indices.last else { appendNext(); return }
-        if items[i].band != nil, !estimates.isEmpty { estimates.removeLast() }
         if items[i].known == true, items[i].band != nil { knownClaims -= 1 }
         items[i].known = nil; items[i].checkCorrect = nil; items[i].check = false; items[i].choices = []
         stopped = false
@@ -255,7 +258,9 @@ public struct VocabTestRun: Sendable {
 
     public func result(date: Date = Date()) -> VocabTestResult {
         let ps = items.filter { $0.band == nil && $0.known != nil }
-        let f = ps.isEmpty ? 0 : Double(ps.filter { $0.known == true }.count) / Double(ps.count)
+        let yes = ps.filter { $0.known == true }.count
+        let f = Adaptive.shrunkFalseAlarm(yes: yes, of: ps.count)
+        let raw = ps.isEmpty ? 0 : Double(yes) / Double(ps.count)
         let correct: (Double) -> Double = { p in f >= 1 ? 0 : max(0, (p - f) / (1 - f)) }
         guard let fit = currentFit() else {
             return VocabTestResult(date: date, estimate: 0, low: 0, high: 0, falseAlarm: f, bands: [], bandRanges: bands, knownBands: [], checkBands: [])
@@ -271,6 +276,8 @@ public struct VocabTestRun: Sendable {
         let known = scores.filter { $0.corrected >= VocabTestScoring.knownThreshold }.map(\.band)
         let check = scores.filter { VocabTestScoring.checkRange.contains($0.corrected) }.map(\.band)
         return VocabTestResult(date: date, estimate: Int(est.rounded()), low: Int(lo.rounded()), high: Int(hi.rounded()),
-                               falseAlarm: f, bands: scores, bandRanges: bands, knownBands: known, checkBands: check)
+                               falseAlarm: f, bands: scores, bandRanges: bands, knownBands: known, checkBands: check,
+                               reliability: Adaptive.reliability(falseAlarm: raw, pseudoSeen: ps.count),
+                               crossCheck: Adaptive.stratified(bands, asked: asked), pseudoYes: raw)
     }
 }

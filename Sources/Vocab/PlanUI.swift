@@ -532,8 +532,9 @@ struct VocabTestSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     Text("你的词汇量约").foregroundStyle(.secondary).padding(.top, 24)
-                    Text("\(r.estimate)").font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit()
-                    Text("可能在 \(r.low)–\(r.high) 之间").foregroundStyle(.secondary)
+                    Text(Adaptive.roundSize(r.estimate).formatted()).font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit()
+                    Text(r.sizeText).font(.callout).foregroundStyle(.secondary)
+                    ReliabilityNote(result: r)
                     if r.falseAlarm > 0 {
                         Text("有 \(Int((r.falseAlarm * 100).rounded()))% 的假词被选了「认识」，结果已按此修正").font(.caption).foregroundStyle(.orange)
                     }
@@ -666,7 +667,10 @@ struct HanziTestSheet: View {
             .padding(16)
             ProgressView(value: Double(min(r.answered, r.expectedTotal)), total: Double(r.expectedTotal)).padding(.horizontal, 16)
             Spacer()
-            Text(item.char).font(.system(size: 72, weight: .regular, design: .serif))
+            Group {
+                if item.isPseudo { PseudoGlyph(parts: item.char, size: 72) }
+                else { Text(item.char).font(.system(size: 72, weight: .regular, design: .serif)) }
+            }
             if r.askingCheck && item.checkKind == .meaning {
                 Text("它是什么意思？").foregroundStyle(.secondary).padding(.top, 8)
                 Spacer()
@@ -722,8 +726,10 @@ struct HanziTestSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     Text("你认识的汉字约").foregroundStyle(.secondary).padding(.top, 24)
-                    Text("\(r.estimate)").font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit()
-                    Text("可能在 \(r.low)–\(r.high) 之间（共测常用字 \(r.bandRanges.last?.hi ?? 0) 个）").foregroundStyle(.secondary)
+                    Text(Adaptive.roundSize(r.estimate).formatted()).font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit()
+                    Text(r.sizeText).font(.callout).foregroundStyle(.secondary)
+                    ReliabilityNote(result: r)
+                    Text("共测常用字 \(r.bandRanges.last?.hi ?? 0) 个").font(.caption).foregroundStyle(.secondary)
                     if r.falseAlarm > 0.05 {
                         Text("抽查（读音 / 字义）有 \(Int((r.falseAlarm * 100).rounded()))% 没对上，结果已按此修正").font(.caption).foregroundStyle(.orange)
                     }
@@ -785,5 +791,46 @@ enum VocabMeaningMaker {
             guard ds.count == 3 else { return nil }
             return (g.short, ([g.short] + ds).shuffled())
         }
+    }
+}
+
+
+/// Gentle answer-reliability hint plus the stratified cross-check.
+struct ReliabilityNote: View {
+    let result: VocabTestResult
+    var body: some View {
+        VStack(spacing: 4) {
+            switch result.reliability ?? 0 {
+            case 2: Text("不少「认识」没能通过核对，结果仅供参考；下次可以只在确定时选「认识」").foregroundStyle(.orange)
+            case 1: Text("有少量「认识」未通过核对，结果已略作修正").foregroundStyle(.secondary)
+            default: EmptyView()
+            }
+            if let c = result.crossCheck, c > 0 {
+                Text("分层抽样估计：约 \(Adaptive.roundSize(c).formatted())").foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Draws a LEXTALE_CH-style pseudo-character: left radical squeezed left, right component on the right.
+struct PseudoGlyph: View {
+    let parts: String
+    let size: CGFloat
+    private static let narrowForms: Set<Character> = ["氵", "亻", "扌", "忄", "纟", "讠", "钅", "礻"]
+    var body: some View {
+        let cs = Array(parts)
+        let left = cs.first.map(String.init) ?? "", right = cs.count > 1 ? String(cs[1]) : ""
+        let narrow = cs.first.map { Self.narrowForms.contains($0) } ?? false
+        let font = Font.system(size: size, weight: .regular, design: .serif)
+        ZStack {
+            Text(left).font(font).scaleEffect(x: narrow ? 1 : 0.45, y: 1, anchor: .leading)
+                .frame(width: size, alignment: .leading)
+                .offset(x: narrow ? -size * 0.22 : 0)
+            Text(right).font(font).scaleEffect(x: 0.6, y: 1, anchor: .trailing)
+                .frame(width: size, alignment: .trailing)
+        }
+        .frame(width: size, height: size * 1.2)
+        .accessibilityLabel("假字")
     }
 }

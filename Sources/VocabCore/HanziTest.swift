@@ -40,6 +40,20 @@ public struct HanziList: Sendable {
     public static let shared: HanziList? = bundledURL().flatMap { try? String(contentsOf: $0, encoding: .utf8) }.flatMap(HanziList.init(tsv:))
 }
 
+/// Pseudo-characters (left radical, right component) that no encoded character combines
+/// (built from cjkvi-ids by scripts/build-pseudohanzi.py).
+public enum HanziPseudo {
+    public static func bundledURL() -> URL? {
+        if let u = Bundle.main.url(forResource: "hanzi-pseudo", withExtension: "tsv") { return u }
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/Data/hanzi-pseudo.tsv")
+        return FileManager.default.fileExists(atPath: repo.path) ? repo : nil
+    }
+    public static let shared: [String] = (bundledURL().flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "")
+        .split(separator: "\n").filter { !$0.hasPrefix("#") }
+        .compactMap { l in let f = l.split(separator: "\t"); return f.count == 2 ? String(f[0] + f[1]) : nil }
+}
+
 /// Pinyin helpers for the reading check.
 public enum Pinyin {
     static let marks: [Character: (Character, Int)] = {
@@ -74,8 +88,10 @@ public struct HanziTestItem: Equatable, Sendable {
     public var char: String
     public var readings: [String]
     public var band: Int
-    /// Frequency rank (1 = most frequent).
+    /// Frequency rank (1 = most frequent); 0 for pseudo-characters.
     public var rank: Int = 0
+    /// LEXTALE_CH-style pseudo-character: `char` holds left radical + right component, drawn composed.
+    public var isPseudo = false
     /// Spot-check this item when answered 认识.
     public var check: Bool
     public enum CheckKind: Equatable, Sendable { case reading, meaning }
@@ -193,7 +209,8 @@ public struct HanziTestRun: Sendable {
     private var checks = 0
     private var knownClaims = 0
     private var used = Set<Int>()
-    private var estimates: [Double] = []
+    private var pseudo: [String]
+    public static let pseudoEvery = 6
     public private(set) var items: [HanziTestItem] = []
     /// True while the current item waits for its spot-check answer.
     public private(set) var askingCheck = false
@@ -211,11 +228,12 @@ public struct HanziTestRun: Sendable {
         byRadical = rad
         allReadings = Array(Set(list.chars.flatMap(\.readings))).sorted()
         self.gloss = gloss ?? { $0.gloss.isEmpty ? nil : $0.gloss }
+        pseudo = HanziPseudo.shared.shuffled(using: &rng)
         appendNext()
     }
 
     private func bandOf(_ rank: Int) -> Int { bands.firstIndex { ($0.lo...$0.hi).contains(rank) } ?? bands.count - 1 }
-    private var answeredItems: [HanziTestItem] { items.filter { $0.known != nil && !(askingCheck && $0 == items.last) } }
+    private var answeredItems: [HanziTestItem] { items.filter { !$0.isPseudo && $0.known != nil && !(askingCheck && $0 == items.last) } }
     private var xMax: Double { xs.last ?? 9 }
 
     public var verified: Double {
@@ -233,12 +251,17 @@ public struct HanziTestRun: Sendable {
         let r = answeredItems
         guard !r.isEmpty else { return nil }
         let v = verified
-        return Adaptive.fit(r.map { (log(Double($0.rank)), Self.label($0, verified: v)) }, xMax: xMax)
+        return Adaptive.fit(r.map { (log(Double($0.rank)), Self.label($0, verified: v)) }, x0: log(Double(Self.startRank)))
     }
 
     private mutating func appendNext() {
-        let hist = answeredItems.map { (x: log(Double($0.rank)), known: $0.known! && $0.checkCorrect != false) }
-        let target = Adaptive.nextTarget(history: hist, fit: currentFit(), startX: log(Double(Self.startRank)), xMax: xMax)
+        let realCount = items.filter { !$0.isPseudo }.count
+        if realCount > 0, realCount % Self.pseudoEvery == 0, items.last?.isPseudo == false, !pseudo.isEmpty {
+            var p = HanziTestItem(char: pseudo.removeFirst(), readings: [], band: -1, check: false)
+            p.isPseudo = true
+            items.append(p); return
+        }
+        let target = Adaptive.nextTarget(fit: currentFit(), x0: log(Double(Self.startRank)), xMax: xMax)
         var i = Adaptive.nearest(target, in: xs, used: used)
         while let j = i, list[j].readings.isEmpty { used.insert(j); i = Adaptive.nearest(target, in: xs, used: used) }
         guard let k = i else { return }
@@ -301,7 +324,7 @@ public struct HanziTestRun: Sendable {
     public mutating func answer(_ known: Bool) {
         guard !askingCheck, let i = items.indices.last, items[i].known == nil else { return }
         items[i].known = known
-        if known {
+        if known && !items[i].isPseudo {
             knownClaims += 1
             if knownClaims % Self.checkEvery == 1 {
                 var it = items[i]; configureCheck(&it); items[i] = it
@@ -320,8 +343,7 @@ public struct HanziTestRun: Sendable {
     }
 
     private mutating func advance() {
-        estimates.append(Double(result().estimate))
-        if Adaptive.shouldStop(estimates: estimates, answered: answered) { return }
+        if items.last?.isPseudo != true, Adaptive.shouldStop(fit: currentFit(), answered: answered) { return }
         appendNext()
     }
 
@@ -329,10 +351,12 @@ public struct HanziTestRun: Sendable {
         if askingCheck, let i = items.indices.last {
             askingCheck = false; items[i].known = nil; items[i].check = false; items[i].choices = []; knownClaims -= 1; checks -= 1; return
         }
-        if let last = items.last, last.known == nil { items.removeLast(); used.remove(last.rank - 1) }
+        if let last = items.last, last.known == nil {
+            items.removeLast()
+            if last.isPseudo { pseudo.insert(last.char, at: 0) } else { used.remove(last.rank - 1) }
+        }
         guard let i = items.indices.last else { appendNext(); return }
-        if !estimates.isEmpty { estimates.removeLast() }
-        if items[i].known == true { knownClaims -= 1 }
+        if items[i].known == true && !items[i].isPseudo { knownClaims -= 1 }
         if items[i].check { checks -= 1 }
         items[i].known = nil; items[i].checkCorrect = nil; items[i].check = false; items[i].choices = []
     }
@@ -342,17 +366,24 @@ public struct HanziTestRun: Sendable {
     public func result(date: Date = Date()) -> VocabTestResult {
         let ranks = Array(1...max(1, list.count))
         let v = verified
+        let ps = items.filter { $0.isPseudo && $0.known != nil }
+        let yes = ps.filter { $0.known == true }.count
+        let f = Adaptive.shrunkFalseAlarm(yes: yes, of: ps.count)
+        let raw = ps.isEmpty ? 0 : Double(yes) / Double(ps.count)
+        let correct: (Double) -> Double = { p in f >= 1 ? 0 : max(0, (p - f) / (1 - f)) }
         guard let fit = currentFit() else {
             return VocabTestResult(date: date, estimate: 0, low: 0, high: 0, falseAlarm: 1 - v, bands: [], bandRanges: bands, knownBands: [], checkBands: [])
         }
-        let est = Adaptive.expected(ranks, mu: fit.mu, s: fit.slope)
-        let lo = Adaptive.expected(ranks, mu: fit.mu - 1.96 * fit.sdMu, s: fit.slope)
-        let hi = Adaptive.expected(ranks, mu: fit.mu + 1.96 * fit.sdMu, s: fit.slope)
+        let est = Adaptive.expected(ranks, mu: fit.mu, s: fit.slope, correct: correct)
+        let lo = Adaptive.expected(ranks, mu: fit.mu - 1.96 * fit.sdMu, s: fit.slope, correct: correct)
+        let hi = Adaptive.expected(ranks, mu: fit.mu + 1.96 * fit.sdMu, s: fit.slope, correct: correct)
         var asked: [Int: (Int, Int)] = [:]
-        for it in answeredItems { let a = asked[it.band] ?? (0, 0); asked[it.band] = (a.0 + 1, a.1 + (it.known! ? 1 : 0)) }
+        for it in answeredItems { let a = asked[it.band] ?? (0, 0); asked[it.band] = (a.0 + 1, a.1 + (it.known! && it.checkCorrect != false ? 1 : 0)) }
         let byBand = bands.map { Array($0.lo...$0.hi) }
-        let scores = Adaptive.bands(bands, ranksByBand: byBand, asked: asked) { Adaptive.sigma(log(Double($0)), mu: fit.mu, s: fit.slope) }
+        let scores = Adaptive.bands(bands, ranksByBand: byBand, asked: asked) { correct(Adaptive.sigma(log(Double($0)), mu: fit.mu, s: fit.slope)) }
         return VocabTestResult(date: date, estimate: Int(est.rounded()), low: Int(lo.rounded()), high: Int(hi.rounded()),
-                               falseAlarm: 1 - v, bands: scores, bandRanges: bands, knownBands: [], checkBands: [])
+                               falseAlarm: 1 - v, bands: scores, bandRanges: bands, knownBands: [], checkBands: [],
+                               reliability: max(Adaptive.reliability(falseAlarm: raw, pseudoSeen: ps.count), v < 0.6 ? 2 : v < 0.8 ? 1 : 0),
+                               crossCheck: Adaptive.stratified(bands, asked: asked), pseudoYes: raw)
     }
 }
