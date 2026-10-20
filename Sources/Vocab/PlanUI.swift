@@ -225,54 +225,27 @@ struct PlanSettingsView: View {
 
     var body: some View {
         Form {
-                Section("词汇量") {
-                    if let r = model.results.first {
-                        LabeledContent("上次结果", value: "约 \(r.estimate) 词（\(r.low)–\(r.high)）")
-                            .modifier(DeletableResult(result: r, hanzi: false))
-                        LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
-                        if model.results.count > 1 {
-                            RowDisclosureLocal("历史记录") {
-                                ForEach(Array(model.results.dropFirst().enumerated()), id: \.offset) { _, h in
-                                    ResultRow(result: h, unit: "词", hanzi: false)
-                                }
+                Section("水平测试") {
+                    TestSummaryRow(title: "词汇量", unit: "词", results: model.results, hanzi: false,
+                                   empty: "认识的词会被跳过，不用再背") { testing = true }
+                    if model.results.count > 1 {
+                        RowDisclosureLocal("词汇量历史") {
+                            ForEach(Array(model.results.dropFirst().enumerated()), id: \.offset) { _, h in
+                                ResultRow(result: h, unit: "词", hanzi: false)
                             }
                         }
-                    } else {
-                        HStack {
-                            Text("测一下词汇量，认识的词会被跳过，不用再背。").foregroundStyle(.secondary)
-                            Spacer()
-                            Button("开始测试") { testing = true }.buttonStyle(.borderedProminent).controlSize(.large)
-                        }
                     }
-                    if !model.results.isEmpty || model.lastBatch != nil {
-                    HStack {
-                        if !model.results.isEmpty { Button("重新测试") { testing = true } }
-                        Spacer()
-                        if let b = model.lastBatch {
-                            Button("撤销「\(b.label)」") { model.undoLastBatch(); refresh() }
-                        }
-                    }
-                    }
-                }
-                Section("识字量") {
-                    if let r = model.hanziResults.first {
-                        LabeledContent("上次结果", value: "约 \(r.estimate) 字（\(r.low)–\(r.high)）")
-                            .modifier(DeletableResult(result: r, hanzi: true))
-                        LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
-                        if model.hanziResults.count > 1 {
-                            RowDisclosureLocal("历史记录") {
-                                ForEach(Array(model.hanziResults.dropFirst().enumerated()), id: \.offset) { _, h in
-                                    ResultRow(result: h, unit: "字", hanzi: true)
-                                }
+                    TestSummaryRow(title: "识字量", unit: "字", results: model.hanziResults, hanzi: true,
+                                   empty: "只做记录，不影响背单词计划") { hanziTesting = true }
+                    if model.hanziResults.count > 1 {
+                        RowDisclosureLocal("识字量历史") {
+                            ForEach(Array(model.hanziResults.dropFirst().enumerated()), id: \.offset) { _, h in
+                                ResultRow(result: h, unit: "字", hanzi: true)
                             }
                         }
-                        HStack { Button("重新测试") { hanziTesting = true }; Spacer() }
-                    } else {
-                        HStack {
-                            Text("测一下认识多少个常用汉字（只做记录，不影响背单词计划）。").foregroundStyle(.secondary)
-                            Spacer()
-                            Button("开始测试") { hanziTesting = true }
-                        }
+                    }
+                    if let b = model.lastBatch {
+                        HStack { Spacer(); Button("撤销「\(b.label)」") { model.undoLastBatch(); refresh() } }
                     }
                 }
                 Section("词书和生词本") {
@@ -858,7 +831,7 @@ struct PseudoGlyph: View {
 }
 
 
-/// A saved test result in 历史记录; delete via context menu, hover trash button or ⌫ (with confirmation).
+/// A saved test result in 历史记录; delete via context menu or hover trash button (with confirmation). Not focusable (no stray focus ring).
 struct ResultRow: View {
     let result: VocabTestResult
     let unit: String
@@ -875,20 +848,16 @@ struct DeletableResult: ViewModifier {
     let hanzi: Bool
     @State private var confirm = false
     @State private var hover = false
-    @FocusState private var focused: Bool
     func body(content: Content) -> some View {
         HStack(spacing: 6) {
             content
             Button { confirm = true } label: { Image(systemName: "trash") }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)
-                .opacity(hover || focused ? 1 : 0).help("删除这条成绩")
+                .opacity(hover ? 1 : 0).help("删除这条成绩")
                 .accessibilityLabel("删除这条成绩")
         }
         .contentShape(Rectangle())
         .onHover { hover = $0 }
-        .focusable().focused($focused)
-        .onDeleteCommand { confirm = true }
-        .onKeyPress(.delete) { confirm = true; return .handled }
         .contextMenu { Button("删除这条成绩…", role: .destructive) { confirm = true } }
         .confirmationDialog("删除 \(result.date.formatted(date: .abbreviated, time: .shortened)) 的成绩？", isPresented: $confirm) {
             Button("删除", role: .destructive) { model.delete(result, hanzi: hanzi) }
@@ -909,5 +878,35 @@ enum RecentTestItems {
         var all = (UserDefaults.standard.array(forKey: key(kind)) as? [[String]]) ?? []
         all.append(items); if all.count > runs { all.removeFirst(all.count - runs) }
         UserDefaults.standard.set(all, forKey: key(kind))
+    }
+}
+
+
+/// One compact row per test: 「词汇量   约 1,823 词（1,410–2,357）· 10月20日  [重新测试]」.
+struct TestSummaryRow: View {
+    let title: String
+    let unit: String
+    let results: [VocabTestResult]
+    let hanzi: Bool
+    let empty: String
+    let start: () -> Void
+    var body: some View {
+        if let r = results.first {
+            LabeledContent(title) {
+                HStack(spacing: 6) {
+                    Text("约 \(r.estimate.formatted()) \(unit)（\(r.low.formatted())–\(r.high.formatted())）").monospacedDigit()
+                    Text("· \(r.date.formatted(.dateTime.month().day()))").font(.caption).foregroundStyle(.secondary)
+                    Button("重新测试", action: start).controlSize(.small)
+                }
+            }
+            .modifier(DeletableResult(result: r, hanzi: hanzi))
+        } else {
+            LabeledContent(title) {
+                HStack(spacing: 6) {
+                    Text(empty).font(.caption).foregroundStyle(.secondary)
+                    Button("开始测试", action: start).controlSize(.small)
+                }
+            }
+        }
     }
 }
