@@ -24,10 +24,9 @@ public struct StudyPlan: Codable, Equatable, Sendable {
     public var reviewAuto = true
     /// The user changed the review limit (so a stored 200 is theirs, not the old default).
     public var reviewEdited = false
-    public static let autoReviewFactor = 5
     /// Effective daily review limit. Setting it switches to a manual limit.
     public var dailyReview: Int {
-        get { reviewAuto ? max(10, dailyNew * Self.autoReviewFactor) : manualReview }
+        get { reviewAuto ? PlanMath.autoReviewLimit(dailyNew: dailyNew) : manualReview }
         set { manualReview = newValue; reviewAuto = false }
     }
     public var targetDate: Date? = nil
@@ -113,6 +112,15 @@ public enum PlanMath {
         let v = Double(total) / Double(cards)
         reviewCache.withLock { $0[key] = v }
         return v
+    }
+    /// 自动 review limit: the estimated steady-state load, rounded up to a multiple of 10 (at least 10).
+    public static func autoReviewLimit(dailyNew: Int, _ f: FSRS = Scheduler.shared) -> Int {
+        max(10, Int((Double(estimatedDailyReviews(dailyNew: dailyNew, f)) / 10).rounded(.up)) * 10)
+    }
+    /// Rough minutes per day: ~30 s per new word (incl. its learning steps), ~8 s per review.
+    public static let secondsPerNew = 30.0, secondsPerReview = 8.0
+    public static func dailyMinutes(new: Int, reviews: Int) -> Int {
+        Int(((Double(new) * secondsPerNew + Double(reviews) * secondsPerReview) / 60).rounded(.up))
     }
     /// Estimated reviews per day once the plan has run a while (new words/day × reviews per word).
     public static func estimatedDailyReviews(dailyNew: Int, _ f: FSRS = Scheduler.shared) -> Int {

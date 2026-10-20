@@ -263,7 +263,7 @@ struct PlanSettingsView: View {
                     }
                     .pickerStyle(.segmented).fixedSize()
                     if model.plan.reviewAuto {
-                        LabeledContent("每天最多复习", value: "\(model.plan.dailyReview)（新词 × \(StudyPlan.autoReviewFactor)）")
+                        LabeledContent("每天最多复习", value: "\(model.plan.dailyReview)（按预计复习量）")
                     } else {
                         Stepper(value: Binding(get: { model.plan.dailyReview },
                                                set: { model.plan.dailyReview = $0; model.plan.reviewEdited = true
@@ -324,6 +324,13 @@ struct PlanSettingsView: View {
             } else if let end {
                 LabeledContent("预计学完", value: end.formatted(date: .long, time: .omitted))
                 Text("每天 \(eff) 个新词").font(.caption).foregroundStyle(.secondary)
+                let rev = PlanMath.estimatedDailyReviews(dailyNew: eff)
+                let mins = PlanMath.dailyMinutes(new: eff, reviews: rev)
+                LabeledContent("每天约", value: "\(eff + rev) 个 · \(mins) 分钟")
+                Text("\(eff) 个新词 + 约 \(rev) 个复习（稳定后估算）").font(.caption).foregroundStyle(.secondary)
+                if mins > 60 {
+                    Text("每天要花 1 小时以上，计划偏重，可以把目标放宽一些。").font(.caption).foregroundStyle(.orange)
+                }
             } else {
                 Text("复习上限已被到期的单词占满，暂时不学新词").foregroundStyle(.secondary)
             }

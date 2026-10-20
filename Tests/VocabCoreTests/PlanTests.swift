@@ -5,8 +5,10 @@ import XCTest
 final class PlanTests: XCTestCase {
     func testDailyLimits() {
         var p = StudyPlan()
-        XCTAssertEqual(p.dailyNew, 20); XCTAssertTrue(p.reviewAuto); XCTAssertEqual(p.dailyReview, 100)   // 自动 = new × 5
-        p.dailyNew = 30; XCTAssertEqual(p.dailyReview, 150); p.dailyNew = 20
+        XCTAssertEqual(p.dailyNew, 20); XCTAssertTrue(p.reviewAuto); XCTAssertEqual(p.dailyReview, PlanMath.autoReviewLimit(dailyNew: 20))
+        XCTAssertEqual(p.dailyReview % 10, 0)
+        XCTAssertGreaterThanOrEqual(p.dailyReview, PlanMath.estimatedDailyReviews(dailyNew: 20))   // 自动 = load rounded up to 10
+        p.dailyNew = 30; XCTAssertEqual(p.dailyReview, PlanMath.autoReviewLimit(dailyNew: 30)); p.dailyNew = 20
         p.dailyReview = 20; XCTAssertFalse(p.reviewAuto)
         XCTAssertEqual(PlanMath.newToday(plan: p, due: 5, introducedToday: 0), 15)     // review limit − due
         XCTAssertEqual(PlanMath.reviewsToday(plan: p, due: 250), 20)
@@ -60,16 +62,16 @@ final class PlanTests: XCTestCase {
     func testOldDefaultReviewLimitMigrates() throws {
         let old = #"{"sources":[],"dailyNew":25,"dailyReview":200,"wordbookFirst":true,"configured":true}"#
         let p = try JSONDecoder().decode(StudyPlan.self, from: Data(old.utf8))
-        XCTAssertTrue(p.reviewAuto); XCTAssertEqual(p.dailyReview, 125); XCTAssertEqual(p.dailyNew, 25); XCTAssertTrue(p.configured)
+        XCTAssertTrue(p.reviewAuto); XCTAssertEqual(p.dailyReview, PlanMath.autoReviewLimit(dailyNew: 25)); XCTAssertEqual(p.dailyNew, 25); XCTAssertTrue(p.configured)
         let twenty = #"{"dailyNew":41,"dailyReview":20,"reviewEdited":false}"#
-        XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: Data(twenty.utf8)).dailyReview, 205)
+        XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: Data(twenty.utf8)).dailyReview, PlanMath.autoReviewLimit(dailyNew: 41))
         let custom = #"{"dailyReview":150}"#
         XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: Data(custom.utf8)).dailyReview, 150)
         var man = StudyPlan(); man.dailyReview = 20      // manual 20 survives a round trip
         let back = try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(man))
         XCTAssertFalse(back.reviewAuto); XCTAssertEqual(back.dailyReview, 20)
         var auto = StudyPlan(); auto.dailyReview = 50; auto.reviewAuto = true
-        XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(auto)).dailyReview, 100)
+        XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(auto)).dailyReview, PlanMath.autoReviewLimit(dailyNew: 20))
         var mine = StudyPlan(); mine.dailyReview = 200; mine.reviewEdited = true
         XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(mine)).dailyReview, 200)
     }
@@ -115,6 +117,11 @@ final class PlanTests: XCTestCase {
         XCTAssert(per > 3 && per < 15, "\(per)")
         XCTAssert(PlanMath.reviewsPerNewWord(FSRS(desiredRetention: 0.95)) > per)   // higher retention → more reviews
         XCTAssertEqual(PlanMath.estimatedDailyReviews(dailyNew: 0), 0)
+        XCTAssertEqual(PlanMath.autoReviewLimit(dailyNew: 0), 10)
+        let f = FSRS(desiredRetention: 0.9)
+        let est = PlanMath.estimatedDailyReviews(dailyNew: 20, f), auto = PlanMath.autoReviewLimit(dailyNew: 20, f)
+        XCTAssert(auto >= est && auto < est + 10 && auto % 10 == 0)
+        XCTAssertEqual(PlanMath.dailyMinutes(new: 20, reviews: 150), 30)          // 10 + 20 min
     }
 
     func testRatios() {
