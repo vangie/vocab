@@ -75,6 +75,18 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         w.titleVisibility = .hidden    // the mode switcher takes the title's place
         bind()
         refresh()
+        // Lay out with the final safe area before revealing the window (see Probe).
+        w.contentView?.layoutSubtreeIfNeeded()
+        let first = w.contentLayoutRect
+        DispatchQueue.main.async {
+            w.displayIfNeeded()
+            w.alphaValue = 1
+            VocabLog.log("window shown: contentLayoutRect \(NSStringFromRect(first))")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                let later = w.contentLayoutRect
+                VocabLog.log("window +1s: contentLayoutRect \(NSStringFromRect(later)) \(later == first ? "(stable)" : "(JUMPED)")")
+            }
+        }
         // Re-assert on key/reopen in case SwiftUI swaps the toolbar or resets the title.
         NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification, object: w)
             .sink { [weak self, weak w] _ in
@@ -339,6 +351,14 @@ struct WindowToolbarInstaller: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard let w = window else { return }
+            // SwiftUI orders the window front before launch finishes, but the toolbar can only be
+            // installed after that; keep the window transparent until it is, so the content
+            // doesn't visibly jump down when the toolbar appears.
+            if w.toolbar?.identifier != "vocab.main" {
+                w.alphaValue = 0
+                // Never leave it invisible, whatever happens.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { if w.alphaValue == 0 { w.alphaValue = 1 } }
+            }
             DispatchQueue.main.async { MainActor.assumeIsolated { MainToolbarController.shared.attach(to: w) } }
             // SwiftUI may install its own toolbar after us; re-assert once things settle.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { MainActor.assumeIsolated { MainToolbarController.shared.attach(to: w) } }
