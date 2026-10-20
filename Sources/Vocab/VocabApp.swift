@@ -65,8 +65,8 @@ struct VocabApp: App {
         Settings {
             SettingsView()
                 .environmentObject(settings)
-                .frame(width: 760, height: 640)
         }
+        .windowResizability(.contentSize)   // window height follows the tab / selected dictionary
     }
 }
 

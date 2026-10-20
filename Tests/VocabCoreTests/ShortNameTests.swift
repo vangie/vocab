@@ -36,3 +36,9 @@ final class WikipediaHTMLTests: XCTestCase {
         }
     }
 }
+
+final class PlainTextTests: XCTestCase {
+    func testCopyrightMarkup() {
+        XCTAssertEqual(DictionaryPrefs.plainText("© 2004 A<br/>B &amp; C<br>D"), "© 2004 A\nB & C\nD")
+    }
+}

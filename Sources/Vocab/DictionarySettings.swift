@@ -69,35 +69,37 @@ enum DictionaryOrder {
 /// alternating rows, checkbox + name, language right-aligned), and the selected dictionary's
 /// preferences in a bordered box below. Resets live in the table's context menu.
 struct DictionarySettingsView: View {
+    /// 11 rows + header, as in Dictionary.app.
+    static let listHeight: CGFloat = 11 * 24 + 28
     @State private var dicts: [DictionaryInfo] = []
     @State private var enabled: [String] = []
     @State private var selection: String?
     @State private var contentHeight: CGFloat = 60
 
     var body: some View {
-        GeometryReader { geo in
-            VStack(alignment: .leading, spacing: 8) {
-                Text("将参考源拖移成你喜欢的顺序：").font(.system(size: 13))
-                DictionaryTable(dicts: $dicts, enabled: $enabled, selection: $selection,
-                                onChange: persist, onResetOrder: resetOrder, onResetPrefs: resetPrefs)
-                    .frame(height: max(150, (geo.size.height - 40) * 0.4))
-                    .padding(.bottom, 8)
-                let tableH = max(150, (geo.size.height - 40) * 0.4)
-                let room = max(40, geo.size.height - 40 - 26 - tableH - 16 - 32)
-                if let id = selection, let d = dicts.first(where: { $0.id == id }) {
-                    ShortNameField(dictionary: d).id("short-" + d.id).padding(.bottom, 8)
-                    // Like native: the box hugs its content (a short description is a short box),
-                    // and scrolls inside only when the content is taller than the space left.
-                    DictionaryDetailView(dictionary: d, height: $contentHeight).id(d.id)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: min(contentHeight, room))
-                        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
-                        .overlay(Rectangle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
-                }
-                Spacer(minLength: 0)
+        // Like Dictionary.app: a fixed ~11-row list; the info box is as tall as its content (capped at
+        // 480 pt, then it scrolls), and the Settings window takes this tab's height, so it grows/shrinks per
+        // selected dictionary with no empty space at the bottom.
+        let maxDetail: CGFloat = 480     // about Dictionary.app's tallest (Longman) box; scrolls beyond
+        VStack(alignment: .leading, spacing: 8) {
+            Text("将参考源拖移成你喜欢的顺序：").font(.system(size: 13))
+            DictionaryTable(dicts: $dicts, enabled: $enabled, selection: $selection,
+                            onChange: persist, onResetOrder: resetOrder, onResetPrefs: resetPrefs)
+                .frame(height: Self.listHeight)
+                .padding(.bottom, 8)
+            if let id = selection, let d = dicts.first(where: { $0.id == id }) {
+                ShortNameField(dictionary: d).id("short-" + d.id).padding(.bottom, 8)
+                DictionaryDetailView(dictionary: d, height: $contentHeight).id(d.id)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: min(max(contentHeight, 40), maxDetail))
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+                    .overlay(Rectangle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
             }
-            .padding(20)
         }
+        .padding(20)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: SettingsView.width, alignment: .top)
+        .animation(.easeInOut(duration: 0.2), value: contentHeight)
         .onAppear { DictionaryWatcher.shared.start(); reload() }
         .onReceive(NotificationCenter.default.publisher(for: .vocabDictionariesInstalled)) { _ in reload() }
     }
@@ -299,7 +301,7 @@ struct DictionaryDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(dictionary.name).font(.headline)
-                    if let c = p?.copyright { Text(c) }
+                    if let c = p?.copyright { Text(DictionaryPrefs.plainText(c)) }
                     if let m = p?.manufacturer { Text("制作：\(m)").foregroundStyle(.secondary) }
                     if let v = p?.version { Text("版本：\(v)").foregroundStyle(.secondary) }
                     let langs = DictionaryOrder.languageLabel(dictionary)
@@ -332,14 +334,14 @@ struct DictionaryPrefsWebView: NSViewRepresentable {
         uc.add(context.coordinator, name: "vocabPrefs")
         uc.add(context.coordinator, name: "vocabHeight")
         let values = (try? JSONSerialization.data(withJSONObject: prefs.effective())).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let copyright = (try? JSONSerialization.data(withJSONObject: [prefs.copyright ?? ""])).flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+        let copyright = (try? JSONSerialization.data(withJSONObject: [DictionaryPrefs.plainText(prefs.copyright ?? "")])).flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
         let js = """
         (function(){
           var prefs = \(values);
           var st = document.createElement('style');
           st.textContent = ':root{color-scheme:light dark} body{font:13px -apple-system,system-ui,sans-serif;line-height:1.35;background:transparent;margin:10px;color:-apple-system-label} hr{border:0;border-top:1px solid -apple-system-separator;margin:8px 0} a{color:-apple-system-link} input,select{-webkit-appearance:auto!important;appearance:auto!important;accent-color:-apple-system-control-accent;font:inherit;margin:3px 5px 3px 0;vertical-align:-2px} input[type=checkbox],input[type=radio]{width:14px;height:14px}';
           document.head && document.head.appendChild(st);
-          var c = document.getElementById('copyright'); if (c && !c.textContent.trim()) c.textContent = \(copyright)[0];
+          var c = document.getElementById('copyright'); if (c && !c.textContent.trim()) { c.textContent = \(copyright)[0]; c.style.whiteSpace = 'pre-line'; }
           var inputs = document.querySelectorAll('input, select');
           inputs.forEach(function(el){
             var n = el.name; if (!n) return;

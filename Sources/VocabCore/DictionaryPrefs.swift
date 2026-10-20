@@ -31,6 +31,16 @@ public struct DictionaryPrefs: Sendable {
         (info["DCSDictionaryXSL"] as? String).map { resources.appendingPathComponent($0) }
             .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
+    /// Info.plist strings sometimes carry markup («…<br/>…»): line breaks for <br>, other tags dropped.
+    public static func plainText(_ s: String) -> String {
+        var t = s.replacingOccurrences(of: #"<br\s*/?>"#, with: "\n", options: [.regularExpression, .caseInsensitive])
+        t = t.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+        for (e, c) in [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&nbsp;", " "), ("&copy;", "©")] {
+            t = t.replacingOccurrences(of: e, with: c)
+        }
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public var copyright: String? { (info["DCSDictionaryCopyright"] ?? info["NSHumanReadableCopyright"]) as? String }
     public var manufacturer: String? { info["DCSDictionaryManufacturerName"] as? String }
     public var version: String? { (info["CFBundleShortVersionString"] ?? info["CFBundleVersion"]) as? String }

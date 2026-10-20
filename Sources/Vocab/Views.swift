@@ -353,6 +353,8 @@ struct EntryWebView: NSViewRepresentable {
 }
 
 struct SettingsView: View {
+    static let width: CGFloat = 760
+    static let formHeight: CGFloat = 640
     @EnvironmentObject var settings: SettingsModel
     @ObservedObject private var state = AppState.shared
     @State private var dicts: [DictionaryInfo] = []
@@ -387,6 +389,7 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
+            .frame(width: Self.width, height: Self.formHeight)
             .onAppear { settings.refreshTrust(); settings.startStatusUpdates() }
             .tabItem { Label("通用", systemImage: "gearshape") }
             .tag("general")
@@ -396,6 +399,7 @@ struct SettingsView: View {
             .tag("dictionary")
 
             PlanSettingsView()
+            .frame(width: Self.width, height: Self.formHeight)
             .tabItem { Label("记词", systemImage: "rectangle.stack") }
             .tag("review")
         }
