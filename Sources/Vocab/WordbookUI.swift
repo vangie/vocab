@@ -101,6 +101,13 @@ final class WordbookModel: ObservableObject {
     func setDefaultBook(_ id: Int64) { try? store?.setDefaultBook(id); reload() }
     func deleteBook(_ id: Int64) { try? store?.deleteBook(id); reload() }
 
+    /// 新建生词本 (toolbar, ⇧⌘N, File menu): ask for a name, then show the new book.
+    func promptNewBook() {
+        AppState.shared.mode = .wordbook
+        guard let n = WordTable.Coordinator.ask("新建生词本", "名称", ""), let b = createBook(n) else { return }
+        AppState.shared.wordGroup = .book(b.id)
+    }
+
     func flash(_ s: String) {
         toast = s
         Task { try? await Task.sleep(nanoseconds: 2_000_000_000); if toast == s { toast = nil } }
@@ -171,7 +178,6 @@ struct WordbookSidebar: View {
     @ObservedObject var state = AppState.shared
     @State private var renaming: Wordbook?
     @State private var newName = ""
-    @State private var creating = false
 
     var body: some View {
         List(selection: Binding(get: { state.wordGroup }, set: { if let g = $0 { state.wordGroup = g } })) {
@@ -208,19 +214,6 @@ struct WordbookSidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            HStack {
-                Button { newName = ""; creating = true } label: { Image(systemName: "plus") }
-                    .buttonStyle(.borderless).help("新建生词本")
-                Spacer()
-            }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-        }
-        .alert("新建生词本", isPresented: $creating) {
-            TextField("名称", text: $newName)
-            Button("创建") { if let b = book.createBook(newName) { state.wordGroup = .book(b.id) } }
-            Button("取消", role: .cancel) {}
-        }
         .alert("重命名生词本", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("名称", text: $newName)
             Button("好") { if let r = renaming { book.renameBook(r.id, newName) }; renaming = nil }

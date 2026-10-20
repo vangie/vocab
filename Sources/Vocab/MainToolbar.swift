@@ -33,6 +33,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     private let modeID = NSToolbarItem.Identifier("vocab.mode")
     private let fontID = NSToolbarItem.Identifier("vocab.font")
     private let searchID = NSToolbarItem.Identifier("vocab.search")
+    private let newBookID = NSToolbarItem.Identifier("vocab.newBook")
 
     private weak var window: NSWindow?
     private var navGroup: NSToolbarItemGroup?
@@ -95,6 +96,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         let lookupMode = state.mode == .lookup
         // ‹ › and 小|大 only do something in 词典: take them out of the toolbar elsewhere
         // (removing items keeps AppKit's layout and » overflow exact, and the AX tree honest).
+        setPresentAtStart(newBookID, state.mode == .wordbook)
         setPresent(fontID, lookupMode, before: searchID)
         setPresent(navID, lookupMode, before: lookupMode ? fontID : searchID)
         if let f = searchItem?.searchField {
@@ -116,6 +118,20 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         } else if present {
             if let a = after, let j = ids.firstIndex(of: a) { tb.insertItem(withItemIdentifier: id, at: j + 1) }
             else if let b = before, let j = ids.firstIndex(of: b) { tb.insertItem(withItemIdentifier: id, at: j) }
+        }
+    }
+
+    /// [flexible space][新建生词本] in the sidebar section (before the tracking separator), so the
+    /// button sits at the sidebar's trailing edge like Notes' new-folder button.
+    private func setPresentAtStart(_ id: NSToolbarItem.Identifier, _ present: Bool) {
+        guard let tb = window?.toolbar else { return }
+        if let i = tb.items.firstIndex(where: { $0.itemIdentifier == id }) {
+            guard !present else { return }
+            tb.removeItem(at: i)
+            if i > 0, tb.items[i - 1].itemIdentifier == .flexibleSpace { tb.removeItem(at: i - 1) }
+        } else if present {
+            tb.insertItem(withItemIdentifier: id, at: 0)
+            tb.insertItem(withItemIdentifier: .flexibleSpace, at: 0)
         }
     }
 
@@ -142,7 +158,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     // MARK: NSToolbarDelegate
 
     func toolbarAllowedItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarTrackingSeparator, navID, .flexibleSpace, modeID, fontID, searchID]
+        [newBookID, .sidebarTrackingSeparator, navID, .flexibleSpace, modeID, fontID, searchID]
     }
 
     func toolbarDefaultItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -187,6 +203,21 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             g.subitems.forEach { $0.autovalidates = false; $0.isEnabled = true }
             fontGroup = g
             return g
+        case newBookID:
+            let it = NSToolbarItem(itemIdentifier: id)
+            it.image = NSImage(systemSymbolName: "book.badge.plus", accessibilityDescription: "新建生词本")
+            it.label = "新建生词本"
+            it.toolTip = "新建生词本 (⇧⌘N)"
+            let b = NSButton(image: NSImage(systemSymbolName: "book.badge.plus", accessibilityDescription: "新建生词本")!,
+                             target: self, action: #selector(newBook(_:)))
+            b.bezelStyle = .toolbar
+            b.toolTip = it.toolTip
+            b.setAccessibilityLabel("新建生词本")
+            it.view = b
+            // View-based: a plain image item placed before the tracking separator stayed in the overflow menu.
+            it.autovalidates = false
+            it.visibilityPriority = .high
+            return it
         case searchID:
             let s = NSSearchToolbarItem(itemIdentifier: id)
             s.searchField.placeholderString = "搜索"
@@ -213,6 +244,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         let i = g.selectedIndex
         if Mode.allCases.indices.contains(i) { state.mode = Mode.allCases[i] }
     }
+
+    @objc private func newBook(_ sender: Any?) { WordbookModel.shared.promptNewBook() }
 
     @objc private func font(_ g: NSToolbarItemGroup) {
         if g.selectedIndex == 0 { lookup.zoomOut() } else { lookup.zoomIn() }
