@@ -203,12 +203,14 @@ struct PlanSettingsView: View {
                             Button("开始测试") { testing = true }.buttonStyle(.borderedProminent).controlSize(.large)
                         }
                     }
+                    if !model.results.isEmpty || model.lastBatch != nil {
                     HStack {
                         if !model.results.isEmpty { Button("重新测试") { testing = true } }
                         Spacer()
                         if let b = model.lastBatch {
                             Button("撤销「\(b.label)」") { model.undoLastBatch(); refresh() }
                         }
+                    }
                     }
                 }
                 Section("词书和生词本") {
