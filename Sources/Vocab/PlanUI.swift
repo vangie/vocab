@@ -95,6 +95,14 @@ final class PlanModel: ObservableObject {
         return topCache!
     }
 
+    /// Common words not to quiz when they came from a 词书 (not saved to 生词本): the top 1000 before
+    /// any test (if 跳过最常见的 1000 词 is on), otherwise the latest test's known bands.
+    func skippedCommonWords() -> Set<String> {
+        var s = listExclusions()
+        if let r = results.first { s.formUnion(knownWords(r).map { $0.lowercased() }) }
+        return s
+    }
+
     private func exclusions(_ queues: [PlanMixer.Queue]) -> Set<String> {
         var ex = (try? book.store?.planExclusions()) ?? []
         let top = listExclusions()

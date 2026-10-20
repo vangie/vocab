@@ -95,7 +95,12 @@ final class ReviewSession: ObservableObject {
         book.reload()
         let now = Date()
         let p = PlanModel.shared.plan
-        let live = book.items.filter { !Scheduler.isMastered($0.review) }
+        // Words studied from a 词书 earlier (outside 生词本) that are now known-common (e.g. 'of' drawn
+        // before the vocabulary test) are not quizzed; words the user saved to 生词本 always are.
+        let common = PlanModel.shared.skippedCommonWords()
+        let live = book.items.filter {
+            !Scheduler.isMastered($0.review) && !($0.bookID == nil && common.contains($0.word.lowercased()))
+        }
         let due = live.filter { !SessionPlanner.isNew($0) && $0.review.due <= now }.sorted { $0.review.due < $1.review.due }
         let reviews = Array(due.prefix(PlanMath.reviewsToday(plan: p, due: due.count)))
         let room = PlanMath.newToday(plan: p, due: due.count, introducedToday: Self.introducedToday)
