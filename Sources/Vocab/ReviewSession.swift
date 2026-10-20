@@ -2,6 +2,9 @@ import AppKit
 import AVFoundation
 import SwiftUI
 import VocabCore
+import os
+
+private let reviewLog = Logger(subsystem: "io.github.vangie.vocab", category: "review")
 
 /// One 背单词 session: plans the cards, picks a question type per card, scores answers and
 /// writes ratings back to the wordbook.
@@ -170,12 +173,23 @@ final class ReviewSession: ObservableObject {
         }
         phase = .loading
         let prev = previousType
+        loadToken &+= 1
+        let token = loadToken
+        reviewLog.info("load \(item.word, privacy: .public) id=\(id)")
         Task.detached(priority: .userInitiated) {
             var rng = SystemRandomNumberGenerator()
             let m = factory.materials(for: item.word)
             let type = QuestionPicker.pick(stage: CardStage(item.review), available: m.available, previous: prev, using: &rng)
             let q = factory.make(item, type: type, using: &rng)
-            await MainActor.run { self.present(q) }
+            await MainActor.run { self.present(q, token: token) }
+        }
+        // Watchdog: never leave the spinner up. If no question arrived (lookup stalled or the result was
+        // dropped), retry once, then fall back to a self-rated recall card that needs no materials.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            guard let self, self.loadToken == token, self.phase == .loading, self.question == nil || self.question?.itemID != id else { return }
+            reviewLog.error("load timed out for \(item.word, privacy: .public); using fallback")
+            var rng = SystemRandomNumberGenerator()
+            self.present(factory.make(item, type: .recall, using: &rng), token: token)
         }
         // Warm up the next card while this one is answered.
         if queue.pending.count > 1, let next = items[queue.pending[1]] {
@@ -183,8 +197,14 @@ final class ReviewSession: ObservableObject {
         }
     }
 
-    private func present(_ q: ReviewQuestion) {
-        guard queue.current == q.itemID else { return }
+    private var loadToken = 0
+
+    private func present(_ q: ReviewQuestion, token: Int) {
+        guard token == loadToken, phase == .loading else { return }   // a newer load superseded this one
+        guard queue.current == q.itemID else {
+            reviewLog.error("dropped question for \(q.word, privacy: .public): current card changed; reloading")
+            loadCurrent(); return
+        }
         question = q; previousType = q.type; askedAt = Date(); phase = .asking
         if q.type != .meaningToWord { speak(q) }   // that one would give the answer away
     }
