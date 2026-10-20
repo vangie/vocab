@@ -5,6 +5,43 @@ import WebKit
 
 extension Notification.Name {
     static let vocabDictionaryPrefsChanged = Notification.Name("VocabDictionaryPrefsChanged")
+    /// ~/Library/Dictionaries (or /Library/Dictionaries) changed: a dictionary was added or removed.
+    static let vocabDictionariesInstalled = Notification.Name("VocabDictionariesInstalled")
+}
+
+/// Watches the dictionary folders so newly installed dictionaries appear without a restart.
+@MainActor
+final class DictionaryWatcher {
+    static let shared = DictionaryWatcher()
+    private var sources: [DispatchSourceFileSystemObject] = []
+    private var pending: DispatchWorkItem?
+
+    func start() {
+        guard sources.isEmpty else { return }
+        let dirs = [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Dictionaries"),
+                    URL(fileURLWithPath: "/Library/Dictionaries")]
+        for d in dirs {
+            let fd = open(d.path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let s = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
+            s.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.changed() } }
+            s.setCancelHandler { close(fd) }
+            s.resume()
+            sources.append(s)
+        }
+    }
+
+    private func changed() {
+        // Copying a .dictionary bundle fires several events; settle first.
+        pending?.cancel()
+        let w = DispatchWorkItem {
+            VocabLog.log("dictionaries folder changed: rescanning")
+            NotificationCenter.default.post(name: .vocabDictionariesInstalled, object: nil)
+            NotificationCenter.default.post(name: .vocabDictionaryPrefsChanged, object: nil)
+        }
+        pending = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: w)
+    }
 }
 
 /// Order of all dictionaries in Vocab (enabled ones first by default).
@@ -60,7 +97,8 @@ struct DictionarySettingsView: View {
             }
             .padding(20)
         }
-        .onAppear(perform: reload)
+        .onAppear { DictionaryWatcher.shared.start(); reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .vocabDictionariesInstalled)) { _ in reload() }
     }
 
     private func reload() {

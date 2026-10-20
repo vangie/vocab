@@ -88,6 +88,30 @@ final class LookupModel: ObservableObject {
         }
     }
 
+    /// Bumped when the enabled set / order / prefs change, so views reading DictionarySelection re-render.
+    @Published private(set) var dictionariesVersion = 0
+
+    /// Settings › 词典 changed (toggle, reorder, prefs) or a dictionary was installed: refresh the
+    /// tab strip, the sidebar suggestions and the shown entry right away.
+    func dictionariesChanged() {
+        dictionariesVersion += 1
+        if let sel = selectedDictionary, !DictionarySelection.enabled().contains(where: { $0.id == sel }) { selectedDictionary = nil }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let term = searchedTerm
+        if !q.isEmpty, suggestionsQuery == q {
+            // Re-run the suggestions but keep showing the word the user picked.
+            suggestTask?.cancel()
+            let dicts = DictionarySelection.enabled()
+            suggestTask = Task {
+                let r = await Task.detached { Suggester.suggest(q, in: dicts) }.value
+                if Task.isCancelled { return }
+                self.suggestions = r.all
+                if let s = self.selection, !r.all.contains(where: { $0.id == s }) { self.selection = r.all.first?.id }
+            }
+        }
+        if !term.isEmpty { show(term, record: false) }
+    }
+
     /// Show the entries for a word without touching the search field.
     func show(_ word: String, record: Bool = true) {
         showTask?.cancel()

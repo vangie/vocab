@@ -84,6 +84,7 @@ struct SettingsOpener: ViewModifier {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DictionaryWatcher.shared.start()
         defer { MainToolbarController.launchFinished = true }
         SettingsModel.shared.applyOnLaunch()
         ReviewSession.applySchedulerSettings()
@@ -103,10 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         // Re-render the current word when dictionary order/enabled/prefs change in Settings.
         NotificationCenter.default.addObserver(forName: .vocabDictionaryPrefsChanged, object: nil, queue: .main) { _ in
-            Task { @MainActor in
-                let m = LookupModel.shared
-                if !m.searchedTerm.isEmpty { m.show(m.searchedTerm, record: false) }
-            }
+            Task { @MainActor in LookupModel.shared.dictionariesChanged() }
         }
     }
 

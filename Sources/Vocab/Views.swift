@@ -190,6 +190,7 @@ struct LookupDetailView: View {
     @EnvironmentObject var book: WordbookModel
 
     var body: some View {
+        let _ = lookup.dictionariesVersion   // re-render when the enabled dictionaries change
         VStack(spacing: 0) {
             DictionaryTabStrip(
                 dictionaries: lookup.searchedTerm.isEmpty ? DictionarySelection.enabled() : lookup.dictionariesWithResults,
