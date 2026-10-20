@@ -165,9 +165,14 @@ public enum EntryHTML {
         html, body { background: transparent; margin: 0; font-family: -apple-system, "PingFang SC", sans-serif; }
         body { padding: 8px 22px 30px; }
         iframe { display: block; width: 100%; border: 0; height: 40px; overflow: hidden; }
-        h2.dict { display: flex; align-items: center; gap: 12px; font-weight: 400; font-size: 17px;
-                  color: #8a8a8e; margin: 22px 0 6px; }
-        h2.dict::before, h2.dict::after { content: ""; flex: 1; border-top: 1px solid rgba(128,128,128,.45); }
+        /* Section titles: secondary-label contrast (≈7:1 on the popup's vibrancy and the window). */
+        h2.dict { display: flex; align-items: center; gap: 12px; font-weight: 500; font-size: 16px;
+                  color: #555558; margin: 22px 0 6px; }
+        h2.dict::before, h2.dict::after { content: ""; flex: 1; border-top: 1px solid rgba(0,0,0,.22); }
+        @media (prefers-color-scheme: dark) {
+          h2.dict { color: #bdbdc2; }
+          h2.dict::before, h2.dict::after { border-top-color: rgba(255,255,255,.26); }
+        }
         .empty { color: #8a8a8e; text-align: center; margin-top: 80px; font-size: 15px; }
         section:first-child h2.dict { margin-top: 6px; }
         </style></head><body>\(body)<script>\(spyScript)</script></body></html>
