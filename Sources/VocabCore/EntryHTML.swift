@@ -59,6 +59,8 @@ public enum EntryHTML {
     }
     """
 
+    public static func isWellFormedXML(_ s: String) -> Bool { XMLParser(data: Data(s.utf8)).parse() }
+
     /// Prepare a full entry document: point <base> at our scheme, inject CSS.
     public static func prepare(_ html: String, resourceDirectory: URL?) -> String {
         var s = html

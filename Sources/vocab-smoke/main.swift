@@ -88,8 +88,16 @@ case "render", "click":
     let isRender = args[1] == "render"
     let out = isRender ? args[3] : ""
     let dark = args.contains("dark")
-    let only = args.dropFirst(isRender ? 4 : 3).first(where: { $0 != "dark" && $0 != "jsform" })
-    var entries = svc.lookup(word, in: dicts(only))
+    let only = args.dropFirst(isRender ? 4 : 3).first(where: { $0 != "dark" && $0 != "jsform" && $0 != "wiki" })
+    var entries = svc.lookup(word, in: dicts(only).filter { !$0.isNetwork })
+    if args.contains("wiki"), let wd = svc.availableDictionaries().first(where: { $0.isNetwork }) {
+        // Same path as the app: our own fetch, then the entry (or the quiet failure note).
+        let sem = DispatchSemaphore(value: 0); var o = WikipediaClient.Outcome.failed
+        Task.detached { o = await WikipediaClient.fetch(word); sem.signal() }
+        sem.wait()
+        if let e = WikipediaClient.entry(o, dictionary: wd, term: word) { entries.append(e) }
+        print("wikipedia:", { if case .found(let t, _, _) = o { return "found \(t)" }; return "\(o)" }())
+    }
     if entries.isEmpty { fail("no results") }
     if args.contains("jsform") {
         // Original (unmodified) LDOCE5 markup: javascript:new Audio("…").play() hrefs.

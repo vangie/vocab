@@ -20,3 +20,19 @@ final class ShortNameTests: XCTestCase {
         XCTAssertTrue(p.contains("vocabSection")); XCTAssertTrue(p.contains("vocabScrollTo"))
     }
 }
+
+final class WikipediaHTMLTests: XCTestCase {
+    func testWikipediaEntriesAreWellFormedXHTML() {
+        let d = DictionaryInfo(id: "com.apple.dictionary.Wikipedia", name: "维基百科", shortName: "维基百科", bundleURL: nil)
+        let found = WikipediaClient.entry(.found(title: "哈哈 & <x>", html: "", text: "t"), dictionary: d, term: "哈哈")
+        XCTAssertNotNil(found)
+        let failed = WikipediaClient.entry(.failed, dictionary: d, term: "哈哈")!
+        XCTAssertNil(WikipediaClient.entry(.notFound, dictionary: d, term: "哈哈"))
+        let status = WikipediaClient.statusEntry("正在查询维基百科…", dictionary: d, term: "哈哈")
+        let page = WikipediaClient.page(title: "A&B <c>", description: "x \"y\"", extract: "1 < 2 & 3", url: "https://zh.wikipedia.org/wiki/%E5%93%88?a=1&b=2")
+        XCTAssertTrue(EntryHTML.isWellFormedXML(EntryHTML.prepare(page, resourceDirectory: nil)))
+        for e in [failed, status] {
+            XCTAssertTrue(EntryHTML.isWellFormedXML(EntryHTML.prepare(e.html, resourceDirectory: nil)), e.html)
+        }
+    }
+}

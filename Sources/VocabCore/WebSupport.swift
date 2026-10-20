@@ -209,7 +209,10 @@ public final class EntryWebViewFactory: NSObject, WKScriptMessageHandler, WKNavi
         var groups: [String: (String, [String])] = [:]
         for e in entries {
             let doc = EntryHTML.prepare(panel ? e.panelHTML : e.html, resourceDirectory: e.resourceDirectory)
-            let u = EntryDocumentStore.shared.register(doc).absoluteString
+            // Our own (network) entries are served as XHTML only when they really are well-formed XML,
+            // so a stray tag can never turn into WebKit's red XML-error page.
+            let mime = e.dictionary.isNetwork && !EntryHTML.isWellFormedXML(doc) ? "text/html" : "application/xhtml+xml"
+            let u = EntryDocumentStore.shared.register(doc, mime: mime).absoluteString
             if groups[e.dictionary.id] == nil { order.append(e.dictionary.id); groups[e.dictionary.id] = (e.dictionary.displayName, []) }
             groups[e.dictionary.id]!.1.append(u)
         }

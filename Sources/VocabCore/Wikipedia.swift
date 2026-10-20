@@ -32,6 +32,16 @@ public enum WikipediaClient {
 
     static func esc(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    /// Well-formed XHTML (entries are served as application/xhtml+xml).
+    public static func page(title: String, description: String?, extract: String, url: String?) -> String {
+        var html = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"utf-8\"/></head><body><div class=\"wiki\"><h2>\(esc(title))</h2>"
+        if let d = description, !d.isEmpty { html += "<p style=\"color:gray\">\(esc(d))</p>" }
+        html += "<p>\(esc(extract))</p>"
+        if let url { html += "<p><a href=\"\(esc(url))\">在维基百科中阅读全文</a></p>" }
+        return html + "</div></body></html>"
     }
 
     public static func fetch(_ term: String) async -> Outcome {
@@ -49,12 +59,8 @@ public enum WikipediaClient {
             let title = j["title"] as? String ?? term
             let extract = j["extract"] as? String ?? ""
             guard !extract.isEmpty else { return .notFound }
-            let page = ((j["content_urls"] as? [String: Any])?["desktop"] as? [String: Any])?["page"] as? String
-            var html = "<html><head><meta charset=\"utf-8\"></head><body><div class=\"wiki\"><h2>\(esc(title))</h2>"
-            if let d = j["description"] as? String, !d.isEmpty { html += "<p style=\"color:gray\">\(esc(d))</p>" }
-            html += "<p>\(esc(extract))</p>"
-            if let page { html += "<p><a href=\"\(esc(page))\">在维基百科中阅读全文</a></p>" }
-            html += "</div></body></html>"
+            let link = ((j["content_urls"] as? [String: Any])?["desktop"] as? [String: Any])?["page"] as? String
+            let html = Self.page(title: title, description: j["description"] as? String, extract: extract, url: link)
             return .found(title: title, html: html, text: extract)
         } catch {
             return .failed
@@ -63,7 +69,7 @@ public enum WikipediaClient {
 
     /// A placeholder / status entry shown in the Wikipedia section.
     public static func statusEntry(_ message: String, dictionary d: DictionaryInfo, term: String) -> DictionaryEntry {
-        let html = "<html><head><meta charset=\"utf-8\"></head><body><p style=\"color:gray\">\(esc(message))</p></body></html>"
+        let html = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"utf-8\"/></head><body><p style=\"color:gray\">\(esc(message))</p></body></html>"
         return DictionaryEntry(id: "\(d.id)#status#\(message)#\(term)", dictionary: d, headword: term, html: html,
                                panelHTML: html, plainText: message, resourceDirectory: nil)
     }
