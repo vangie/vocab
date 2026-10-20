@@ -49,9 +49,13 @@ public enum HanziPseudo {
             .appendingPathComponent("Resources/Data/hanzi-pseudo.tsv")
         return FileManager.default.fileExists(atPath: repo.path) ? repo : nil
     }
-    public static let shared: [String] = (bundledURL().flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "")
-        .split(separator: "\n").filter { !$0.hasPrefix("#") }
-        .compactMap { l in let f = l.split(separator: "\t"); return f.count == 2 ? String(f[0] + f[1]) : nil }
+    static let rows: [[String]] = (bundledURL().flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "")
+        .split(separator: "\n").filter { !$0.hasPrefix("#") }.map { $0.split(separator: "\t").map(String.init) }.filter { $0.count >= 2 }
+    /// Pseudo-characters as left + right component strings.
+    public static let shared: [String] = rows.map { $0[0] + $0[1] }
+    /// Real characters to take the left / right component from when drawing (candidate strings).
+    public static let donors: [String: (left: String, right: String)] = Dictionary(
+        rows.filter { $0.count >= 4 }.map { ($0[0] + $0[1], (left: $0[2], right: $0[3])) }, uniquingKeysWith: { a, _ in a })
 }
 
 /// Pinyin helpers for the reading check.

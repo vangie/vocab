@@ -669,7 +669,7 @@ struct HanziTestSheet: View {
             Spacer()
             Group {
                 if item.isPseudo { PseudoGlyph(parts: item.char, size: 72) }
-                else { Text(item.char).font(.system(size: 72, weight: .regular, design: .serif)) }
+                else { Text(item.char).font(.custom("Songti SC", size: 65)) }   // same face & size as PseudoGlyph (0.9 em)
             }
             if r.askingCheck && item.checkKind == .meaning {
                 Text("它是什么意思？").foregroundStyle(.secondary).padding(.top, 8)
@@ -813,24 +813,17 @@ struct ReliabilityNote: View {
     }
 }
 
-/// Draws a LEXTALE_CH-style pseudo-character: left radical squeezed left, right component on the right.
+/// Draws a LEXTALE_CH-style pseudo-character from real-character components (see PseudoHanziGlyph).
 struct PseudoGlyph: View {
     let parts: String
     let size: CGFloat
-    private static let narrowForms: Set<Character> = ["氵", "亻", "扌", "忄", "纟", "讠", "钅", "礻"]
     var body: some View {
-        let cs = Array(parts)
-        let left = cs.first.map(String.init) ?? "", right = cs.count > 1 ? String(cs[1]) : ""
-        let narrow = cs.first.map { Self.narrowForms.contains($0) } ?? false
-        let font = Font.system(size: size, weight: .regular, design: .serif)
-        ZStack {
-            Text(left).font(font).scaleEffect(x: narrow ? 1 : 0.45, y: 1, anchor: .leading)
-                .frame(width: size, alignment: .leading)
-                .offset(x: narrow ? -size * 0.22 : 0)
-            Text(right).font(font).scaleEffect(x: 0.6, y: 1, anchor: .trailing)
-                .frame(width: size, alignment: .trailing)
+        if let d = HanziPseudo.donors[parts], let font = NSFont(name: "Songti SC", size: size),
+           let img = PseudoHanziGlyph.image(leftDonors: d.left, rightDonors: d.right, size: size, font: font) {
+            Image(nsImage: img).renderingMode(.template).frame(width: size, height: size * 1.2)
+                .accessibilityLabel("假字")
+        } else {
+            Text(parts).font(.system(size: size * 0.6, design: .serif))
         }
-        .frame(width: size, height: size * 1.2)
-        .accessibilityLabel("假字")
     }
 }

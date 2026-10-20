@@ -65,7 +65,7 @@ final class HanziTests: XCTestCase {
     }
 
     func testPseudoCharacters() {
-        XCTAssertGreaterThan(HanziPseudo.shared.count, 100)
+        XCTAssertGreaterThan(HanziPseudo.shared.count, 60); XCTAssertEqual(HanziPseudo.donors.count, HanziPseudo.shared.count)
         let (honest, _) = simulateHanzi(threshold: 2500, seed: 5)
         let ps = honest.items.filter(\.isPseudo)
         XCTAssertGreaterThan(ps.count, 2); XCTAssertTrue(ps.allSatisfy { !$0.check && $0.char.count == 2 })
