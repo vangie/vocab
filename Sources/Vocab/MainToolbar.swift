@@ -102,7 +102,6 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         let lookupMode = state.mode == .lookup
         // ‹ › and 小|大 only do something in 词典: take them out of the toolbar elsewhere
         // (removing items keeps AppKit's layout and » overflow exact, and the AX tree honest).
-        setPresentAtStart(newBookID, state.mode == .words)
         setPresent(fontID, lookupMode, before: searchID)
         setPresent(studyID, state.mode == .words, before: searchID)
         setPresent(navID, lookupMode, before: lookupMode ? fontID : searchID)
@@ -165,7 +164,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     // MARK: NSToolbarDelegate
 
     func toolbarAllowedItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [newBookID, studyID, .sidebarTrackingSeparator, navID, .flexibleSpace, modeID, fontID, searchID]
+        [studyID, .sidebarTrackingSeparator, navID, .flexibleSpace, modeID, fontID, searchID]
     }
 
     func toolbarDefaultItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {

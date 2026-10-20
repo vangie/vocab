@@ -235,7 +235,7 @@ struct WordbookSidebar: View {
                         .help(f == .familiar ? "记忆稳定度 ≥ 21 天" : "")
                 }
             }
-            Section("生词本") {
+            Section {
                 Label("所有单词", systemImage: "tray.full").badge(book.items.count).tag(WordGroup.all)
                 ForEach(book.books) { b in
                     Label(b.name, systemImage: b.isDefault ? "book.closed.fill" : "book.closed")
@@ -251,6 +251,8 @@ struct WordbookSidebar: View {
                             Button("删除生词本…") { confirmDelete(b) }.disabled(b.isDefault)
                         }
                 }
+            } header: {
+                HoverAddHeader(title: "生词本", help: "新建生词本 (⇧⌘N)") { book.promptNewBook() }
             }
             if !book.tags.isEmpty {
                 Section("标签") {
@@ -821,5 +823,26 @@ struct AdaptiveLabelStyle: LabelStyle {
     var iconOnly: Bool
     func makeBody(configuration: Configuration) -> some View {
         if iconOnly { configuration.icon } else { HStack(spacing: 4) { configuration.icon; configuration.title } }
+    }
+}
+
+/// Section header with a 「+」 at the right end that appears on hover (like Notes/Reminders).
+struct HoverAddHeader: View {
+    let title: String
+    let help: String
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Button(action: action) { Image(systemName: "plus").font(.system(size: 11, weight: .semibold)) }
+                .buttonStyle(.borderless)
+                .help(help)
+                .accessibilityLabel("新建生词本")
+                .opacity(hover ? 1 : 0)
+        }
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
     }
 }
