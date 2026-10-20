@@ -5,6 +5,8 @@ import WebKit
 enum Mode: String, CaseIterable, Identifiable {
     case lookup = "词典", words = "记词"
     var id: String { rawValue }
+    /// Same symbols as the Settings tabs; neither has localized variants.
+    var symbol: String { self == .lookup ? "books.vertical" : "rectangle.stack" }
 }
 
 extension Notification.Name {

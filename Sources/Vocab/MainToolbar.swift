@@ -43,7 +43,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
 
     private weak var window: NSWindow?
     private var navGroup: NSToolbarItemGroup?
-    private var modeGroup: NSToolbarItemGroup?
+    private var modeControl: NSSegmentedControl?
     private var fontGroup: NSToolbarItemGroup?
     private var searchItem: NSSearchToolbarItem?
     private var bag: Set<AnyCancellable> = []
@@ -98,7 +98,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     func refresh() {
         navGroup?.subitems[0].isEnabled = lookup.canGoBack
         navGroup?.subitems[1].isEnabled = lookup.canGoForward
-        modeGroup?.selectedIndex = Mode.allCases.firstIndex(of: state.mode) ?? 0
+        modeControl?.selectedSegment = Mode.allCases.firstIndex(of: state.mode) ?? 0
         let lookupMode = state.mode == .lookup
         // ‹ › and 小|大 only do something in 词典: take them out of the toolbar elsewhere
         // (removing items keeps AppKit's layout and » overflow exact, and the AX tree honest).
@@ -189,15 +189,27 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             navGroup = g
             return g
         case modeID:
-            let g = NSToolbarItemGroup(itemIdentifier: id, titles: Mode.allCases.map(\.rawValue),
-                                       selectionMode: .selectOne, labels: Mode.allCases.map(\.rawValue),
-                                       target: self, action: #selector(mode(_:)))
-            g.label = "模式"
-            g.controlRepresentation = .expanded
-            g.autovalidates = false
-            g.subitems.forEach { $0.autovalidates = false; $0.isEnabled = true }
-            modeGroup = g
-            return g
+            // Icon + label per segment (icons match Settings › 词典 / 记词 tabs; neither localizes).
+            let c = NSSegmentedControl(labels: Mode.allCases.map(\.rawValue), trackingMode: .selectOne,
+                                       target: self, action: #selector(modeSeg(_:)))
+            let menu = NSMenu(title: "模式")
+            for (i, m) in Mode.allCases.enumerated() {
+                let img = NSImage(systemSymbolName: m.symbol, accessibilityDescription: m.rawValue)?
+                    .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+                c.setImage(img, forSegment: i)
+                c.setImageScaling(.scaleProportionallyDown, forSegment: i)
+                let mi = NSMenuItem(title: m.rawValue, action: #selector(modeMenu(_:)), keyEquivalent: "")
+                mi.target = self; mi.tag = i; mi.image = NSImage(systemSymbolName: m.symbol, accessibilityDescription: nil)
+                menu.addItem(mi)
+            }
+            c.segmentStyle = .automatic
+            c.selectedSegment = Mode.allCases.firstIndex(of: state.mode) ?? 0
+            let it = NSToolbarItem(itemIdentifier: id)
+            it.view = c; it.label = "模式"
+            let top = NSMenuItem(title: "模式", action: nil, keyEquivalent: ""); top.submenu = menu
+            it.menuFormRepresentation = top
+            modeControl = c
+            return it
         case fontID:
             let g = NSToolbarItemGroup(itemIdentifier: id,
                                        images: [Self.glyph("小", size: 11), Self.glyph("大", size: 15)],
@@ -262,9 +274,11 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         if g.selectedIndex == 0 { lookup.back() } else { lookup.forward() }
     }
 
-    @objc private func mode(_ g: NSToolbarItemGroup) {
-        let i = g.selectedIndex
+    @objc private func modeSeg(_ c: NSSegmentedControl) { setMode(c.selectedSegment) }
+    @objc private func modeMenu(_ m: NSMenuItem) { setMode(m.tag) }
+    private func setMode(_ i: Int) {
         if Mode.allCases.indices.contains(i) { state.mode = Mode.allCases[i] }
+        modeControl?.selectedSegment = Mode.allCases.firstIndex(of: state.mode) ?? 0
     }
 
     @objc private func openPlan() { state.openPlan() }
