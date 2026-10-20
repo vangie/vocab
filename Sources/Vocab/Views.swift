@@ -56,13 +56,9 @@ struct MainView: View {
         .onChange(of: lookup.selection) { _, id in
             if let id, state.mode == .lookup { sidebarSelection = .suggestion(id) }
         }
-        .onChange(of: columns) { _, c in
-            // 生词本 and 背单词 have no sidebar: don't let a toggle bring it back.
-            if state.mode != .lookup, c != .detailOnly { columns = .detailOnly }
-        }
         .onChange(of: state.mode) { _, m in
             // 背单词 needs no list: hide the sidebar there, like a focused mode.
-            columns = m == .review || m == .wordbook ? .detailOnly
+            columns = m == .review ? .detailOnly
                 : m == .lookup && lookup.query.trimmingCharacters(in: .whitespaces).isEmpty ? .detailOnly : .all
             sidebarSelection = nil
         }
@@ -75,7 +71,7 @@ struct MainView: View {
 
     @ViewBuilder private var sidebar: some View {
         if state.mode == .wordbook {
-            EmptyView()
+            WordbookSidebar()
         } else {
             let content = SidebarContent.make(query: lookup.query, suggestionsFor: lookup.suggestionsQuery,
                                               words: lookup.suggestions.map(\.word), recents: lookup.recents)
