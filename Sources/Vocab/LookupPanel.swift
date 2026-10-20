@@ -37,7 +37,7 @@ final class LookupPanelController {
 
     func show(word: String, context: String?, surface: String? = nil, source: WordSource? = nil, entries: [DictionaryEntry], at point: NSPoint, anchor: NSRect? = nil) {
         closePanelOnly()
-        let body = NSSize(width: 440, height: 440)
+        let body = NSSize(width: 460, height: 520)
         let arrowH: CGFloat = 10
         let size = NSSize(width: body.width, height: body.height + arrowH)
         let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
@@ -104,7 +104,11 @@ final class LookupPanelController {
             if e.keyCode == 53 { Task { @MainActor in self?.close() } }
         } as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            if e.keyCode == 53 { self?.close(); return nil }
+            if e.keyCode == 53 {
+                // Editing the headword: Esc cancels the edit, not the panel.
+                if self?.panel?.firstResponder is NSTextView { return e }
+                self?.close(); return nil
+            }
             return e
         } as Any)
     }
@@ -163,57 +167,35 @@ enum PopoverShape {
     }
 }
 
-/// First sense or two of an entry, for the compact Look-Up-style list.
-enum Excerpt {
-    static func make(_ e: DictionaryEntry, limit: Int = 220) -> String {
-        var t = e.plainText.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespaces)
-        if t.lowercased().hasPrefix(e.headword.lowercased()) { t = String(t.dropFirst(e.headword.count)).trimmingCharacters(in: .whitespaces) }
-        guard t.count > limit else { return t }
-        let cut = t.prefix(limit)
-        if let i = cut.lastIndex(where: { "。；;.".contains($0) }), cut.distance(from: cut.startIndex, to: i) > limit / 2 {
-            return String(cut[...i]) + " …"
-        }
-        return cut + "…"
-    }
-}
-
 struct PanelView: View {
-    let word: String
+    let initialWord: String
     let context: String?
     var surface: String? = nil
     var source: WordSource? = nil
-    let entries: [DictionaryEntry]
+    let initialEntries: [DictionaryEntry]
     let close: () -> Void
+    @State private var word = ""
+    @State private var entries: [DictionaryEntry] = []
     @State private var added = false
-    /// nil = compact overview of every dictionary; otherwise the full entry of that dictionary.
-    @State private var expanded: String? = nil
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var fieldFocused: Bool
 
-    private var dicts: [DictionaryInfo] {
-        var seen = Set<String>(); return entries.compactMap { seen.insert($0.dictionary.id).inserted ? $0.dictionary : nil }
+    init(word: String, context: String?, surface: String? = nil, source: WordSource? = nil,
+         entries: [DictionaryEntry], close: @escaping () -> Void) {
+        initialWord = word; self.context = context; self.surface = surface; self.source = source
+        initialEntries = entries; self.close = close
+        _word = State(initialValue: word); _entries = State(initialValue: entries)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider().opacity(0.6)
-            if entries.isEmpty {
-                Text("没有找到「\(word)」").foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let id = expanded {
-                HStack {
-                    Button { expanded = nil } label: { Label("全部词典", systemImage: "chevron.left") }
-                        .buttonStyle(.borderless)
-                    Spacer()
-                    Text(dicts.first { $0.id == id }?.name ?? "").font(.system(size: 12)).foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 6)
-                EntryWebView(entries: entries.filter { $0.dictionary.id == id }, showTitles: false, panel: true,
-                             emptyMessage: "没有找到「\(word)」",
-                             onLookup: { LookupModel.shared.search($0); NSApp.activate(ignoringOtherApps: true) })
-            } else {
-                overview
-            }
+            // Every dictionary's full entry at once, rendered like the main window (audio buttons play).
+            EntryWebView(entries: entries, showTitles: true, panel: true,
+                         emptyMessage: "没有找到「\(word)」",
+                         onLookup: { relookup($0) })
             Divider().opacity(0.6)
             footerRow("在「生词」中打开", "book") { openInMain() }
             Divider().opacity(0.6).padding(.leading, 14)
@@ -229,11 +211,25 @@ struct PanelView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text(word).font(.system(size: 17, weight: .semibold))
+            if editing {
+                TextField("单词", text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 15, weight: .semibold))
+                    .focused($fieldFocused)
+                    .onSubmit { relookup(draft) }
+                    .onExitCommand { editing = false }
+                    .frame(maxWidth: 260)
+            } else {
+                Button { draft = word; editing = true; DispatchQueue.main.async { fieldFocused = true } } label: {
+                    Text(word).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .help("点按修改要查的词")
+                .onHover { $0 ? NSCursor.iBeam.push() : NSCursor.pop() }
+            }
             Spacer()
             Button {
-                let pool = expanded.map { s in entries.filter { $0.dictionary.id == s } } ?? entries
-                if let e = pool.first {
+                if let e = entries.first {
                     WordbookModel.shared.add(entry: e, word: word, context: context, surface: surface, source: source)
                     added = true
                 }
@@ -248,27 +244,14 @@ struct PanelView: View {
         .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
     }
 
-    private var overview: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(dicts) { d in
-                    let es = entries.filter { $0.dictionary.id == d.id }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(d.name).font(.system(size: 20, weight: .bold))
-                        Rectangle().fill(Color.primary.opacity(0.18)).frame(height: 0.5)
-                        ForEach(es.prefix(2), id: \.id) { e in
-                            Text(Excerpt.make(e)).font(.system(size: 13)).lineSpacing(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
-                        }
-                        Button("更多") { expanded = d.id }
-                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
-                            .font(.system(size: 13))
-                    }
-                }
-            }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-        }
+    /// Look the (edited or linked) text up again inside the panel.
+    private func relookup(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        editing = false
+        guard !t.isEmpty else { return }
+        let r = Suggester.lookupWithFallback(t, in: DictionarySelection.enabled())
+        word = r.word; entries = r.entries
+        added = WordbookModel.shared.contains(r.word)
     }
 
     private func footerRow(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
