@@ -179,3 +179,30 @@ public enum ContextHint {
         return re.stringByReplacingMatches(in: sentence, range: NSRange(location: 0, length: (sentence as NSString).length), withTemplate: mask)
     }
 }
+
+/// Per-session tallies. `record` one answer; `unrecord` takes it back (斩 right after answering
+/// replaces that answer, so it isn't counted twice).
+public struct SessionStats {
+    public var answered = 0, correct = 0, wrong = 0, retired = 0
+    public var ratings: [ReviewRating: Int] = [:]
+    public var byType: [QuestionType: (right: Int, total: Int)] = [:]
+    public var started = Date()
+    public init() {}
+
+    public mutating func record(_ r: ReviewRating, correct ok: Bool, type: QuestionType) {
+        answered += 1
+        if ok { correct += 1 } else { wrong += 1 }
+        ratings[r, default: 0] += 1
+        var t = byType[type] ?? (0, 0); t.total += 1; if ok { t.right += 1 }; byType[type] = t
+    }
+
+    public mutating func unrecord(_ r: ReviewRating, correct ok: Bool, type: QuestionType) {
+        answered = max(0, answered - 1)
+        if ok { correct = max(0, correct - 1) } else { wrong = max(0, wrong - 1) }
+        if let n = ratings[r] { ratings[r] = n > 1 ? n - 1 : nil }
+        if var t = byType[type] {
+            t.total -= 1; if ok { t.right -= 1 }
+            byType[type] = t.total > 0 ? t : nil
+        }
+    }
+}

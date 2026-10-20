@@ -16,12 +16,9 @@ final class ReviewSession: ObservableObject {
 
     enum Phase: Equatable { case idle, loading, check, asking, answered, summary }
 
-    struct Stats {
-        var answered = 0, correct = 0, wrong = 0, retired = 0
-        var ratings: [ReviewRating: Int] = [:]
-        var byType: [QuestionType: (right: Int, total: Int)] = [:]
-        var started = Date()
-    }
+    typealias Stats = SessionStats
+    /// The answer just recorded for the current card (so 斩 in the answered state can replace it).
+    private var lastAnswer: (rating: ReviewRating, correct: Bool, type: QuestionType)?
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var question: ReviewQuestion?
@@ -168,7 +165,7 @@ final class ReviewSession: ObservableObject {
     func reset() { phase = .idle; question = nil; refreshPreview() }
 
     private func loadCurrent() {
-        revealed = false; typed = ""; chosen = nil; marks = []; lastRating = nil
+        revealed = false; typed = ""; chosen = nil; marks = []; lastRating = nil; lastAnswer = nil
         guard let id = queue.current, let item = items[id], let factory else { end(); return }
         if quickCheck.contains(id) {
             quickCheck.remove(id)
@@ -310,6 +307,8 @@ final class ReviewSession: ObservableObject {
             if e.type == .leftMouseDown {
                 // Only clicks in the review content, not the toolbar or other windows.
                 guard let w = e.window, w.isMainWindow, e.locationInWindow.y < w.contentLayoutRect.maxY else { return e }
+                // The quiz top bar (结束 · 斩) handles its own clicks: 斩 must still work during the countdown.
+                if e.locationInWindow.y > w.contentLayoutRect.maxY - 64 { return e }
             }
             if e.type == .keyDown, e.modifierFlags.contains(.command) { return e }
             self.next()
@@ -332,10 +331,8 @@ final class ReviewSession: ObservableObject {
             items[item.id] = updated
         }
         lastRating = r
-        stats.answered += 1
-        if correct { stats.correct += 1 } else { stats.wrong += 1 }
-        stats.ratings[r, default: 0] += 1
-        var t = stats.byType[q.type] ?? (0, 0); t.total += 1; if correct { t.right += 1 }; stats.byType[q.type] = t
+        stats.record(r, correct: correct, type: q.type)
+        lastAnswer = (r, correct, q.type)
         queue.answer(correct: correct)
     }
 
@@ -348,9 +345,15 @@ final class ReviewSession: ObservableObject {
     /// 斩 / 已掌握: retire the word for good.
     func retire() {
         guard let q = question, phase == .asking || phase == .answered else { return }
+        cancelAutoAdvance()   // else the countdown would skip the next card
+        // Retiring overwrites the review state just written by the answer (Scheduler.retire).
         if let rid = materialize(q.itemID) { _ = try? book.store?.retire(id: rid) }
         if phase == .asking { queue.retire() }
-        else { queue.dropCurrentRequeue(q.itemID) }
+        else {
+            queue.dropCurrentRequeue(q.itemID)   // also removes a wrong answer's relearning requeue
+            if let a = lastAnswer { stats.unrecord(a.rating, correct: a.correct, type: a.type) }
+        }
+        lastAnswer = nil
         stats.retired += 1
         if queue.finished { end() } else { loadCurrent() }
     }
