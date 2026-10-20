@@ -134,7 +134,7 @@ final class ReviewSession: ObservableObject {
         loadCurrent()
     }
 
-    func end() { phase = .summary; question = nil; book.reload() }
+    func end() { cancelAutoAdvance(); phase = .summary; question = nil; book.reload() }
     func reset() { phase = .idle; question = nil; refreshPreview() }
 
     private func loadCurrent() {
@@ -224,6 +224,36 @@ final class ReviewSession: ObservableObject {
         lastCorrect = correct
         phase = .answered
         if q.type == .meaningToWord || !correct { speak(q) }
+        if correct && Self.autoAdvance { scheduleAutoAdvance() }
+    }
+
+    // MARK: 答对后自动下一题
+
+    static let autoAdvanceKey = "autoAdvanceOnCorrect"
+    static var autoAdvance: Bool { UserDefaults.standard.object(forKey: autoAdvanceKey) as? Bool ?? true }
+    static let autoAdvanceDelay: TimeInterval = 0.8
+    private var autoTimer: Timer?
+    private var autoMonitor: Any?
+    /// A correct answer waits ~0.8 s, then moves on; a click or any key moves on at once.
+    private func scheduleAutoAdvance() {
+        cancelAutoAdvance()
+        autoTimer = Timer.scheduledTimer(withTimeInterval: Self.autoAdvanceDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.next() }
+        }
+        autoMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] e in
+            guard let self, self.phase == .answered else { return e }
+            if e.type == .leftMouseDown {
+                // Only clicks in the review content, not the toolbar or other windows.
+                guard let w = e.window, w.isMainWindow, e.locationInWindow.y < w.contentLayoutRect.maxY else { return e }
+            }
+            if e.type == .keyDown, e.modifierFlags.contains(.command) { return e }
+            self.next()
+            return nil
+        }
+    }
+    private func cancelAutoAdvance() {
+        autoTimer?.invalidate(); autoTimer = nil
+        if let m = autoMonitor { NSEvent.removeMonitor(m); autoMonitor = nil }
     }
 
     private func apply(_ r: ReviewRating, correct: Bool) {
@@ -243,6 +273,7 @@ final class ReviewSession: ObservableObject {
     }
 
     func next() {
+        cancelAutoAdvance()
         guard phase == .answered || phase == .asking else { return }
         if queue.finished { end() } else { loadCurrent() }
     }

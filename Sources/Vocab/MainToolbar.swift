@@ -12,9 +12,12 @@ final class AppState: ObservableObject {
     @Published var wordScope: WordbookScope = .all
     /// Sidebar grouping in 生词本 (wordbook, tag or source).
     @Published var wordGroup: WordGroup = .all
-    /// 背诵计划 sheet (menu bar, toolbar pull-down, first visit).
-    @Published var showPlan = false
-    func openPlan() { mode = .review; showPlan = true }
+    /// Selected Settings tab ("general" / "dictionary" / "review").
+    @Published var settingsTab = "general"
+    /// Bumped to ask the main window to open Settings (SwiftUI's openSettings).
+    @Published var settingsRequest = 0
+    /// 背诵计划 lives in Settings › 背单词.
+    func openPlan() { settingsTab = "review"; settingsRequest += 1 }
     /// Table scroll offset, kept while the user looks a word up and comes back.
     var wordTableScroll: CGFloat?
     var wordSortKey: String = UserDefaults.standard.string(forKey: "wordSortKey") ?? "added" {

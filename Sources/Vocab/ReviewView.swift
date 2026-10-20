@@ -19,7 +19,7 @@ struct ReviewView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { session.refreshPreview() }
-        .sheet(isPresented: $state.showPlan, onDismiss: { session.refreshPreview() }) { PlanSheet() }
+        .onChange(of: PlanModel.shared.plan) { _, _ in session.refreshPreview() }
     }
 }
 
@@ -27,11 +27,23 @@ private struct StartScreen: View {
     @ObservedObject var session: ReviewSession
     @ObservedObject var plan = PlanModel.shared
     var body: some View {
-        content
-            .onAppear {
-                // First visit: set up the plan.
-                if !plan.plan.configured { DispatchQueue.main.async { AppState.shared.showPlan = true } }
+        VStack(spacing: 0) {
+            if !plan.plan.configured {
+                // First visit: an inline prompt instead of a popup.
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar").foregroundStyle(.secondary).accessibilityHidden(true)
+                    Text("还没有设置背诵计划：选词书、定目标，先测一下词汇量可以跳过认识的词。")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("设置计划…") { AppState.shared.openPlan() }.buttonStyle(.borderedProminent)
+                    Button("以后再说") { plan.plan.configured = true }.buttonStyle(.borderless)
+                }
+                .padding(12)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                .padding([.horizontal, .top], 16)
             }
+            content
+        }
     }
 
     private var content: some View {
@@ -155,7 +167,10 @@ private struct QuestionScreen: View {
         HStack {
             Spacer()
             if session.phase == .answered {
-                Button("继续") { session.next() }.keyboardShortcut(.defaultAction).controlSize(.large)
+                Button { session.next() } label: {
+                    HStack(spacing: 6) { Text("继续"); Text("↩").foregroundStyle(.secondary) }
+                }
+                .keyboardShortcut(.defaultAction).controlSize(.large).help("继续（↩ 或空格）")
                 // Space also continues.
                 Button("") { session.next() }.keyboardShortcut(.space, modifiers: []).hidden().frame(width: 0)
             }

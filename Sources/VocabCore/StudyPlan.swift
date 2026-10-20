@@ -18,9 +18,18 @@ public struct PlanSource: Hashable, Codable, Sendable, Identifiable {
 public struct StudyPlan: Codable, Equatable, Sendable {
     public var sources: [PlanSource] = []
     public var dailyNew = 20
-    public var dailyReview = 20
+    /// Manual review limit (used when `reviewAuto` is off).
+    public var manualReview = 100
+    /// 自动: the review limit follows the new limit (× `autoReviewFactor`).
+    public var reviewAuto = true
     /// The user changed the review limit (so a stored 200 is theirs, not the old default).
     public var reviewEdited = false
+    public static let autoReviewFactor = 5
+    /// Effective daily review limit. Setting it switches to a manual limit.
+    public var dailyReview: Int {
+        get { reviewAuto ? max(10, dailyNew * Self.autoReviewFactor) : manualReview }
+        set { manualReview = newValue; reviewAuto = false }
+    }
     public var targetDate: Date? = nil
     /// Which quick pick set the target (nil = none / custom date).
     public var targetPreset: TargetPreset? = nil
@@ -30,19 +39,31 @@ public struct StudyPlan: Codable, Equatable, Sendable {
     public var configured = false
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case sources, dailyNew, dailyReview, reviewEdited, targetDate, targetPreset, wordbookFirst, configured }
+    enum CodingKeys: String, CodingKey { case sources, dailyNew, dailyReview, reviewAuto, reviewEdited, targetDate, targetPreset, wordbookFirst, configured }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         sources = try c.decodeIfPresent([PlanSource].self, forKey: .sources) ?? []
         dailyNew = try c.decodeIfPresent(Int.self, forKey: .dailyNew) ?? 20
-        dailyReview = try c.decodeIfPresent(Int.self, forKey: .dailyReview) ?? 20
+        let stored = try c.decodeIfPresent(Int.self, forKey: .dailyReview)
         reviewEdited = try c.decodeIfPresent(Bool.self, forKey: .reviewEdited) ?? false
         targetDate = try c.decodeIfPresent(Date.self, forKey: .targetDate)
         targetPreset = try c.decodeIfPresent(TargetPreset.self, forKey: .targetPreset)
         wordbookFirst = try c.decodeIfPresent(Bool.self, forKey: .wordbookFirst) ?? true
         configured = try c.decodeIfPresent(Bool.self, forKey: .configured) ?? false
-        // Old default review limit (200) that was never touched → the new default.
-        if dailyReview == 200 && !reviewEdited { dailyReview = 20 }
+        manualReview = stored ?? 100
+        if let auto = try c.decodeIfPresent(Bool.self, forKey: .reviewAuto) { reviewAuto = auto }
+        else {
+            // Older plans: an untouched default (20, or the even older 200) becomes 自动.
+            reviewAuto = stored == nil || (!reviewEdited && (stored == 20 || stored == 200))
+        }
+    }
+    public func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(sources, forKey: .sources); try c.encode(dailyNew, forKey: .dailyNew)
+        try c.encode(manualReview, forKey: .dailyReview); try c.encode(reviewAuto, forKey: .reviewAuto)
+        try c.encode(reviewEdited, forKey: .reviewEdited); try c.encodeIfPresent(targetDate, forKey: .targetDate)
+        try c.encodeIfPresent(targetPreset, forKey: .targetPreset)
+        try c.encode(wordbookFirst, forKey: .wordbookFirst); try c.encode(configured, forKey: .configured)
     }
 
     public static let defaultsKey = "studyPlan"
@@ -65,6 +86,39 @@ public enum TargetPreset: String, Codable, CaseIterable, Sendable, Identifiable 
 }
 
 public enum PlanMath {
+    /// Steady-state reviews per day for each daily new word: a Monte Carlo run of the FSRS
+    /// schedule (recall at the desired retention, Good on success, Again on a lapse), counting
+    /// reviews on later days over a one-year horizon. An estimate, cached per scheduler.
+    public static func reviewsPerNewWord(_ f: FSRS = Scheduler.shared, horizonDays: Int = 365, cards: Int = 1500) -> Double {
+        let key = "\(f.desiredRetention)|\(f.w)|\(horizonDays)"
+        if let v = reviewCache.withLock({ $0[key] }) { return v }
+        var rng = SplitMix(seed: 42)
+        let start = Date(timeIntervalSince1970: 0)
+        let end = start.addingTimeInterval(Double(horizonDays) * 86_400)
+        var total = 0
+        for _ in 0..<cards {
+            var c = ReviewState.new(now: start)
+            var now = start
+            var guardN = 0
+            while guardN < 200 {
+                guardN += 1
+                let ok = c.state == .new || c.state == .learning || c.state == .relearning
+                    ? true : Double(rng.next() % 1_000_000) / 1_000_000 < f.desiredRetention
+                c = f.next(c, rating: ok ? .good : .forgot, now: now)
+                now = c.due
+                if now >= end { break }
+                if now.timeIntervalSince(start) >= 86_400 { total += 1 }
+            }
+        }
+        let v = Double(total) / Double(cards)
+        reviewCache.withLock { $0[key] = v }
+        return v
+    }
+    /// Estimated reviews per day once the plan has run a while (new words/day × reviews per word).
+    public static func estimatedDailyReviews(dailyNew: Int, _ f: FSRS = Scheduler.shared) -> Int {
+        Int((Double(dailyNew) * reviewsPerNewWord(f)).rounded())
+    }
+
     public static let newBounds = 1...500
     /// Above this the sheet shows a gentle note.
     public static let heavyDaily = 100
@@ -225,3 +279,9 @@ public enum PlanRatios {
         return out
     }
 }
+
+struct SplitMix { var s: UInt64; init(seed: UInt64) { s = seed }
+    mutating func next() -> UInt64 { s &+= 0x9E3779B97F4A7C15; var z = s; z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9; z = (z ^ (z >> 27)) &* 0x94D049BB133111EB; return z ^ (z >> 31) } }
+final class LockedBox<T>: @unchecked Sendable { private var v: T; private let l = NSLock(); init(_ v: T) { self.v = v }
+    func withLock<R>(_ f: (inout T) -> R) -> R { l.lock(); defer { l.unlock() }; return f(&v) } }
+let reviewCache = LockedBox<[String: Double]>([:])

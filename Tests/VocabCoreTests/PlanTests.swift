@@ -5,7 +5,9 @@ import XCTest
 final class PlanTests: XCTestCase {
     func testDailyLimits() {
         var p = StudyPlan()
-        XCTAssertEqual(p.dailyNew, 20); XCTAssertEqual(p.dailyReview, 20)
+        XCTAssertEqual(p.dailyNew, 20); XCTAssertTrue(p.reviewAuto); XCTAssertEqual(p.dailyReview, 100)   // 自动 = new × 5
+        p.dailyNew = 30; XCTAssertEqual(p.dailyReview, 150); p.dailyNew = 20
+        p.dailyReview = 20; XCTAssertFalse(p.reviewAuto)
         XCTAssertEqual(PlanMath.newToday(plan: p, due: 5, introducedToday: 0), 15)     // review limit − due
         XCTAssertEqual(PlanMath.reviewsToday(plan: p, due: 250), 20)
         p.dailyReview = 200
@@ -58,9 +60,16 @@ final class PlanTests: XCTestCase {
     func testOldDefaultReviewLimitMigrates() throws {
         let old = #"{"sources":[],"dailyNew":25,"dailyReview":200,"wordbookFirst":true,"configured":true}"#
         let p = try JSONDecoder().decode(StudyPlan.self, from: Data(old.utf8))
-        XCTAssertEqual(p.dailyReview, 20); XCTAssertEqual(p.dailyNew, 25); XCTAssertTrue(p.configured)
+        XCTAssertTrue(p.reviewAuto); XCTAssertEqual(p.dailyReview, 125); XCTAssertEqual(p.dailyNew, 25); XCTAssertTrue(p.configured)
+        let twenty = #"{"dailyNew":41,"dailyReview":20,"reviewEdited":false}"#
+        XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: Data(twenty.utf8)).dailyReview, 205)
         let custom = #"{"dailyReview":150}"#
         XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: Data(custom.utf8)).dailyReview, 150)
+        var man = StudyPlan(); man.dailyReview = 20      // manual 20 survives a round trip
+        let back = try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(man))
+        XCTAssertFalse(back.reviewAuto); XCTAssertEqual(back.dailyReview, 20)
+        var auto = StudyPlan(); auto.dailyReview = 50; auto.reviewAuto = true
+        XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(auto)).dailyReview, 100)
         var mine = StudyPlan(); mine.dailyReview = 200; mine.reviewEdited = true
         XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(mine)).dailyReview, 200)
     }
@@ -99,6 +108,13 @@ final class PlanTests: XCTestCase {
         PlanMath.limitsChanged(&p, remaining: 4500, due: 0, now: now, calendar: cal)
         XCTAssertNil(p.targetDate)
         XCTAssertNil(PlanMath.projectedDate(remaining: 10, plan: p, due: 999, now: now, calendar: cal))
+    }
+
+    func testReviewEstimate() {
+        let per = PlanMath.reviewsPerNewWord(FSRS(desiredRetention: 0.9))
+        XCTAssert(per > 3 && per < 15, "\(per)")
+        XCTAssert(PlanMath.reviewsPerNewWord(FSRS(desiredRetention: 0.95)) > per)   // higher retention → more reviews
+        XCTAssertEqual(PlanMath.estimatedDailyReviews(dailyNew: 0), 0)
     }
 
     func testRatios() {

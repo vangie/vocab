@@ -16,6 +16,7 @@ struct VocabApp: App {
                 .environmentObject(book)
                 .environmentObject(settings)
                 .frame(minWidth: 640, minHeight: 480)
+                .modifier(SettingsOpener())
         }
         .defaultSize(width: 860, height: 680)
         .commands {
@@ -66,6 +67,18 @@ struct VocabApp: App {
             SettingsView()
                 .environmentObject(settings)
                 .frame(width: 760, height: 640)
+        }
+    }
+}
+
+/// Opens the Settings window when AppState asks (toolbar 计划, ⌥⌘P, review prompt).
+struct SettingsOpener: ViewModifier {
+    @Environment(\.openSettings) private var openSettings
+    @ObservedObject private var state = AppState.shared
+    func body(content: Content) -> some View {
+        content.onChange(of: state.settingsRequest) { _, _ in
+            openSettings()
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
 }

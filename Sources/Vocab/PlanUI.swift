@@ -117,12 +117,21 @@ final class PlanModel: ObservableObject {
 
 // MARK: - Plan sheet
 
-struct PlanSheet: View {
+/// Settings › 背单词: 词汇量 → 词书和生词本 → 目标 → 每日 → 高级 (FSRS).
+struct PlanSettingsView: View {
     @ObservedObject var model = PlanModel.shared
-    @Environment(\.dismiss) private var dismiss
     @State private var remaining = 0
     @State private var testing = false
-    var onDone: () -> Void = {}
+    @AppStorage(ReviewSession.retentionKey) private var retention = 0.9
+    @AppStorage(ReviewSession.learningKey) private var learningSteps = "1m 10m"
+    @AppStorage(ReviewSession.relearningKey) private var relearningSteps = "10m"
+    @State private var showAdvanced = false
+    @AppStorage(ReviewSession.autoAdvanceKey) private var autoAdvance = true
+
+    private func normalizeSteps(_ s: inout String, fallback: String) {
+        if let st = FSRS.parseSteps(s) { s = FSRS.formatSteps(st) } else { s = fallback }
+        ReviewSession.applySchedulerSettings()
+    }
 
     private var chosen: [Int] { model.plan.sources.indices.filter { model.plan.sources[$0].enabled } }
 
@@ -150,8 +159,33 @@ struct PlanSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
+        Form {
+                Section("词汇量") {
+                    if let r = model.results.first {
+                        LabeledContent("上次结果", value: "约 \(r.estimate) 词（\(r.low)–\(r.high)）")
+                        LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
+                        if model.results.count > 1 {
+                            DisclosureGroup("历史记录") {
+                                ForEach(Array(model.results.dropFirst().enumerated()), id: \.offset) { _, h in
+                                    LabeledContent(h.date.formatted(date: .abbreviated, time: .omitted), value: "约 \(h.estimate) 词")
+                                }
+                            }
+                        }
+                    } else {
+                        HStack {
+                            Text("测一下词汇量，认识的词会被跳过，不用再背。").foregroundStyle(.secondary)
+                            Spacer()
+                            Button("开始测试") { testing = true }.buttonStyle(.borderedProminent).controlSize(.large)
+                        }
+                    }
+                    HStack {
+                        if !model.results.isEmpty { Button("重新测试") { testing = true } }
+                        Spacer()
+                        if let b = model.lastBatch {
+                            Button("撤销「\(b.label)」") { model.undoLastBatch(); refresh() }
+                        }
+                    }
+                }
                 Section("词书和生词本") {
                     ForEach(chosen, id: \.self) { i in
                         let src = model.plan.sources[i]
@@ -219,45 +253,58 @@ struct PlanSheet: View {
                     Stepper(value: Binding(get: { model.plan.dailyNew },
                                            set: { model.plan.dailyNew = $0; PlanMath.limitsChanged(&model.plan, remaining: remaining, due: due, now: Date()) }),
                             in: 0...PlanMath.newBounds.upperBound, step: 5) { LabeledContent("新词上限", value: "\(model.plan.dailyNew)") }
-                    Stepper(value: Binding(get: { model.plan.dailyReview },
-                                           set: { model.plan.dailyReview = $0; model.plan.reviewEdited = true
-                                                  PlanMath.limitsChanged(&model.plan, remaining: remaining, due: due, now: Date()) }),
-                            in: 10...1000, step: 10) { LabeledContent("复习上限", value: "\(model.plan.dailyReview)") }
+                    Picker("复习上限", selection: Binding(get: { model.plan.reviewAuto },
+                                                        set: { a in
+                                                            if a { model.plan.reviewAuto = true } else { model.plan.dailyReview = model.plan.dailyReview }
+                                                            model.plan.reviewEdited = true
+                                                            PlanMath.limitsChanged(&model.plan, remaining: remaining, due: due, now: Date()) })) {
+                        Text("自动").tag(true)
+                        Text("手动").tag(false)
+                    }
+                    .pickerStyle(.segmented).fixedSize()
+                    if model.plan.reviewAuto {
+                        LabeledContent("每天最多复习", value: "\(model.plan.dailyReview)（新词 × \(StudyPlan.autoReviewFactor)）")
+                    } else {
+                        Stepper(value: Binding(get: { model.plan.dailyReview },
+                                               set: { model.plan.dailyReview = $0; model.plan.reviewEdited = true
+                                                      PlanMath.limitsChanged(&model.plan, remaining: remaining, due: due, now: Date()) }),
+                                in: 10...5000, step: 10) { LabeledContent("每天最多复习", value: "\(model.plan.dailyReview)") }
+                    }
+                    let est = PlanMath.estimatedDailyReviews(dailyNew: model.plan.dailyNew)
+                    LabeledContent("预计每天复习", value: "约 \(est) 个")
+                    Text("估算：按当前记忆保持率和默认 FSRS 参数模拟，坚持一段时间后的日均复习量。").font(.caption).foregroundStyle(.secondary)
+                    if !model.plan.reviewAuto, model.plan.dailyReview < est {
+                        Text("复习上限低于预计复习量，待复习的单词会越积越多。可以调高上限或切回自动。").font(.caption).foregroundStyle(.orange)
+                    }
                     Text("先复习，再学新词。今天的新词 = min(新词上限, 复习上限 − 到期数)。").font(.caption).foregroundStyle(.secondary)
                 }
-                Section("词汇量") {
-                    if let r = model.results.first {
-                        LabeledContent("上次结果", value: "约 \(r.estimate) 词（\(r.low)–\(r.high)）")
-                        LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
-                        if model.results.count > 1 {
-                            DisclosureGroup("历史记录") {
-                                ForEach(Array(model.results.dropFirst().enumerated()), id: \.offset) { _, h in
-                                    LabeledContent(h.date.formatted(date: .abbreviated, time: .omitted), value: "约 \(h.estimate) 词")
-                                }
+                Section("答题") {
+                    Toggle("答对后自动下一题", isOn: $autoAdvance)
+                    Text("答对约 0.8 秒后进入下一题，期间按任意键或点击可立即继续；答错会停下来等你看完。").font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
+                    DisclosureGroup("高级", isExpanded: $showAdvanced) {
+                        LabeledContent("目标记忆率") {
+                            HStack {
+                                Slider(value: $retention, in: 0.70...0.97, step: 0.01).frame(width: 180)
+                                Text("\(Int((retention * 100).rounded()))%").monospacedDigit().frame(width: 36, alignment: .trailing)
                             }
                         }
-                    } else {
-                        Text("先测一下词汇量：认识的常用词会被斩掉，不用再背。").foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Button(model.results.isEmpty ? "开始测试" : "重新测试") { testing = true }
-                        Spacer()
-                        if let b = model.lastBatch {
-                            Button("撤销「\(b.label)」") { model.undoLastBatch(); refresh() }
+                        .onChange(of: retention) { _, _ in ReviewSession.applySchedulerSettings() }
+                        LabeledContent("学习步长") {
+                            TextField("", text: $learningSteps, prompt: Text("1m 10m")).frame(width: 120)
+                                .onSubmit { normalizeSteps(&learningSteps, fallback: "1m 10m") }
                         }
+                        LabeledContent("重学步长") {
+                            TextField("", text: $relearningSteps, prompt: Text("10m")).frame(width: 120)
+                                .onSubmit { normalizeSteps(&relearningSteps, fallback: "10m") }
+                        }
+                        Text("FSRS-6 调度（默认参数）。记忆率越高复习越频繁；步长用 s/m/h/d，例如 1m 10m。").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-            }
-            .formStyle(.grouped)
-            Divider()
-            HStack {
-                Spacer()
-                Button("完成") { model.plan.configured = true; onDone(); dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(12)
         }
-        .frame(width: 520, height: 640)
-        .onAppear { model.reconcile(); normalize(); model.reloadResults(); refresh() }
+        .formStyle(.grouped)
+        .onAppear { model.reconcile(); normalize(); model.reloadResults(); refresh(); model.plan.configured = true }
         .onChange(of: model.plan.sources) { _, _ in refresh() }
         .sheet(isPresented: $testing, onDismiss: refresh) { VocabTestSheet() }
     }
