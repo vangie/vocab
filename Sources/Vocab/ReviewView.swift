@@ -59,6 +59,11 @@ private struct StartScreen: View {
                 VStack(spacing: 10) {
                     if p.reviews + p.new == 0 {
                         Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3.weight(.medium))
+                        Button { session.start(extraNew: ReviewSession.extraGroupSize) } label: {
+                            Text("再学一组").frame(minWidth: 120)
+                        }
+                        .controlSize(.large).buttonBorderShape(.capsule)
+                        .help("再学 \(ReviewSession.extraGroupSize) 个新词（含到期复习）")
                     } else {
                         Button { session.start() } label: { Text("开始").font(.title2.weight(.semibold)).frame(minWidth: 200, minHeight: 48) }
                             .keyboardShortcut(.defaultAction).controlSize(.large)

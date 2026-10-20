@@ -88,7 +88,12 @@ final class ReviewSession: ObservableObject {
     private var quickCheck: Set<Int64> = []
     private var realID: [Int64: Int64] = [:]
 
-    private func plan() -> [WordItem] {
+    /// Size of a 「再学一组」 extra group: the daily new-word quota, or 10 if none.
+    static var extraGroupSize: Int { let n = PlanModel.shared.plan.dailyNew; return n > 0 ? n : 10 }
+
+    /// `extraNew` > 0: an extra group after today's tasks: that many new words plus every due review,
+    /// ignoring the day's caps (progress counts as usual, so rings can pass 100%).
+    private func plan(extraNew: Int = 0) -> [WordItem] {
         book.reload()
         let now = Date()
         let p = PlanModel.shared.plan
@@ -99,8 +104,8 @@ final class ReviewSession: ObservableObject {
             !Scheduler.isMastered($0.review) && !($0.bookID == nil && common.contains($0.word.lowercased()))
         }
         let due = live.filter { !SessionPlanner.isNew($0) && $0.review.due <= now }.sorted { $0.review.due < $1.review.due }
-        let reviews = Array(due.prefix(PlanMath.reviewsToday(plan: p, due: due.count)))
-        let room = PlanMath.newToday(plan: p, due: due.count, introducedToday: Self.introducedToday)
+        let reviews = extraNew > 0 ? due : Array(due.prefix(PlanMath.reviewsToday(plan: p, due: due.count)))
+        let room = extraNew > 0 ? extraNew : PlanMath.newToday(plan: p, due: due.count, introducedToday: Self.introducedToday)
         virtualSource = [:]; quickCheck = []; realID = [:]
         guard room > 0 else { return reviews }
         let picks = PlanModel.shared.drawNew(count: room, liveItems: live)
@@ -149,9 +154,9 @@ final class ReviewSession: ObservableObject {
         overall = PlanModel.shared.progress()
     }
 
-    func start() {
+    func start(extraNew: Int = 0) {
         Self.applySchedulerSettings()
-        let p = plan()
+        let p = plan(extraNew: extraNew)
         items = Dictionary(uniqueKeysWithValues: p.map { ($0.id, $0) })
         queue = ReviewQueue(ids: p.map(\.id))
         stats = Stats(); answeredOnce = []; previousType = nil; lastActivity = Date()
