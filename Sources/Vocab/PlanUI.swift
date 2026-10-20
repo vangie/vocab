@@ -32,6 +32,9 @@ final class PlanModel: ObservableObject {
         for l in ExamList.allCases where !p.sources.contains(where: { $0.id == .list(l) }) {
             p.sources.append(PlanSource(id: .list(l), enabled: false, ratio: 1))
         }
+        let on = p.sources.indices.filter { p.sources[$0].enabled }
+        let r = PlanRatios.snap(on.map { p.sources[$0].ratio })
+        for (k, i) in on.enumerated() { p.sources[i].ratio = r[k] }
         if p != plan { plan = p }
     }
 
@@ -121,26 +124,77 @@ struct PlanSheet: View {
     @State private var testing = false
     var onDone: () -> Void = {}
 
-    private var enabledTotal: Double { model.plan.sources.filter(\.enabled).reduce(0) { $0 + $1.ratio } }
+    private var chosen: [Int] { model.plan.sources.indices.filter { model.plan.sources[$0].enabled } }
+
+    private func setRatios(_ r: [Double]) {
+        for (k, i) in chosen.enumerated() where k < r.count { model.plan.sources[i].ratio = r[k] }
+    }
+
+    /// Keep the chosen shares in 5% steps summing to 100.
+    private func normalize() {
+        let r = PlanRatios.snap(chosen.map { model.plan.sources[$0].ratio })
+        if r != chosen.map({ model.plan.sources[$0].ratio }) { setRatios(r) }
+    }
+
+    private func add(_ i: Int) {
+        let n = Double(chosen.count + 1)
+        for j in chosen { model.plan.sources[j].ratio *= (n - 1) / n }
+        model.plan.sources[i].ratio = 100 / n
+        model.plan.sources[i].enabled = true
+        normalize()
+    }
+
+    private func remove(_ i: Int) {
+        model.plan.sources[i].enabled = false
+        normalize()
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
                 Section("词书和生词本") {
-                    ForEach($model.plan.sources) { $s in
-                        HStack(spacing: 10) {
-                            Toggle(isOn: $s.enabled) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: s.id.isBook ? "book.closed" : "text.book.closed").foregroundStyle(.secondary)
-                                    Text(model.title(s.id))
-                                    Text("\(model.size(s.id))").font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                    ForEach(chosen, id: \.self) { i in
+                        let src = model.plan.sources[i]
+                        HStack(spacing: 8) {
+                            Image(systemName: src.id.isBook ? "book.closed" : "text.book.closed").foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Text(model.title(src.id))
+                            Text("\(model.size(src.id)) 词").foregroundStyle(.secondary).monospacedDigit()
+                            Spacer()
+                            Button { remove(i) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.borderless).help("移除")
+                                .accessibilityLabel("移除\(model.title(src.id))")
+                        }
+                    }
+                    if chosen.isEmpty { Text("还没有选择来源").foregroundStyle(.secondary) }
+                    HStack {
+                        Menu("添加词书…") {
+                            let rest = model.plan.sources.indices.filter { !model.plan.sources[$0].enabled }
+                            let books = rest.filter { model.plan.sources[$0].id.isBook }
+                            let lists = rest.filter { !model.plan.sources[$0].id.isBook }
+                            if !books.isEmpty {
+                                Section("生词本") {
+                                    ForEach(books, id: \.self) { i in Button("\(model.title(model.plan.sources[i].id))（\(model.size(model.plan.sources[i].id)) 词）") { add(i) } }
                                 }
                             }
-                            .toggleStyle(.checkbox)
-                            Spacer()
-                            Slider(value: $s.ratio, in: 0.1...5).frame(width: 110).disabled(!s.enabled)
-                            Text(s.enabled && enabledTotal > 0 ? "\(Int((s.ratio / enabledTotal * 100).rounded()))%" : "–")
-                                .monospacedDigit().foregroundStyle(.secondary).frame(width: 38, alignment: .trailing)
+                            Section("词书") {
+                                ForEach(lists, id: \.self) { i in Button("\(model.title(model.plan.sources[i].id))（\(model.size(model.plan.sources[i].id)) 词）") { add(i) } }
+                            }
+                        }
+                        .fixedSize()
+                        .disabled(!model.plan.sources.contains { !$0.enabled })
+                        Spacer()
+                    }
+                    if chosen.count > 1 {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("比例").foregroundStyle(.secondary)
+                                Spacer()
+                                Button("平均分配") { setRatios(PlanRatios.equal(chosen.count)) }
+                            }
+                            ProportionBar(names: chosen.map { model.title(model.plan.sources[$0].id) },
+                                          ratios: Binding(get: { chosen.map { model.plan.sources[$0].ratio } }, set: setRatios))
+                            Text("拖动分隔线调整，每格 5%").font(.caption).foregroundStyle(.tertiary)
                         }
                     }
                     Toggle("生词本优先", isOn: $model.plan.wordbookFirst)
@@ -149,7 +203,7 @@ struct PlanSheet: View {
                 }
                 Section("每日") {
                     Stepper(value: $model.plan.dailyNew, in: 0...200, step: 5) { LabeledContent("新词上限", value: "\(model.plan.dailyNew)") }
-                    Stepper(value: $model.plan.dailyReview, in: 10...1000, step: 10) { LabeledContent("复习上限", value: "\(model.plan.dailyReview)") }
+                    Stepper(value: Binding(get: { model.plan.dailyReview }, set: { model.plan.dailyReview = $0; model.plan.reviewEdited = true }), in: 10...1000, step: 10) { LabeledContent("复习上限", value: "\(model.plan.dailyReview)") }
                     Text("先复习，再学新词。今天的新词 = min(新词上限, 复习上限 − 到期数)。").font(.caption).foregroundStyle(.secondary)
                     Toggle("目标日期", isOn: Binding(get: { model.plan.targetDate != nil },
                                                   set: { model.plan.targetDate = $0 ? Calendar.current.date(byAdding: .month, value: 3, to: Date()) : nil }))
@@ -190,7 +244,7 @@ struct PlanSheet: View {
             .padding(12)
         }
         .frame(width: 520, height: 640)
-        .onAppear { model.reconcile(); model.reloadResults(); refresh() }
+        .onAppear { model.reconcile(); normalize(); model.reloadResults(); refresh() }
         .onChange(of: model.plan.sources) { _, _ in refresh() }
         .sheet(isPresented: $testing, onDismiss: refresh) { VocabTestSheet() }
     }
@@ -321,5 +375,59 @@ struct VocabTestSheet: View {
             }
             .padding(12)
         }
+    }
+}
+
+/// One stacked bar for the chosen sources' shares; drag a divider to move 5% steps between neighbours.
+struct ProportionBar: View {
+    let names: [String]
+    @Binding var ratios: [Double]
+    @State private var dragStart: [Double]?
+    static let colors: [Color] = [.accentColor, .orange, .green, .purple, .pink, .teal, .yellow, .indigo, .brown, .mint]
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            ZStack(alignment: .leading) {
+                HStack(spacing: 0) {
+                    ForEach(ratios.indices, id: \.self) { i in
+                        let c = Self.colors[i % Self.colors.count]
+                        ZStack {
+                            Rectangle().fill(c.opacity(0.75))
+                            Text("\(names[i]) \(Int(ratios[i]))%")
+                                .font(.caption.weight(.medium)).foregroundStyle(.white)
+                                .lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 3)
+                                .opacity(w * ratios[i] / 100 > 34 ? 1 : 0)
+                        }
+                        .frame(width: max(0, w * ratios[i] / 100))
+                        .help("\(names[i]) \(Int(ratios[i]))%")
+                        .accessibilityElement()
+                        .accessibilityLabel(names[i])
+                        .accessibilityValue("\(Int(ratios[i]))%")
+                        .accessibilityAdjustableAction { dir in
+                            ratios = PlanRatios.nudge(ratios, i, by: dir == .increment ? PlanRatios.step : -PlanRatios.step)
+                        }
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15)))
+                ForEach(0..<max(0, ratios.count - 1), id: \.self) { i in
+                    let x = w * ratios[...i].reduce(0, +) / 100
+                    Rectangle().fill(Color(nsColor: .windowBackgroundColor)).frame(width: 2, height: 28)
+                        .overlay(Capsule().fill(Color.primary.opacity(0.5)).frame(width: 2, height: 14))
+                        .frame(width: 14, height: 28).contentShape(Rectangle())
+                        .position(x: x, y: 14)
+                        .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+                        .gesture(DragGesture(minimumDistance: 1).onChanged { g in
+                            let base = dragStart ?? ratios
+                            if dragStart == nil { dragStart = ratios }
+                            let start = w * base[...i].reduce(0, +) / 100
+                            ratios = PlanRatios.moveDivider(base, after: i, to: (start + g.translation.width) / w * 100)
+                        }.onEnded { _ in dragStart = nil })
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .frame(height: 28)
     }
 }

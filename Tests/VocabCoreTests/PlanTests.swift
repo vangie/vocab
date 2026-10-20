@@ -5,9 +5,12 @@ import XCTest
 final class PlanTests: XCTestCase {
     func testDailyLimits() {
         var p = StudyPlan()
-        XCTAssertEqual(p.dailyNew, 20); XCTAssertEqual(p.dailyReview, 200)
+        XCTAssertEqual(p.dailyNew, 20); XCTAssertEqual(p.dailyReview, 20)
+        XCTAssertEqual(PlanMath.newToday(plan: p, due: 5, introducedToday: 0), 15)     // review limit − due
+        XCTAssertEqual(PlanMath.reviewsToday(plan: p, due: 250), 20)
+        p.dailyReview = 200
         XCTAssertEqual(PlanMath.newToday(plan: p, due: 10, introducedToday: 0), 20)
-        XCTAssertEqual(PlanMath.newToday(plan: p, due: 190, introducedToday: 0), 10)   // review limit − due
+        XCTAssertEqual(PlanMath.newToday(plan: p, due: 190, introducedToday: 0), 10)
         XCTAssertEqual(PlanMath.newToday(plan: p, due: 250, introducedToday: 0), 0)
         XCTAssertEqual(PlanMath.newToday(plan: p, due: 0, introducedToday: 15), 5)
         XCTAssertEqual(PlanMath.reviewsToday(plan: p, due: 250), 200)
@@ -50,6 +53,31 @@ final class PlanTests: XCTestCase {
         // Without priority, book and lists share by ratio.
         let n = PlanMixer.mix([l1, book], count: 2, wordbookFirst: false)
         XCTAssertEqual(Set(n.map(\.source)), [.book(1), .list(.cet4)])
+    }
+
+    func testOldDefaultReviewLimitMigrates() throws {
+        let old = #"{"sources":[],"dailyNew":25,"dailyReview":200,"wordbookFirst":true,"configured":true}"#
+        let p = try JSONDecoder().decode(StudyPlan.self, from: Data(old.utf8))
+        XCTAssertEqual(p.dailyReview, 20); XCTAssertEqual(p.dailyNew, 25); XCTAssertTrue(p.configured)
+        let custom = #"{"dailyReview":150}"#
+        XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: Data(custom.utf8)).dailyReview, 150)
+        var mine = StudyPlan(); mine.dailyReview = 200; mine.reviewEdited = true
+        XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(mine)).dailyReview, 200)
+    }
+
+    func testRatios() {
+        XCTAssertEqual(PlanRatios.equal(3), [35, 35, 30])
+        XCTAssertEqual(PlanRatios.equal(1), [100])
+        XCTAssertEqual(PlanRatios.snap([1, 1]), [50, 50])
+        XCTAssertEqual(PlanRatios.snap([3, 1]), [75, 25])
+        XCTAssertEqual(PlanRatios.snap([1, 1, 1]).reduce(0, +), 100)
+        XCTAssertEqual(PlanRatios.snap([100, 0.01]), [95, 5])
+        let r = [40.0, 30, 30]
+        XCTAssertEqual(PlanRatios.moveDivider(r, after: 0, to: 52), [50, 20, 30])     // snaps to 5%
+        XCTAssertEqual(PlanRatios.moveDivider(r, after: 0, to: 99), [65, 5, 30])      // neighbour keeps 5%
+        XCTAssertEqual(PlanRatios.moveDivider(r, after: 1, to: 0), [40, 5, 55])
+        XCTAssertEqual(PlanRatios.nudge(r, 2, by: 5), [40, 25, 35])
+        XCTAssertEqual(PlanRatios.nudge([95, 5], 0, by: 5), [95, 5])
     }
 
     func testPlanPersists() {

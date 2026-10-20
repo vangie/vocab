@@ -18,13 +18,29 @@ public struct PlanSource: Hashable, Codable, Sendable, Identifiable {
 public struct StudyPlan: Codable, Equatable, Sendable {
     public var sources: [PlanSource] = []
     public var dailyNew = 20
-    public var dailyReview = 200
+    public var dailyReview = 20
+    /// The user changed the review limit (so a stored 200 is theirs, not the old default).
+    public var reviewEdited = false
     public var targetDate: Date? = nil
     /// Wordbook words are drawn before word-list words.
     public var wordbookFirst = true
     /// Set once the user has seen the plan sheet.
     public var configured = false
     public init() {}
+
+    enum CodingKeys: String, CodingKey { case sources, dailyNew, dailyReview, reviewEdited, targetDate, wordbookFirst, configured }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sources = try c.decodeIfPresent([PlanSource].self, forKey: .sources) ?? []
+        dailyNew = try c.decodeIfPresent(Int.self, forKey: .dailyNew) ?? 20
+        dailyReview = try c.decodeIfPresent(Int.self, forKey: .dailyReview) ?? 20
+        reviewEdited = try c.decodeIfPresent(Bool.self, forKey: .reviewEdited) ?? false
+        targetDate = try c.decodeIfPresent(Date.self, forKey: .targetDate)
+        wordbookFirst = try c.decodeIfPresent(Bool.self, forKey: .wordbookFirst) ?? true
+        configured = try c.decodeIfPresent(Bool.self, forKey: .configured) ?? false
+        // Old default review limit (200) that was never touched → the new default.
+        if dailyReview == 200 && !reviewEdited { dailyReview = 20 }
+    }
 
     public static let defaultsKey = "studyPlan"
     public static func load(_ d: UserDefaults = .standard) -> StudyPlan {
@@ -97,6 +113,53 @@ public enum PlanMixer {
             }
             if out.count >= count { break }
         }
+        return out
+    }
+}
+
+/// Shares of the chosen sources as percentages in 5% steps that add up to 100.
+public enum PlanRatios {
+    public static let step = 5.0
+
+    public static func equal(_ n: Int) -> [Double] {
+        guard n > 0 else { return [] }
+        let units = Int(100 / step), base = units / n, extra = units % n
+        return (0..<n).map { Double(base + ($0 < extra ? 1 : 0)) * step }
+    }
+
+    /// Scale to 100, round to 5% (each at least 5%), fix rounding on the largest share.
+    public static func snap(_ r: [Double]) -> [Double] {
+        guard !r.isEmpty else { return [] }
+        let total = r.reduce(0, +)
+        guard total > 0, r.count <= Int(100 / step) else { return equal(r.count) }
+        var out = r.map { max(step, ($0 / total * 100 / step).rounded() * step) }
+        var diff = 100 - out.reduce(0, +)
+        while diff != 0 {
+            let i: Int
+            if diff > 0 { i = out.indices.min { out[$0] < out[$1] }! }
+            else { guard let j = out.indices.filter({ out[$0] > step }).max(by: { out[$0] < out[$1] }) else { break }; i = j }
+            out[i] += diff > 0 ? step : -step; diff += diff > 0 ? -step : step
+        }
+        return out
+    }
+
+    /// Drag the divider after segment `i` to `position` (0–100, cumulative). Only `i` and `i+1` change.
+    public static func moveDivider(_ r: [Double], after i: Int, to position: Double) -> [Double] {
+        guard i >= 0, i + 1 < r.count else { return r }
+        let start = r[..<i].reduce(0, +), end = start + r[i] + r[i + 1]
+        let x = min(max((position / step).rounded() * step, start + step), end - step)
+        var out = r
+        out[i] = x - start; out[i + 1] = end - x
+        return out
+    }
+
+    /// Give `i` 5% more (or less) from a neighbour (VoiceOver increment/decrement).
+    public static func nudge(_ r: [Double], _ i: Int, by delta: Double) -> [Double] {
+        guard r.count > 1, r.indices.contains(i) else { return r }
+        let j = i + 1 < r.count ? i + 1 : i - 1
+        var out = r
+        let d = delta > 0 ? min(delta, out[j] - step) : max(delta, step - out[i])
+        out[i] += d; out[j] -= d
         return out
     }
 }
