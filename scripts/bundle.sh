@@ -26,7 +26,7 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Localized app name (生词 on Chinese systems, Vocab elsewhere).
 for l in Resources/*.lproj; do [ -d "$l" ] && cp -R "$l" "$APP/Contents/Resources/"; done
 # Bundled word lists (ECDICT extract, MIT; see THIRD_PARTY.md).
-cp Resources/Data/wordlists.sqlite "$APP/Contents/Resources/"
+cp Resources/Data/wordlists.sqlite Resources/Data/hanzi-freq.tsv "$APP/Contents/Resources/"
 cp THIRD_PARTY.md "$APP/Contents/Resources/"
 # Local, untracked icon override: Local/AppIcon.png (1024px) wins over Resources/AppIcon.icns.
 if [ -f Local/AppIcon.png ]; then

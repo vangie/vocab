@@ -8,6 +8,8 @@ final class PlanModel: ObservableObject {
     static let shared = PlanModel()
     @Published var plan: StudyPlan { didSet { if plan != oldValue { plan.save() } } }
     @Published private(set) var results: [VocabTestResult] = []
+    /// 识字量 history (newest first). Not used by the study plan.
+    @Published private(set) var hanziResults: [VocabTestResult] = []
     @Published private(set) var lastBatch: RetireBatch?
     private var checkCache: (date: Date, words: Set<String>)?
 
@@ -40,6 +42,7 @@ final class PlanModel: ObservableObject {
 
     func reloadResults() {
         results = (try? book.store?.testResults()) ?? []
+        hanziResults = (try? book.store?.hanziResults()) ?? []
         lastBatch = (try? book.store?.latestBatch()) ?? nil
         checkCache = nil
     }
@@ -140,6 +143,7 @@ final class PlanModel: ObservableObject {
     }
 
     func save(_ r: VocabTestResult) { try? book.store?.saveTestResult(r); reloadResults() }
+    func saveHanzi(_ r: VocabTestResult) { try? book.store?.saveHanziResult(r); reloadResults() }
 
     /// Words in the bands the test marked as known.
     func knownWords(_ r: VocabTestResult) -> [String] {
@@ -168,6 +172,7 @@ struct PlanSettingsView: View {
     @ObservedObject var model = PlanModel.shared
     @State private var remaining = 0
     @State private var testing = false
+    @State private var hanziTesting = false
     @AppStorage(ReviewSession.retentionKey) private var retention = 0.9
     @AppStorage(ReviewSession.learningKey) private var learningSteps = "1m 10m"
     @AppStorage(ReviewSession.relearningKey) private var relearningSteps = "10m"
@@ -234,6 +239,26 @@ struct PlanSettingsView: View {
                             Button("撤销「\(b.label)」") { model.undoLastBatch(); refresh() }
                         }
                     }
+                    }
+                }
+                Section("识字量") {
+                    if let r = model.hanziResults.first {
+                        LabeledContent("上次结果", value: "约 \(r.estimate) 字（\(r.low)–\(r.high)）")
+                        LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
+                        if model.hanziResults.count > 1 {
+                            DisclosureGroup("历史记录") {
+                                ForEach(Array(model.hanziResults.dropFirst().enumerated()), id: \.offset) { _, h in
+                                    LabeledContent(h.date.formatted(date: .abbreviated, time: .omitted), value: "约 \(h.estimate) 字")
+                                }
+                            }
+                        }
+                        HStack { Button("重新测试") { hanziTesting = true }; Spacer() }
+                    } else {
+                        HStack {
+                            Text("测一下认识多少个常用汉字（只做记录，不影响背单词计划）。").foregroundStyle(.secondary)
+                            Spacer()
+                            Button("开始测试") { hanziTesting = true }
+                        }
                     }
                 }
                 Section("词书和生词本") {
@@ -370,6 +395,7 @@ struct PlanSettingsView: View {
         .onAppear { model.reconcile(); normalize(); model.reloadResults(); refresh(); model.plan.configured = true }
         .onChange(of: model.plan.sources) { _, _ in refresh() }
         .sheet(isPresented: $testing, onDismiss: refresh) { VocabTestSheet() }
+        .sheet(isPresented: $hanziTesting) { HanziTestSheet() }
     }
 
     private func refresh() { remaining = model.remainingNew() }
@@ -570,5 +596,120 @@ struct ProportionBar: View {
             }
         }
         .frame(height: 28)
+    }
+}
+
+// MARK: - Character recognition test (识字量)
+
+struct HanziTestSheet: View {
+    @ObservedObject var model = PlanModel.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var run: HanziTestRun?
+    @State private var result: VocabTestResult?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let r = result { resultView(r) }
+            else if let run, let item = run.current { question(run, item) }
+            else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }
+        .frame(width: 480, height: 520)
+        .onAppear(perform: start)
+    }
+
+    private func start() {
+        guard let list = HanziList.shared else { return }
+        var rng = SystemRandomNumberGenerator()
+        run = HanziTestRun(list: list, using: &rng)
+        result = nil
+    }
+
+    private func question(_ r: HanziTestRun, _ item: HanziTestItem) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("识字量测试 · 第 \(r.round) 轮").font(.headline)
+                Spacer()
+                Text("\(r.answered + 1) / \(r.items.count)").monospacedDigit().foregroundStyle(.secondary)
+                Button("取消") { dismiss() }
+            }
+            .padding(16)
+            ProgressView(value: Double(r.answered), total: Double(max(1, r.items.count))).padding(.horizontal, 16)
+            Spacer()
+            Text(item.char).font(.system(size: 72, weight: .regular, design: .serif))
+            if r.askingReading {
+                Text("它读什么？").foregroundStyle(.secondary).padding(.top, 8)
+                Spacer()
+                HStack(spacing: 10) {
+                    ForEach(Array(item.choices.enumerated()), id: \.offset) { i, c in
+                        Button { reading(c) } label: { Text(c).font(.title3).frame(minWidth: 72) }
+                            .controlSize(.large).keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [])
+                    }
+                }
+                Button("不确定") { reading("") }.buttonStyle(.borderless).padding(.top, 8).keyboardShortcut("0", modifiers: [])
+            } else {
+                Text("认识这个字吗？").foregroundStyle(.secondary).padding(.top, 8)
+                Spacer()
+                HStack(spacing: 16) {
+                    Button { answer(false) } label: { Text("不认识").frame(width: 120) }
+                        .controlSize(.large).keyboardShortcut(.leftArrow, modifiers: [])
+                    Button { answer(true) } label: { Text("认识").frame(width: 120) }
+                        .controlSize(.large).keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(.borderedProminent)
+                }
+            }
+            HStack {
+                Button("上一个") { run?.undo() }.disabled(r.answered == 0 && !r.askingReading).keyboardShortcut(.delete, modifiers: [])
+                Spacer()
+                Text(r.askingReading ? "1–4 选读音 · 0 不确定 · ⌫ 上一个" : "← 不认识 · → 认识 · ⌫ 上一个").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(16)
+        }
+    }
+
+    private func answer(_ known: Bool) { guard var r = run else { return }; r.answer(known); finish(&r) }
+    private func reading(_ c: String) { guard var r = run else { return }; r.answerReading(c); finish(&r) }
+
+    private func finish(_ r: inout HanziTestRun) {
+        if r.finished {
+            var rng = SystemRandomNumberGenerator()
+            if !(r.round == 1 && r.startRound2(using: &rng)) {
+                let res = r.result()
+                model.saveHanzi(res); result = res
+            }
+        }
+        run = r
+    }
+
+    private func resultView(_ r: VocabTestResult) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 14) {
+                    Text("你认识的汉字约").foregroundStyle(.secondary).padding(.top, 24)
+                    Text("\(r.estimate)").font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit()
+                    Text("可能在 \(r.low)–\(r.high) 之间（共测常用字 \(r.bandRanges.last?.hi ?? 0) 个）").foregroundStyle(.secondary)
+                    if r.falseAlarm > 0.05 {
+                        Text("读音抽查有 \(Int((r.falseAlarm * 100).rounded()))% 没对上，结果已按此修正").font(.caption).foregroundStyle(.orange)
+                    }
+                    VStack(spacing: 6) {
+                        ForEach(r.bands, id: \.band) { b in
+                            HStack {
+                                Text(r.bandRanges[b.band].title).font(.caption).monospacedDigit().frame(width: 92, alignment: .leading)
+                                ProgressView(value: b.corrected)
+                                Text("\(Int((b.corrected * 100).rounded()))%").font(.caption).monospacedDigit().frame(width: 36, alignment: .trailing)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 30)
+                    Text("按字频分段抽字，「认识」的字中抽一部分问读音来校正高估。参考：常用字 2500 个覆盖日常文本约 98%。")
+                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 30)
+                }
+            }
+            Divider()
+            HStack {
+                Button("再测一次") { start() }
+                Spacer()
+                Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+        }
     }
 }

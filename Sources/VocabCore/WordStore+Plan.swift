@@ -25,6 +25,27 @@ extension WordStore {
     }
 
     /// Newest first.
+    /// 识字量测试 results (newest first); separate from 词汇量 so they never drive the word plan.
+    /// Additive table (no data touched), created on first use rather than by a version migration.
+    static let hanziSQL = "CREATE TABLE IF NOT EXISTS hanzi_results(id INTEGER PRIMARY KEY AUTOINCREMENT, taken REAL NOT NULL, estimate INTEGER NOT NULL, json TEXT NOT NULL)"
+
+    public func saveHanziResult(_ r: VocabTestResult) throws {
+        try runPublic(Self.hanziSQL, [])
+        let json = String(decoding: try JSONEncoder().encode(r), as: UTF8.self)
+        try runPublic("INSERT INTO hanzi_results(taken, estimate, json) VALUES(?,?,?)", [r.date, r.estimate, json])
+    }
+
+    public func hanziResults() throws -> [VocabTestResult] {
+        try runPublic(Self.hanziSQL, [])
+        var out: [VocabTestResult] = []
+        try runPublic("SELECT json FROM hanzi_results ORDER BY taken DESC, id DESC", []) { st in
+            if let t = sqlite3_column_text(st, 0), let r = try? JSONDecoder().decode(VocabTestResult.self, from: Data(String(cString: t).utf8)) {
+                out.append(r)
+            }
+        }
+        return out
+    }
+
     public func testResults() throws -> [VocabTestResult] {
         var out: [VocabTestResult] = []
         try runPublic("SELECT json FROM test_results ORDER BY taken DESC, id DESC", []) { st in

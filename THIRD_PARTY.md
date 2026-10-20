@@ -30,3 +30,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Modern Chinese Character Frequency List (识字量测试)
+
+`Resources/Data/hanzi-freq.tsv` lists, in frequency-rank order, the 6,696 GB2312 characters among
+the top of **Jun Da's Modern Chinese Character Frequency List** (现代汉语单字频率列表, Middle Tennessee
+State University, https://lingua.mtsu.edu/chinese-computing/statistics/), with readings converted to
+tone-marked pinyin from the list's pinyin column (sourced by the author from CEDICT,
+https://www.mdbg.net/chinese/dictionary?page=cedict, CC BY-SA 4.0). Built by `scripts/build-hanzi.py`.
+The list is published by its author for free use in teaching and research; please credit Jun Da (2004).

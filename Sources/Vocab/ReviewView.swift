@@ -55,11 +55,13 @@ private struct StartScreen: View {
                 VStack(spacing: 10) {
                     if p.reviews + p.new == 0 {
                         Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3.weight(.medium))
+                        TestLinks()
                     } else {
                         Button { session.start() } label: { Text("开始").font(.title2.weight(.semibold)).frame(minWidth: 200, minHeight: 48) }
                             .keyboardShortcut(.defaultAction).controlSize(.large)
                             .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                         Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.secondary)
+                        TestLinks()
                     }
                 }
                 .padding(.top, 18)   // + the stack's 14 pt = 32 pt below the pills
@@ -78,6 +80,7 @@ private struct StartScreen: View {
                     .keyboardShortcut(.defaultAction).controlSize(.extraLarge)
                     .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.top, 6)
                 Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.tertiary)
+                        TestLinks()
             }
             Spacer()
         }
@@ -605,5 +608,34 @@ private struct Ring: View, Animatable {
             .rotationEffect(.degrees(-90))
             .frame(width: g.size.width, height: g.size.height)
         }
+    }
+}
+
+/// Small gray links under 开始: 测词汇量 · 测识字量 (underline on hover).
+private struct TestLinks: View {
+    @State private var vocab = false
+    @State private var hanzi = false
+    var body: some View {
+        HStack(spacing: 4) {
+            HoverLink(title: "测词汇量") { vocab = true }
+            Text("·").foregroundStyle(.tertiary)
+            HoverLink(title: "测识字量") { hanzi = true }
+        }
+        .font(.caption)
+        .padding(.top, 2)
+        .sheet(isPresented: $vocab) { VocabTestSheet() }
+        .sheet(isPresented: $hanzi) { HanziTestSheet() }
+    }
+}
+
+private struct HoverLink: View {
+    let title: String
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) { Text(title).underline(hover).foregroundStyle(.secondary) }
+            .buttonStyle(.plain)
+            .onHover { hover = $0; if $0 { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+            .accessibilityAddTraits(.isLink)
     }
 }
