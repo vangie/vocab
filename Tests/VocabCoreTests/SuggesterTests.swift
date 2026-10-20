@@ -160,4 +160,19 @@ final class SidebarContentTests: XCTestCase {
                        .noSuggestions(query: "的等待"))
         XCTAssertEqual(SidebarContent.make(query: " ", suggestionsFor: nil, words: [], recents: recents), .recents(recents))
     }
+
+    func testChineseDisplayHeadwords() {
+        XCTAssertEqual(Suggester.splitHeadword("朝三暮四 zhāosān-mùsì").word, "朝三暮四")
+        XCTAssertEqual(Suggester.splitHeadword("朝三暮四 zhāosān-mùsì").reading, "zhāosān-mùsì")
+        XCTAssertEqual(Suggester.splitHeadword("朝三暮四 zhāo sān mù sì").word, "朝三暮四")
+        XCTAssertNil(Suggester.splitHeadword("朝三暮四").reading)
+        XCTAssertEqual(Suggester.splitHeadword("ice cream").word, "ice cream")    // English untouched
+        XCTAssertNil(Suggester.splitHeadword("ice cream").reading)
+        XCTAssertEqual(Suggester.splitHeadword("T恤 tīxù").word, "T恤 tīxù")      // not Han-initial: left alone
+        let n = Suggester.normalize(["朝三暮四", "朝三暮四 zhāosān-mùsì", "朝三暮四 zhāo sān mù sì", "朝秦暮楚 zhāoqín-mùchǔ"])
+        XCTAssertEqual(Suggester.rank(n.words, query: "朝三暮四"), ["朝三暮四", "朝秦暮楚"])
+        XCTAssertEqual(n.readings["朝三暮四"], "zhāosān-mùsì")
+        let r = Suggester.Result(matches: ["朝三暮四"], spelling: [], readings: n.readings)
+        XCTAssertEqual(r.all.first?.detail, "zhāosān-mùsì")
+    }
 }

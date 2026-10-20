@@ -6,12 +6,37 @@ public struct Suggestion: Hashable, Sendable, Identifiable {
     public enum Kind: Sendable { case match, spelling }
     public let word: String
     public let kind: Kind
+    /// Secondary text (e.g. pinyin from a Chinese dictionary's display headword).
+    public var detail: String? = nil
     public var id: String { "\(kind)|\(word)" }
-    public init(word: String, kind: Kind) { self.word = word; self.kind = kind }
+    public init(word: String, kind: Kind, detail: String? = nil) { self.word = word; self.kind = kind; self.detail = detail }
 }
 
 /// Autocomplete, spelling correction and lemmatization on top of DictionaryService.
 public enum Suggester {
+    /// Chinese dictionaries list display headwords with the reading appended
+    /// ("朝三暮四 zhāosān-mùsì"); the lookup key is the Han part. Returns (key, reading).
+    public static func splitHeadword(_ h: String) -> (word: String, reading: String?) {
+        let t = h.trimmingCharacters(in: .whitespaces)
+        guard let r = t.range(of: #"^(\p{Han}[\p{Han}\p{P}0-9]*)\s+([\p{Latin}\p{M}0-9·'’\- ]+)$"#, options: .regularExpression),
+              r == t.startIndex..<t.endIndex,
+              let sp = t.firstIndex(where: { $0.isWhitespace }) else { return (t, nil) }
+        let word = String(t[..<sp])
+        let reading = t[sp...].trimmingCharacters(in: .whitespaces)
+        return (word, reading.isEmpty ? nil : reading)
+    }
+
+    /// Clean headwords to lookup keys (deduped later by `rank`) and remember the first reading per key.
+    public static func normalize(_ headwords: [String]) -> (words: [String], readings: [String: String]) {
+        var words: [String] = [], readings: [String: String] = [:]
+        for h in headwords {
+            let (w, r) = splitHeadword(h)
+            words.append(w)
+            if let r, readings[w] == nil { readings[w] = r }
+        }
+        return (words, readings)
+    }
+
     /// Dedupe case-insensitively and rank: exact match, then prefix matches by
     /// length (single words before phrases), then alphabetically.
     public static func rank(_ headwords: [String], query: String, limit: Int = 60) -> [String] {
@@ -84,8 +109,12 @@ public enum Suggester {
     public struct Result: Sendable {
         public let matches: [String]
         public let spelling: [String]
+        public var readings: [String: String] = [:]
+        public init(matches: [String], spelling: [String], readings: [String: String] = [:]) {
+            self.matches = matches; self.spelling = spelling; self.readings = readings
+        }
         public var all: [Suggestion] {
-            matches.map { Suggestion(word: $0, kind: .match) } + spelling.map { Suggestion(word: $0, kind: .spelling) }
+            matches.map { Suggestion(word: $0, kind: .match, detail: readings[$0]) } + spelling.map { Suggestion(word: $0, kind: .spelling) }
         }
     }
 
@@ -98,7 +127,8 @@ public enum Suggester {
         var raw = service.headwords(q, method: 0, in: dicts, maxPerDictionary: 5)   // exact + indexed inflections
         raw += service.headwords(q, method: 1, in: dicts, maxPerDictionary: 40)     // prefix
         if raw.isEmpty, let l = lemma(q) { raw += service.headwords(l, method: 0, in: dicts, maxPerDictionary: 5) }
-        let matches = rank(raw, query: q)
+        let norm = normalize(raw)
+        let matches = rank(norm.words, query: q)
 
         // Spelling suggestions when there are few direct matches.
         var spelling: [String] = []
@@ -125,7 +155,7 @@ public enum Suggester {
             spelling = cands.filter { let k = $0.lowercased(); return !taken.contains(k) && k != q.lowercased() && seen.insert(k).inserted }
             spelling = Array(spelling.prefix(8))
         }
-        return Result(matches: matches, spelling: spelling)
+        return Result(matches: matches, spelling: spelling, readings: norm.readings)
     }
 
     /// Entries for a word, falling back to its lemma (for taps on inflected words).

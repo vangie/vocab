@@ -81,7 +81,16 @@ struct MainView: View {
                 switch content {
                 case .suggestions:
                     if !matches.isEmpty {
-                        Section { ForEach(matches) { s in Text(s.word).lineLimit(1).tag(SidebarItem.suggestion(s.id)) } }
+                        Section {
+                            ForEach(matches) { s in
+                                HStack(spacing: 6) {
+                                    Text(s.word).lineLimit(1).layoutPriority(1)
+                                    if let d = s.detail { Text(d).foregroundStyle(.secondary).lineLimit(1) }
+                                }
+                                .tag(SidebarItem.suggestion(s.id))
+                                .help(s.detail.map { "\(s.word) \($0)" } ?? s.word)
+                            }
+                        }
                     }
                     if !spelling.isEmpty {
                         Section("你是不是要找：") {
