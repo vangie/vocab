@@ -164,91 +164,6 @@ final class WordbookModel: ObservableObject {
     }
 }
 
-// MARK: - Sidebar
-
-struct WordbookSidebar: View {
-    @EnvironmentObject var book: WordbookModel
-    @ObservedObject var state = AppState.shared
-    @State private var renaming: Wordbook?
-    @State private var newName = ""
-    @State private var creating = false
-
-    var body: some View {
-        List(selection: Binding(get: { state.wordGroup }, set: { if let g = $0 { state.wordGroup = g } })) {
-            Section("生词本") {
-                Label("所有单词", systemImage: "tray.full").badge(book.items.count).tag(WordGroup.all)
-                ForEach(book.books) { b in
-                    Label(b.name, systemImage: b.isDefault ? "book.closed.fill" : "book.closed")
-                        .badge(book.items.filter { $0.bookID == b.id }.count)
-                        .tag(WordGroup.book(b.id))
-                        .dropDestination(for: String.self) { ids, _ in
-                            book.move(Set(ids.compactMap { Int64($0) }), to: b.id); return true
-                        }
-                        .contextMenu {
-                            Button("重命名…") { newName = b.name; renaming = b }
-                            Button("设为默认生词本") { book.setDefaultBook(b.id) }.disabled(b.isDefault)
-                            Divider()
-                            Button("删除生词本…") { confirmDelete(b) }.disabled(b.isDefault)
-                        }
-                }
-            }
-            if !book.tags.isEmpty {
-                Section("标签") {
-                    ForEach(book.tags, id: \.tag) { t in
-                        Label(t.tag, systemImage: "tag").badge(t.count).tag(WordGroup.tag(t.tag))
-                    }
-                }
-            }
-            if !book.sources.isEmpty {
-                Section("来源") {
-                    ForEach(book.sources, id: \.name) { s in
-                        Label(s.name, systemImage: icon(s.name)).badge(s.count).tag(WordGroup.source(s.name))
-                    }
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            HStack {
-                Button { newName = ""; creating = true } label: { Image(systemName: "plus") }
-                    .buttonStyle(.borderless).help("新建生词本")
-                Spacer()
-            }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-        }
-        .alert("新建生词本", isPresented: $creating) {
-            TextField("名称", text: $newName)
-            Button("创建") { if let b = book.createBook(newName) { state.wordGroup = .book(b.id) } }
-            Button("取消", role: .cancel) {}
-        }
-        .alert("重命名生词本", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("名称", text: $newName)
-            Button("好") { if let r = renaming { book.renameBook(r.id, newName) }; renaming = nil }
-            Button("取消", role: .cancel) { renaming = nil }
-        }
-    }
-
-    private func icon(_ app: String) -> String {
-        switch app {
-        case "Safari", "Google Chrome", "Microsoft Edge", "Arc", "Brave Browser": return "globe"
-        case "Kindle", "图书", "Books": return "books.vertical"
-        default: return "app"
-        }
-    }
-
-    private func confirmDelete(_ b: Wordbook) {
-        let a = NSAlert()
-        a.messageText = "删除生词本「\(b.name)」？"
-        a.informativeText = "其中的单词会移到默认生词本，不会被删除。"
-        a.addButton(withTitle: "删除"); a.addButton(withTitle: "取消")
-        a.buttons.first?.hasDestructiveAction = true
-        if a.runModal() == .alertFirstButtonReturn {
-            book.deleteBook(b.id)
-            if state.wordGroup == .book(b.id) { state.wordGroup = .all }
-        }
-    }
-}
-
 // MARK: - Main pane
 
 struct WordbookView: View {
@@ -301,10 +216,17 @@ struct WordbookView: View {
                     .frame(minHeight: 160)
                     .overlay { if book.items.isEmpty { Text("生词本还是空的。查词时点「加入生词本」或按 ⌘D。").foregroundStyle(.secondary) }
                                else if rows.isEmpty { Text("没有符合条件的单词").foregroundStyle(.secondary) } }
-                if selection.count == 1, let id = selection.first, let w = book.items.first(where: { $0.id == id }) {
-                    WordDetailView(item: w, onOpen: onOpen)
-                        .frame(minHeight: 160, idealHeight: 240)
+                Group {
+                    if selection.count == 1, let id = selection.first, let w = book.items.first(where: { $0.id == id }) {
+                        WordDetailView(item: w, onOpen: onOpen)
+                    } else {
+                        Text(selection.isEmpty ? "选择一个单词查看原句、标签和笔记" : "已选择 \(selection.count) 个单词")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color(nsColor: .textBackgroundColor))
+                    }
                 }
+                .frame(minHeight: 120, idealHeight: 220)
             }
         }
         .overlay(alignment: .bottom) {
@@ -317,36 +239,118 @@ struct WordbookView: View {
         .onChange(of: state.wordGroup) { _, _ in selection = [] }
     }
 
-    /// Finder-style scope bar: what to show on the left, familiarity next to it, actions on the right.
+    /// Finder-style filter bar. Wide: full labels; narrow: the same controls, compacted.
     private func filterBar(count: Int, rows: [WordItem]) -> some View {
-        HStack(spacing: 10) {
-            Picker("", selection: $state.wordScope) {
-                ForEach(WordbookScope.allCases) { s in Text(s.rawValue).tag(s) }
-            }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            Picker("", selection: $state.wordFamiliarity) {
-                Text("全部熟悉度").tag(Familiarity?.none)
-                Divider()
-                ForEach(Familiarity.allCases) { f in Text(f.title).tag(Familiarity?.some(f)) }
-            }
-            .pickerStyle(.menu).labelsHidden().fixedSize()
-            .help("按熟悉度筛选")
-            Spacer()
-            Text("\(groupTitle) · \(count) 个").foregroundStyle(.secondary).lineLimit(1)
-            Menu {
-                Button("CSV…") { book.importCSV() }
-                Button("Kindle 生词本（vocab.db）…") { book.importKindle() }
-            } label: { Text("导入") }
-            .menuStyle(.borderlessButton).fixedSize()
-            Menu {
-                Button("CSV…") { book.exportCSV(rows) }
-                Button("Anki 卡片包（.apkg）…") { book.exportAnki(rows, deck: groupTitle) }
-            } label: { Text("导出") }
-            .menuStyle(.borderlessButton).fixedSize()
-            .disabled(rows.isEmpty)
+        ViewThatFits(in: .horizontal) {
+            barContent(count: count, rows: rows, compact: false)
+            barContent(count: count, rows: rows, compact: true)
         }
         .controlSize(.small)
         .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    private func barContent(count: Int, rows: [WordItem], compact: Bool) -> some View {
+        HStack(spacing: compact ? 6 : 10) {
+            Picker("", selection: $state.wordScope) {
+                ForEach(WordbookScope.allCases) { s in Text(compact ? String(s.rawValue.prefix(s == .recent ? 2 : 3)) : s.rawValue).tag(s) }
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            bookMenu(compact)
+            if !book.tags.isEmpty { tagMenu(compact) }
+            if !book.sources.isEmpty { sourceMenu(compact) }
+            Menu {
+                Picker("", selection: $state.wordFamiliarity) {
+                    Text("全部熟悉度").tag(Familiarity?.none)
+                    Divider()
+                    ForEach(Familiarity.allCases) { f in Text(f.title).tag(Familiarity?.some(f)) }
+                }
+                .pickerStyle(.inline).labelsHidden()
+            } label: { Text(state.wordFamiliarity?.title ?? (compact ? "熟悉度" : "全部熟悉度")) }
+            .fixedSize().help("按熟悉度筛选")
+            Spacer(minLength: 4)
+            if !compact { Text("\(count) 个").foregroundStyle(.secondary).lineLimit(1).fixedSize() }
+            Menu {
+                Section("导入") {
+                    Button("CSV…") { book.importCSV() }
+                    Button("Kindle 生词本（vocab.db）…") { book.importKindle() }
+                }
+                Section("导出") {
+                    Button("CSV…") { book.exportCSV(rows) }.disabled(rows.isEmpty)
+                    Button("Anki 卡片包（.apkg）…") { book.exportAnki(rows, deck: groupTitle) }.disabled(rows.isEmpty)
+                }
+            } label: { Image(systemName: "square.and.arrow.up.on.square") }
+            .menuIndicator(.hidden).fixedSize().help("导入 / 导出")
+        }
+    }
+
+    private var currentBookID: Int64? { if case .book(let id) = state.wordGroup { return id }; return nil }
+
+    private func check(_ on: Bool, _ title: String) -> some View {
+        Group { if on { Label(title, systemImage: "checkmark") } else { Text(title) } }
+    }
+
+    private func bookMenu(_ compact: Bool) -> some View {
+        let title: String = {
+            if let id = currentBookID { return book.books.first { $0.id == id }?.name ?? "生词本" }
+            return "所有单词"
+        }()
+        return Menu {
+            Button { state.wordGroup = .all } label: { check(state.wordGroup == .all, "所有单词") }
+            Divider()
+            ForEach(book.books) { b in
+                Button { state.wordGroup = .book(b.id) } label: { check(currentBookID == b.id, b.isDefault ? "\(b.name)（默认）" : b.name) }
+            }
+            Divider()
+            Button("新建生词本…") {
+                if let n = WordTable.Coordinator.ask("新建生词本", "名称", ""), let b = book.createBook(n) { state.wordGroup = .book(b.id) }
+            }
+            if let id = currentBookID, let b = book.books.first(where: { $0.id == id }) {
+                Button("重命名「\(b.name)」…") {
+                    if let n = WordTable.Coordinator.ask("重命名生词本", "名称", b.name) { book.renameBook(b.id, n) }
+                }
+                Button("设为默认生词本") { book.setDefaultBook(b.id) }.disabled(b.isDefault)
+                Button("删除「\(b.name)」…") { confirmDelete(b) }.disabled(b.isDefault)
+            }
+        } label: { Label(title, systemImage: "book.closed").labelStyle(AdaptiveLabelStyle(iconOnly: compact)) }
+        .fixedSize().help("生词本：\(title)")
+    }
+
+    private func tagMenu(_ compact: Bool) -> some View {
+        var cur: String? = nil
+        if case .tag(let t) = state.wordGroup { cur = t }
+        return Menu {
+            Button { state.wordGroup = .all } label: { check(cur == nil, "全部标签") }
+            Divider()
+            ForEach(book.tags, id: \.tag) { t in
+                Button { state.wordGroup = .tag(t.tag) } label: { check(cur == t.tag, "\(t.tag)（\(t.count)）") }
+            }
+        } label: { Label(cur ?? "标签", systemImage: "tag").labelStyle(AdaptiveLabelStyle(iconOnly: compact && cur == nil)) }
+        .fixedSize().help("按标签筛选")
+    }
+
+    private func sourceMenu(_ compact: Bool) -> some View {
+        var cur: String? = nil
+        if case .source(let s) = state.wordGroup { cur = s }
+        return Menu {
+            Button { state.wordGroup = .all } label: { check(cur == nil, "全部来源") }
+            Divider()
+            ForEach(book.sources, id: \.name) { s in
+                Button { state.wordGroup = .source(s.name) } label: { check(cur == s.name, "\(s.name)（\(s.count)）") }
+            }
+        } label: { Label(cur ?? "来源", systemImage: "globe").labelStyle(AdaptiveLabelStyle(iconOnly: compact && cur == nil)) }
+        .fixedSize().help("按来源筛选")
+    }
+
+    private func confirmDelete(_ b: Wordbook) {
+        let a = NSAlert()
+        a.messageText = "删除生词本「\(b.name)」？"
+        a.informativeText = "其中的单词会移到默认生词本，不会被删除。"
+        a.addButton(withTitle: "删除"); a.addButton(withTitle: "取消")
+        a.buttons.first?.hasDestructiveAction = true
+        if a.runModal() == .alertFirstButtonReturn {
+            book.deleteBook(b.id)
+            if state.wordGroup == .book(b.id) { state.wordGroup = .all }
+        }
     }
 }
 
@@ -385,7 +389,6 @@ struct WordTable: NSViewRepresentable {
         tv.target = context.coordinator
         tv.doubleAction = #selector(Coordinator.doubleClick(_:))
         let menu = NSMenu(); menu.delegate = context.coordinator; tv.menu = menu
-        tv.setDraggingSourceOperationMask(.move, forLocal: true)
         let st = AppState.shared
         tv.sortDescriptors = [NSSortDescriptor(key: st.wordSortKey, ascending: st.wordSortAscending)]
         let scroll = NSScrollView()
@@ -467,10 +470,6 @@ struct WordTable: NSViewRepresentable {
             guard !syncing, let tv = table else { return }
             let ids = Set(tv.selectedRowIndexes.compactMap { $0 < sorted.count ? sorted[$0].id : nil })
             if ids != parent.selection { parent.selection = ids }
-        }
-
-        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-            row < sorted.count ? String(sorted[row].id) as NSString : nil
         }
 
         func tableView(_ tableView: NSTableView, viewFor col: NSTableColumn?, row: Int) -> NSView? {
@@ -557,7 +556,7 @@ struct WordTable: NSViewRepresentable {
                 if current == [b.id] { i.state = .on }
                 sub.addItem(i)
             }
-            sub.addItem(.separator()); sub.addItem(item("新建生词本…", #selector(moveToNew)))
+            sub.addItem(.separator()); sub.addItem(item("新建生词本并移入…", #selector(moveToNew)))
             move.submenu = sub; menu.addItem(move)
             let tagItem = NSMenuItem(title: "标签", action: nil, keyEquivalent: "")
             let tsub = NSMenu()
@@ -734,5 +733,13 @@ struct WordDetailView: View {
         var a = AttributedString(sentence)
         if let r = a.range(of: word, options: .caseInsensitive) { a[r].font = .body.bold() }
         return a
+    }
+}
+
+/// Icon only in the compact filter bar, icon and title otherwise.
+struct AdaptiveLabelStyle: LabelStyle {
+    var iconOnly: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if iconOnly { configuration.icon } else { HStack(spacing: 4) { configuration.icon; configuration.title } }
     }
 }
