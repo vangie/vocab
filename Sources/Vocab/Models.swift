@@ -229,7 +229,9 @@ final class LookupModel: ObservableObject {
         guard !suggestions.isEmpty else { return }
         let i = suggestions.firstIndex { $0.id == selection } ?? -1
         let n = min(max(0, i + delta), suggestions.count - 1)
-        select(suggestions[n].id)
+        // Arrowing through suggestions is browsing, not a committed lookup: don't record.
+        selection = suggestions[n].id
+        show(suggestions[n].word, record: false)
     }
 
     /// Enter in the search field.

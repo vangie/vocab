@@ -22,4 +22,21 @@ final class LookupHistoryTests: XCTestCase {
         h.record("new"); h.save(d)
         XCTAssertEqual(LookupHistory.load(d).words, ["new", "开", "word"])
     }
+
+    func testHeadwordStripsPinyinAndRejectsLabels() {
+        XCTAssertEqual(LookupHistory.headword("你们  nǐmen"), "你们")
+        XCTAssertEqual(LookupHistory.headword("你方 nǐfāng"), "你方")
+        XCTAssertEqual(LookupHistory.headword("朝三暮四  zhāo sān mù sì"), "朝三暮四")
+        XCTAssertEqual(LookupHistory.headword("apple pie"), "apple pie")
+        XCTAssertNil(LookupHistory.headword("Food, dish-topic food"))
+        var h = LookupHistory(); h.record("你们  nǐmen"); h.record("你们")
+        XCTAssertEqual(h.words, ["你们"])
+    }
+
+    func testLoadCleansLegacyJunk() throws {
+        let d = try XCTUnwrap(UserDefaults(suiteName: "lh-\(UUID())"))
+        d.set(["开发者", "朝三暮四  zhāosān-mùsì", "朝三暮四", "你们  nǐmen", "Food, dish-topic food", "apple"], forKey: LookupHistory.legacyKey)
+        XCTAssertEqual(LookupHistory.load(d).words, ["开发者", "朝三暮四", "你们", "apple"])
+        XCTAssertNotNil(d.data(forKey: LookupHistory.defaultsKey))
+    }
 }

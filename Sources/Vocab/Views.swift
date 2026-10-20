@@ -120,17 +120,6 @@ struct MainView: View {
                 }
             }
             .listStyle(.sidebar)
-            .safeAreaInset(edge: .bottom) {
-                if lookup.query.trimmingCharacters(in: .whitespaces).isEmpty, !lookup.recents.isEmpty {
-                    HStack {
-                        Spacer()
-                        Button("清空历史") { confirmClearHistory = true }
-                            .buttonStyle(.borderless).font(.callout).foregroundStyle(.secondary)
-                            .focusable(false)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                }
-            }
             .confirmationDialog("清空全部查询历史？", isPresented: $confirmClearHistory) {
                 Button("清空历史", role: .destructive) { lookup.clearRecents() }
                 Button("取消", role: .cancel) {}
@@ -409,6 +398,7 @@ struct SettingsView: View {
                         }
                     }
                 }
+                HistorySettingsSection()
             }
             .formStyle(.grouped)
             .frame(width: Self.width, height: Self.formHeight)
@@ -474,5 +464,26 @@ struct HistoryRow: View {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN")
         f.dateFormat = Calendar.current.isDate(d, equalTo: now, toGranularity: .year) ? "M月d日" : "yyyy年M月d日"
         return f.string(from: d)
+    }
+}
+
+
+/// Settings › 通用: lookup-history count and 清空历史… (with confirmation).
+struct HistorySettingsSection: View {
+    @ObservedObject private var lookup = LookupModel.shared
+    @State private var confirm = false
+    var body: some View {
+        Section {
+            HStack {
+                Text("查询历史")
+                Spacer()
+                Text(lookup.recents.isEmpty ? "无" : "\(lookup.recents.count) 个词").foregroundStyle(.secondary)
+                Button("清空历史…") { confirm = true }.disabled(lookup.recents.isEmpty)
+            }
+        }
+        .confirmationDialog("清空全部查询历史？", isPresented: $confirm) {
+            Button("清空历史", role: .destructive) { lookup.clearRecents() }
+            Button("取消", role: .cancel) {}
+        } message: { Text("此操作无法撤销。") }
     }
 }
