@@ -55,8 +55,9 @@ private struct StartScreen: View {
                 if p.reviews + p.new == 0 {
                     Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
                 } else {
-                    Button("开始") { session.start() }
-                        .keyboardShortcut(.defaultAction).controlSize(.large).padding(.top, 4)
+                    Button { session.start() } label: { Text("开始").font(.title3.weight(.semibold)).frame(minWidth: 160, minHeight: 40) }
+                    .keyboardShortcut(.defaultAction).controlSize(.extraLarge)
+                    .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.top, 4)
                     Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.tertiary)
                 }
             } else if p.reviews + p.new == 0 {
@@ -70,8 +71,9 @@ private struct StartScreen: View {
                     Stat(value: p.reviews, label: "待复习")
                     Stat(value: p.new, label: "新词")
                 }
-                Button("开始") { session.start() }
-                    .keyboardShortcut(.defaultAction).controlSize(.large).padding(.top, 6)
+                Button { session.start() } label: { Text("开始").font(.title3.weight(.semibold)).frame(minWidth: 160, minHeight: 40) }
+                    .keyboardShortcut(.defaultAction).controlSize(.extraLarge)
+                    .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.top, 6)
                 Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.tertiary)
             }
             Spacer()
