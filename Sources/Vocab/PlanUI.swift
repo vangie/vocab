@@ -218,7 +218,7 @@ struct PlanSettingsView: View {
                         LabeledContent("上次结果", value: "约 \(r.estimate) 词（\(r.low)–\(r.high)）")
                         LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
                         if model.results.count > 1 {
-                            DisclosureGroup("历史记录") {
+                            RowDisclosureLocal("历史记录") {
                                 ForEach(Array(model.results.dropFirst().enumerated()), id: \.offset) { _, h in
                                     LabeledContent(h.date.formatted(date: .abbreviated, time: .omitted), value: "约 \(h.estimate) 词")
                                 }
@@ -246,7 +246,7 @@ struct PlanSettingsView: View {
                         LabeledContent("上次结果", value: "约 \(r.estimate) 字（\(r.low)–\(r.high)）")
                         LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
                         if model.hanziResults.count > 1 {
-                            DisclosureGroup("历史记录") {
+                            RowDisclosureLocal("历史记录") {
                                 ForEach(Array(model.hanziResults.dropFirst().enumerated()), id: \.offset) { _, h in
                                     LabeledContent(h.date.formatted(date: .abbreviated, time: .omitted), value: "约 \(h.estimate) 字")
                                 }
@@ -371,7 +371,7 @@ struct PlanSettingsView: View {
                     Text("答对后等一会儿自动进入下一题，「继续」下方的细条显示倒计时；指针停在答案上会暂停，按空格、回车或任意键立即继续。答错会停下来等你看完。").font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
-                    DisclosureGroup("高级", isExpanded: $showAdvanced) {
+                    RowDisclosure("高级", isExpanded: $showAdvanced) {
                         LabeledContent("目标记忆率") {
                             HStack {
                                 Slider(value: $retention, in: 0.70...0.97, step: 0.01).frame(width: 180)
