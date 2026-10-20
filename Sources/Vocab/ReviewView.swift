@@ -52,17 +52,17 @@ private struct StartScreen: View {
             let p = session.preview
             if plan.plan.configured {
                 PlanDashboard(session: session, plan: plan.plan)
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     if p.reviews + p.new == 0 {
                         Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3.weight(.medium))
                     } else {
-                        Button { session.start() } label: { Text("开始").font(.headline).frame(minWidth: 140, minHeight: 36) }
+                        Button { session.start() } label: { Text("开始").font(.title2.weight(.semibold)).frame(minWidth: 200, minHeight: 48) }
                             .keyboardShortcut(.defaultAction).controlSize(.large)
                             .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                         Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .padding(.top, 18)
+                .padding(.top, 32)
             } else if p.reviews + p.new == 0 {
                 Image(systemName: "checkmark.circle").font(.system(size: 46, weight: .light)).foregroundStyle(.green)
                 Text("今天没有要复习的单词").font(.title3)
@@ -455,8 +455,8 @@ private struct PlanDashboard: View {
     let plan: StudyPlan
 
     static let newColor = Color(red: 0.98, green: 0.07, blue: 0.31)      // Activity "move" pink-red
-    static let reviewColor = Color(red: 0.62, green: 0.98, blue: 0.0)    // "exercise" green
-    static let totalColor = Color(red: 0.0, green: 0.88, blue: 0.95)     // "stand" cyan
+    static let reviewColor = Color(red: 0.25, green: 0.82, blue: 0.30)   // calmer system-like green
+    static let totalColor = Color(red: 0.0, green: 0.74, blue: 0.90)     // slightly deeper cyan
 
     private func frac(_ a: Int, _ b: Int) -> Double { b > 0 ? Double(a) / Double(b) : (a > 0 ? 1 : 0) }
 
@@ -466,20 +466,21 @@ private struct PlanDashboard: View {
                                   colors: [Self.newColor, Self.reviewColor, Self.totalColor])
             .frame(width: 210, height: 210)
             .accessibilityHidden(true)
-        let stats = VStack(alignment: .leading, spacing: 14) {
+        let stats = VStack(alignment: .leading, spacing: 20) {
             StatRow(label: "今日新词", value: t.newDone, total: t.newQuota, color: Self.newColor)
             StatRow(label: "今日复习", value: t.reviewsDone, total: t.reviewTarget, color: Self.reviewColor)
             StatRow(label: "总进度", value: o.learned, total: o.total, color: Self.totalColor,
                     detail: "已掌握 \(o.mastered.formatted())")
         }
         .fixedSize()
-        VStack(spacing: 22) {
+        VStack(spacing: 32) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 40) { rings; stats }
-                VStack(spacing: 20) { rings; stats }
+                HStack(alignment: .center, spacing: 44) { rings; stats }
+                VStack(spacing: 24) { rings; stats }
             }
+            .frame(maxWidth: .infinity)
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { targetPill; streakPill }
+                HStack(spacing: 12) { targetPill; streakPill }
                 VStack(spacing: 8) { targetPill; streakPill }
             }
         }
@@ -526,12 +527,15 @@ private struct StatRow: View {
     let label: String, value: Int, total: Int, color: Color
     var detail: String? = nil
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value.formatted()).font(.system(.title, design: .rounded).weight(.semibold)).foregroundStyle(color)
-                Text("/\(total.formatted())").font(.system(.title3, design: .rounded)).foregroundStyle(.secondary)
-                if let detail { Text(detail).font(.caption).foregroundStyle(.tertiary).padding(.leading, 8) }
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 8, height: 8)
+                Text(label).font(.subheadline).foregroundStyle(.secondary)
+                if let detail { Text("· \(detail)").font(.subheadline).foregroundStyle(.tertiary) }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value.formatted()).font(.system(size: 34, weight: .semibold, design: .rounded)).foregroundStyle(color)
+                Text("/\(total.formatted())").font(.system(size: 20, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
             }
             .monospacedDigit()
         }
@@ -543,7 +547,8 @@ private struct Pill<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         content.font(.callout).lineLimit(1).fixedSize()
-            .padding(.horizontal, 12).padding(.vertical, 6)
+            .frame(height: 20)
+            .padding(.horizontal, 14).padding(.vertical, 7)
             .background(.quaternary.opacity(0.5), in: Capsule())
     }
 }
@@ -587,7 +592,7 @@ private struct Ring: View, Animatable {
             ZStack {
                 Circle().stroke(color.opacity(0.18), style: style)
                 if v > 1 { Circle().stroke(color, style: style) }
-                if v > 0.0005 {
+                if v > 0.002 {
                     Circle().trim(from: 0, to: max(lap, 0.0001))
                         .stroke(AngularGradient(colors: [start, color], center: .center,
                                                 startAngle: .degrees(0), endAngle: .degrees(360 * max(lap, 0.01))), style: style)
