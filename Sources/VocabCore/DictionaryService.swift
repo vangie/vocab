@@ -147,7 +147,9 @@ public final class DictionaryService: @unchecked Sendable {
             guard let records = fn("DCSCopyRecordsForSearchString", FRecords.self),
                   let hwFn = fn("DCSRecordGetHeadword", FString.self) else { return [] }
             var out: [String] = []
-            for d in dictionaries {
+            // Never search network dictionaries (Wikipedia) through DCS: the call blocks for seconds or
+            // hangs, and this serial queue would stall every other lookup and quiz question behind it.
+            for d in dictionaries where !d.isNetwork {
                 guard let ref = refs[d.id],
                       let recs = records(ref, t as CFString, method, maxPerDictionary)?.takeRetainedValue() as [AnyObject]? else { continue }
                 for r in recs { if let h = hwFn(r)?.takeUnretainedValue() as String? { out.append(h) } }

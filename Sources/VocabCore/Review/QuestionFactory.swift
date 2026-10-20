@@ -48,7 +48,7 @@ public final class QuestionFactory: @unchecked Sendable {
     private let lock = NSLock()
 
     public init(service: DictionaryService = .shared, dicts: [DictionaryInfo], thesaurus: DictionaryInfo?, book: [String]) {
-        self.service = service; self.dicts = dicts; self.thesaurus = thesaurus; self.book = book
+        self.service = service; self.dicts = dicts.filter { !$0.isNetwork }; self.thesaurus = thesaurus; self.book = book   // no Wikipedia: DCS network search hangs
     }
 
     static func normalize(_ headword: String) -> String {

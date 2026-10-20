@@ -36,7 +36,14 @@ case "html":
 
 case "review":
     // vocab-smoke review <word>…   materials for each question type (gloss, syllables, roots, distractors)
-    let active = svc.activeDictionaries()
+    var active = svc.activeDictionaries()
+    // Same dictionaries as the app (Settings › 词典 selection) so slow ones show up here too.
+    if let ids = UserDefaults(suiteName: "io.github.vangie.vocab")?.array(forKey: "enabledDictionaryIDs") as? [String] {
+        let all = svc.availableDictionaries()
+        let sel = ids.compactMap { id in all.first { $0.id == id } }
+        if !sel.isEmpty { active = sel }
+        print("dicts: \(active.map(\.id).joined(separator: ", "))")
+    }
     let ote = svc.availableDictionaries().first { $0.id == "com.apple.dictionary.OTE" }
     let f = QuestionFactory(dicts: active, thesaurus: ote, book: [])
     for w in args.dropFirst(2) {
