@@ -142,7 +142,7 @@ private struct QuestionScreen: View {
                 }
                 Spacer()
                 Text("\(session.queue.done.count) / \(session.queue.total)").monospacedDigit().foregroundStyle(.secondary)
-                Button { session.retire() } label: { Label("斩", systemImage: "scissors") }
+                Button { session.retire() } label: { Label { Text("斩") } icon: { CleaverIcon.swiftUI } }
                     .help("已掌握：不再复习这个词（⌘K）")
                     .keyboardShortcut("k", modifiers: .command)
             }
