@@ -34,40 +34,53 @@ final class HanziTests: XCTestCase {
         XCTAssertLessThan(HanziTestScoring.verified(correct: 2, of: 10), 0.2)   // ≈ guessing
     }
 
-    func testFullRunEstimates() throws {
-        let list = try XCTUnwrap(HanziList.shared)
-        var rng = SystemRandomNumberGenerator()
+    func simulateHanzi(threshold t: Double, slope: Double = 3, checkOK: Double = 1, meaningOK: Double = 1, seed: UInt64) -> (HanziTestRun, Double) {
+        let list = HanziList.shared!
+        var rng = SeededRNG(seed)
         var run = HanziTestRun(list: list, using: &rng)
-        XCTAssertEqual(run.items.count, HanziTestRun.perBand * run.bands.count)
-        // Simulated reader: knows the 3000 most frequent characters and reads them correctly.
-        func step() {
-            let it = run.current!
-            if run.askingCheck { run.answerCheck(it.correct.first!) } else { run.answer(run.bands[it.band].hi <= 3000) }
+        let truth = (1...list.chars.count).reduce(0.0) { $0 + Adaptive.sigma(log(Double($1)), mu: log(t), s: slope) }
+        while let it = run.current {
+            if run.askingCheck {
+                let ok = Double.random(in: 0..<1, using: &rng) < (it.checkKind == .meaning ? meaningOK : checkOK)
+                run.answerCheck(ok ? it.correct.first! : "x"); continue
+            }
+            run.answer(Double.random(in: 0..<1, using: &rng) < Adaptive.sigma(log(Double(it.rank)), mu: log(t), s: slope))
         }
-        while !run.finished { step() }
-        run.startRound2(using: &rng)
-        while !run.finished { step() }
-        let r = run.result()
-        XCTAssertEqual(r.estimate, 3000, accuracy: 300)
-        XCTAssertEqual(r.falseAlarm, 0, accuracy: 0.001)
-
-        // Same answers but every reading check wrong → heavy correction.
-        var run2 = HanziTestRun(list: list, using: &rng)
-        while !run2.finished {
-            let it = run2.current!
-            if run2.askingCheck { run2.answerCheck("x") } else { run2.answer(true) }
-        }
-        XCTAssertLessThan(run2.result().estimate, 1500)
+        return (run, truth)
     }
 
-    func testUndoDuringReading() throws {
+    func testAdaptiveHanziWithin10PercentAndShorter() {
+        let fixedDesign = 50   // old 2-round design: 40 + 10 characters (plus spot-checks)
+        for t in [800.0, 2500, 4500] {
+            var errs: [Double] = [], counts: [Int] = []
+            for seed in 1...7 {
+                let (r, truth) = simulateHanzi(threshold: t, seed: UInt64(seed) * 104729 + UInt64(t))
+                errs.append(abs(Double(r.result().estimate) - truth) / truth); counts.append(r.items.count)
+            }
+            print("SIM \(t): median err \(errs.sorted()[errs.count / 2]) items \(counts.min()!)–\(counts.max()!) mean \(Double(counts.reduce(0,+))/Double(counts.count))")
+            XCTAssertLessThan(errs.sorted()[errs.count / 2], 0.10, "threshold \(t): \(errs)")
+            XCTAssertLessThan(counts.max()!, fixedDesign, "threshold \(t): \(counts)")
+        }
+    }
+
+    func testSpotChecksMixAndDiscount() {
+        let (r, _) = simulateHanzi(threshold: 2500, seed: 9)
+        let checked = r.items.filter(\.check)
+        XCTAssertTrue(checked.contains { $0.checkKind == .reading }); XCTAssertTrue(checked.contains { $0.checkKind == .meaning })
+        for m in checked where m.checkKind == .meaning { XCTAssertEqual(Set(m.choices).count, 4); XCTAssertTrue(m.choices.contains(m.correct.first!)) }
+        let honest = Double(r.result().estimate)
+        let badMeaning = Double(simulateHanzi(threshold: 2500, meaningOK: 0, seed: 9).0.result().estimate)
+        let badReading = Double(simulateHanzi(threshold: 2500, checkOK: 0, seed: 9).0.result().estimate)
+        XCTAssertLessThan(badMeaning, honest * 0.8); XCTAssertLessThan(badReading, honest * 0.8)
+    }
+
+    func testUndoDuringCheck() throws {
         let list = try XCTUnwrap(HanziList.shared)
-        var rng = SystemRandomNumberGenerator()
+        var rng = SeededRNG(1)
         var run = HanziTestRun(list: list, using: &rng)
-        while !(run.current!.check) { run.answer(false) }
-        let i = run.answered
-        run.answer(true); XCTAssertTrue(run.askingCheck)
-        run.undo(); XCTAssertFalse(run.askingCheck); XCTAssertEqual(run.answered, i); XCTAssertNil(run.current?.known)
+        let first = run.current!.char
+        run.answer(true); XCTAssertTrue(run.askingCheck)          // 1st 认识 is checked
+        run.undo(); XCTAssertFalse(run.askingCheck); XCTAssertEqual(run.current?.char, first); XCTAssertEqual(run.answered, 0)
     }
 
     func testHanziResultsStoredSeparately() throws {
@@ -91,20 +104,6 @@ final class HanziTests: XCTestCase {
         XCTAssertEqual(HanziGloss.firstSense("哧 chī 拟声 模拟笑声。", char: "哧"), "模拟笑声")
     }
 
-    func testSpotChecksMixReadingAndMeaning() throws {
-        let list = try XCTUnwrap(HanziList.shared)
-        XCTAssertGreaterThan(list.chars[0].radical, 0)
-        var rng = SystemRandomNumberGenerator()
-        let run = HanziTestRun(list: list, using: &rng)     // bundled English glosses
-        let checks = run.items.filter(\.check)
-        let meaning = checks.filter { $0.checkKind == .meaning }
-        XCTAssertGreaterThan(meaning.count, 0); XCTAssertGreaterThan(checks.count - meaning.count, 0)
-        for m in meaning {
-            XCTAssertEqual(m.choices.count, 4); XCTAssertEqual(Set(m.choices).count, 4)
-            XCTAssertEqual(m.correct.count, 1); XCTAssertTrue(m.choices.contains(m.correct.first!))
-        }
-    }
-
     func testDistractorsShareRadical() throws {
         let list = try XCTUnwrap(HanziList.shared)
         var rng = SystemRandomNumberGenerator()
@@ -115,20 +114,4 @@ final class HanziTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(m.choices.filter { sameRadical.contains($0) }.count, 2, "\(m.choices)")
     }
 
-    func testFailedMeaningCheckDiscounts() throws {
-        let list = try XCTUnwrap(HanziList.shared)
-        var rng = SystemRandomNumberGenerator()
-        func run(failMeaning: Bool) -> Int {
-            var r = HanziTestRun(list: list, using: &rng)
-            while !r.finished {
-                let it = r.current!
-                if r.askingCheck {
-                    r.answerCheck(it.checkKind == .meaning && failMeaning ? "x" : it.correct.first!)
-                } else { r.answer(true) }
-            }
-            return r.result().estimate
-        }
-        XCTAssertGreaterThan(run(failMeaning: false), 6000)
-        XCTAssertLessThan(run(failMeaning: true), 5000)
-    }
 }

@@ -109,6 +109,14 @@ public final class WordLists: @unchecked Sendable {
         return out
     }
 
+    /// Base forms with their frequency rank, most frequent first (adaptive 词汇量 test).
+    public func lemmasRanked(rank lo: Int, _ hi: Int) -> [(word: String, rank: Int)] {
+        var out: [(String, Int)] = []
+        query("SELECT word, CASE WHEN frq > 0 THEN frq ELSE bnc END AS r FROM words WHERE lemma IS NULL AND r BETWEEN ? AND ? ORDER BY r, word",
+              [lo, hi]) { out.append((String(cString: sqlite3_column_text($0, 0)), Int(sqlite3_column_int64($0, 1)))) }
+        return out
+    }
+
     /// Pronounceable non-words, verified absent from all of ECDICT when the extract was built.
     public func pseudowords() -> [String] {
         var out: [String] = []

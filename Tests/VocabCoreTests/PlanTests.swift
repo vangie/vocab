@@ -178,32 +178,59 @@ final class PlanTests: XCTestCase {
         XCTAssertLessThan(VocabTestScoring.corrected(hit: 0.8, falseAlarm: 0.5), VocabTestScoring.corrected(hit: 0.8, falseAlarm: 0.2))
     }
 
-    func run(_ knows: (Int) -> Bool, claimPseudo: Bool) -> VocabTestRun {
-        let bands = (0..<10).map { VocabBand(lo: $0 * 1000 + 1, hi: ($0 + 1) * 1000, size: 1000) }
-        let pool = (0..<10).map { b in (0..<40).map { "w\(b)_\($0)" } }
-        var rng = SystemRandomNumberGenerator()
-        var r = VocabTestRun(bands: bands, pool: pool, pseudo: (0..<60).map { "p\($0)" }, using: &rng)
-        func answerAll() { while let it = r.current { r.answer(it.band.map(knows) ?? claimPseudo) } }
-        answerAll()
-        XCTAssertTrue(r.startRound2(using: &rng))
-        answerAll()
-        return r
+    /// Candidates every 2 ranks up to 20000 (10000 words), like the extract's spread.
+    static let cands: [(word: String, rank: Int)] = (1...10000).map { ("w\($0)", $0 * 2) }
+
+    func simulate(threshold t: Double, slope: Double = 3, claimPseudo: Double = 0, meaningOK: Double = 1,
+                  seed: UInt64) -> (VocabTestRun, truth: Double) {
+        var rng = SeededRNG(seed)
+        var r = VocabTestRun(candidates: Self.cands, pseudo: (0..<60).map { "p\($0)" }, using: &rng)
+        r.meaning = { w in ("对", ["对", "错1", "错2", "错3"]) }
+        let truth = Self.cands.reduce(0.0) { $0 + Adaptive.sigma(log(Double($1.rank)), mu: log(t), s: slope) }
+        while let it = r.current {
+            if r.askingCheck { r.answerCheck(Double.random(in: 0..<1, using: &rng) < meaningOK ? "对" : "错1"); continue }
+            if let rank = it.rank {
+                r.answer(Double.random(in: 0..<1, using: &rng) < Adaptive.sigma(log(Double(rank)), mu: log(t), s: slope))
+            } else { r.answer(Double.random(in: 0..<1, using: &rng) < claimPseudo) }
+        }
+        return (r, truth)
     }
 
-    func testRoundsAndScoring() {
-        // Knows everything below rank 4000, nothing above.
-        let r = run({ $0 < 4 }, claimPseudo: false)
-        XCTAssertEqual(r.items.filter { $0.band != nil }.count, 40 + 10)
-        let pseudo = r.items.filter { $0.band == nil }.count
-        XCTAssertEqual(Double(pseudo) / Double(r.items.count), 0.15, accuracy: 0.03)
-        let res = r.result()
-        XCTAssertEqual(res.estimate, 4000)
-        XCTAssertLessThanOrEqual(res.low, 4000); XCTAssertGreaterThanOrEqual(res.high, 4000)
-        XCTAssertEqual(res.knownBands, [0, 1, 2, 3])
-        XCTAssertEqual(res.falseAlarm, 0)
-        // A yes-to-everything user is caught by the pseudowords.
-        let liar = run({ _ in true }, claimPseudo: true).result()
-        XCTAssertEqual(liar.falseAlarm, 1); XCTAssertEqual(liar.estimate, 0)
+    func testAdaptiveVocabEstimatesWithin10Percent() {
+        let fixedDesign = 59   // old 2-round design: 40 + 10 words + 15% pseudowords
+        for t in [1500.0, 4000, 9000] {
+            var errs: [Double] = [], counts: [Int] = []
+            for seed in 1...7 {
+                let (r, truth) = simulate(threshold: t, seed: UInt64(seed) * 7919 + UInt64(t))
+                let est = Double(r.result().estimate)
+                errs.append(abs(est - truth) / truth); counts.append(r.items.count)
+            }
+            print("SIM \(t): median err \(errs.sorted()[errs.count / 2]) items \(counts.min()!)–\(counts.max()!) mean \(Double(counts.reduce(0,+))/Double(counts.count))")
+            let med = errs.sorted()[errs.count / 2]
+            XCTAssertLessThan(med, 0.10, "threshold \(t): errors \(errs)")
+            XCTAssertLessThan(counts.max()!, fixedDesign, "threshold \(t): items \(counts)")
+        }
+    }
+
+    func testPseudowordsAndMeaningChecksDiscount() {
+        let honest = Double(simulate(threshold: 4000, seed: 11).0.result().estimate)
+        let (liar, _) = simulate(threshold: 4000, claimPseudo: 0.6, seed: 11)
+        XCTAssertGreaterThan(liar.result().falseAlarm, 0.2)
+        XCTAssertLessThan(Double(liar.result().estimate), honest * 0.75)
+        let bluffer = Double(simulate(threshold: 4000, meaningOK: 0.25, seed: 11).0.result().estimate)
+        XCTAssertLessThan(bluffer, honest * 0.6)
+        let all = simulate(threshold: 1e9, claimPseudo: 1, seed: 3).0.result()
+        XCTAssertEqual(all.falseAlarm, 1); XCTAssertEqual(all.estimate, 0)
+    }
+
+    func testAdaptiveStartsMidAndSteps() {
+        var rng = SeededRNG(5)
+        var r = VocabTestRun(candidates: Self.cands, pseudo: ["px"], using: &rng)
+        XCTAssertEqual(Double(r.current!.rank!), 3000, accuracy: 4)
+        r.answer(true); XCTAssertEqual(Double(r.current!.rank!), 6000, accuracy: 4)     // known → harder
+        r.answer(false); XCTAssertNotNil(r.current?.rank)
+        r.undo(); XCTAssertEqual(Double(r.current!.rank!), 6000, accuracy: 4)
+        XCTAssertEqual(r.answered, 1)
     }
 
     func testFocusBands() {
@@ -323,5 +350,19 @@ final class FilenameSegmentationTests: XCTestCase {
         XCTAssertEqual(w("AGENTS.md", 1), "AGENTS")
         XCTAssertEqual(w("snake_case_name", 7), "case")
         XCTAssertEqual(w("The harbor is calm.", 6), "harbor")      // prose unchanged
+    }
+}
+
+
+/// Deterministic RNG for simulated-user tests (SplitMix64).
+struct SeededRNG: RandomNumberGenerator {
+    var state: UInt64
+    init(_ seed: UInt64) { state = seed &+ 0x9E3779B97F4A7C15 }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E3779B97F4A7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        return z ^ (z >> 31)
     }
 }

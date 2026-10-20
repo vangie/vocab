@@ -193,6 +193,10 @@ case "hanzi":
     // vocab-smoke hanzi — sample spot-checks with Chinese glosses from the installed dictionaries.
     let avail = svc.availableDictionaries()
     let ds = ["com.apple.dictionary.zh_CN.SDCC", "com.vangie.cndict.xinhua"].compactMap { id in avail.first { $0.id == id } }
+    for ch in args.dropFirst(2) {
+        for d in ds { for e in svc.lookup(ch, in: [d], maxPerDictionary: 1) { print(ch, d.shortName, HanziGloss.firstSense(e.plainText, char: ch) ?? "nil") } }
+    }
+    if args.count > 2 { exit(0) }
     var rng = SystemRandomNumberGenerator()
     let t0 = Date()
     let run = HanziTestRun(list: HanziList.shared!, gloss: { c in

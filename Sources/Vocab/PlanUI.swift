@@ -453,25 +453,42 @@ struct VocabTestSheet: View {
         .onAppear(perform: start)
     }
 
+    @State private var busy = false
+
     private func start() {
         guard let lists = WordLists.shared else { return }
         var rng = SystemRandomNumberGenerator()
-        run = VocabTestRun(lists: lists, using: &rng)
+        var r = VocabTestRun(lists: lists, using: &rng)
+        r.meaning = VocabMeaningMaker.make()
+        run = r
         result = nil; retired = false
     }
 
     private func question(_ r: VocabTestRun, _ item: VocabTestItem) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("词汇量测试 · 第 \(r.round) 轮").font(.headline)
+                Text("词汇量测试").font(.headline)
                 Spacer()
-                Text("\(r.answered + 1) / \(r.items.count)").monospacedDigit().foregroundStyle(.secondary)
+                Text("第 \(r.answered + 1) 题").monospacedDigit().foregroundStyle(.secondary)
                 Button("取消") { dismiss() }
             }
             .padding(16)
-            ProgressView(value: Double(r.answered), total: Double(max(1, r.items.count))).padding(.horizontal, 16)
+            ProgressView(value: Double(min(r.answered, r.expectedTotal)), total: Double(r.expectedTotal)).padding(.horizontal, 16)
             Spacer()
             Text(item.word).font(.system(size: 42, weight: .semibold, design: .serif))
+            if r.askingCheck {
+                Text("它是什么意思？").foregroundStyle(.secondary).padding(.top, 8)
+                Spacer()
+                VStack(spacing: 6) {
+                    ForEach(Array(item.choices.enumerated()), id: \.offset) { i, c in
+                        Button { check(c) } label: {
+                            HStack { Text("\(i + 1)").monospacedDigit().foregroundStyle(.secondary); Text(c).lineLimit(1); Spacer() }.frame(width: 320)
+                        }
+                        .controlSize(.large).keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [])
+                    }
+                }
+                Button("不确定") { check("") }.buttonStyle(.borderless).padding(.top, 8).keyboardShortcut("0", modifiers: [])
+            } else {
             Text("知道这个词的意思吗？").foregroundStyle(.secondary).padding(.top, 8)
             Spacer()
             HStack(spacing: 16) {
@@ -480,26 +497,33 @@ struct VocabTestSheet: View {
                 Button { answer(true) } label: { Text("认识").frame(width: 120) }
                     .controlSize(.large).keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(.borderedProminent)
             }
+            .disabled(busy)
+            }
             HStack {
                 Button("上一个") { run?.undo() }.disabled(r.answered == 0).keyboardShortcut(.delete, modifiers: [])
                 Spacer()
-                Text("← 不认识 · → 认识 · ⌫ 上一个").font(.caption).foregroundStyle(.tertiary)
+                Text(r.askingCheck ? "1–4 选择 · 0 不确定 · ⌫ 上一个" : "← 不认识 · → 认识 · ⌫ 上一个").font(.caption).foregroundStyle(.tertiary)
             }
             .padding(16)
         }
     }
 
     private func answer(_ known: Bool) {
-        guard var r = run else { return }
-        r.answer(known)
-        if r.finished {
-            var rng = SystemRandomNumberGenerator()
-            if !(r.round == 1 && r.startRound2(using: &rng)) {
-                let res = r.result()
-                model.save(res); result = res
-            }
+        guard let r0 = run, !busy else { return }
+        // 认识 may build a meaning check (dictionary lookups): off the main thread.
+        busy = true
+        Task {
+            let r = await Task.detached(priority: .userInitiated) { var r = r0; r.answer(known); return r }.value
+            busy = false
+            finish(r)
         }
+    }
+
+    private func check(_ c: String) { guard var r = run else { return }; r.answerCheck(c); finish(r) }
+
+    private func finish(_ r: VocabTestRun) {
         run = r
+        if r.finished { let res = r.result(); model.save(res); result = res }
     }
 
     private func resultView(_ r: VocabTestResult) -> some View {
@@ -513,6 +537,7 @@ struct VocabTestSheet: View {
                     if r.falseAlarm > 0 {
                         Text("有 \(Int((r.falseAlarm * 100).rounded()))% 的假词被选了「认识」，结果已按此修正").font(.caption).foregroundStyle(.orange)
                     }
+                    Text("自适应出题：按你的回答在词频上前后调整，并用词义抽查和假词校正。").font(.caption).foregroundStyle(.secondary)
                     VStack(spacing: 6) {
                         ForEach(r.bands, id: \.band) { b in
                             HStack {
@@ -633,13 +658,13 @@ struct HanziTestSheet: View {
     private func question(_ r: HanziTestRun, _ item: HanziTestItem) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("识字量测试 · 第 \(r.round) 轮").font(.headline)
+                Text("识字量测试").font(.headline)
                 Spacer()
-                Text("\(r.answered + 1) / \(r.items.count)").monospacedDigit().foregroundStyle(.secondary)
+                Text("第 \(r.answered + 1) 题").monospacedDigit().foregroundStyle(.secondary)
                 Button("取消") { dismiss() }
             }
             .padding(16)
-            ProgressView(value: Double(r.answered), total: Double(max(1, r.items.count))).padding(.horizontal, 16)
+            ProgressView(value: Double(min(r.answered, r.expectedTotal)), total: Double(r.expectedTotal)).padding(.horizontal, 16)
             Spacer()
             Text(item.char).font(.system(size: 72, weight: .regular, design: .serif))
             if r.askingCheck && item.checkKind == .meaning {
@@ -688,13 +713,7 @@ struct HanziTestSheet: View {
     private func reading(_ c: String) { guard var r = run else { return }; r.answerCheck(c); finish(&r) }
 
     private func finish(_ r: inout HanziTestRun) {
-        if r.finished {
-            var rng = SystemRandomNumberGenerator()
-            if !(r.round == 1 && r.startRound2(using: &rng)) {
-                let res = r.result()
-                model.saveHanzi(res); result = res
-            }
-        }
+        if r.finished { let res = r.result(); model.saveHanzi(res); result = res }
         run = r
     }
 
@@ -750,6 +769,21 @@ enum HanziGlosser {
                 }
             }
             return nil
+        }
+    }
+}
+
+/// English meaning check: Chinese gloss + 3 confusable words' glosses (the quiz's distractor logic).
+enum VocabMeaningMaker {
+    static func make() -> VocabTestRun.MeaningMaker {
+        let dicts = DictionarySelection.enabled().filter { !$0.isNetwork }
+        let factory = QuestionFactory(dicts: dicts, thesaurus: nil, book: [])
+        return { word in
+            let g = factory.gloss(word)
+            guard !g.isEmpty else { return nil }
+            let ds = factory.distractors(for: word, gloss: g).map(\.gloss.short)
+            guard ds.count == 3 else { return nil }
+            return (g.short, ([g.short] + ds).shuffled())
         }
     }
 }

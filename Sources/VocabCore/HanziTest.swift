@@ -74,6 +74,8 @@ public struct HanziTestItem: Equatable, Sendable {
     public var char: String
     public var readings: [String]
     public var band: Int
+    /// Frequency rank (1 = most frequent).
+    public var rank: Int = 0
     /// Spot-check this item when answered 认识.
     public var check: Bool
     public enum CheckKind: Equatable, Sendable { case reading, meaning }
@@ -151,10 +153,17 @@ public enum HanziGloss {
             t = String(parts[2])
         }
         t = t.replacingOccurrences(of: #"[①-⑳]"#, with: "", options: .regularExpression)
-        t = t.replacingOccurrences(of: #"^\s*[0-9０-９]+\s*"#, with: "", options: .regularExpression)
-        t = t.replacingOccurrences(of: #"^\s*(（[^）]*）\s*)+"#, with: "", options: .regularExpression)       // （鴛）
+        // Leading clutter in any order («（鴛）名», «〈书〉名», «1〔～鸯〕»): strip until nothing changes.
+        for _ in 0..<4 {
+            let before = t
+            t = t.replacingOccurrences(of: #"^\s*[0-9０-９]+\s*"#, with: "", options: .regularExpression)
+            t = t.replacingOccurrences(of: #"^\s*(（[^）]*）\s*)+"#, with: "", options: .regularExpression)       // （鴛）
+            t = t.replacingOccurrences(of: #"^\s*〔[^〕]*〕\s*"#, with: "", options: .regularExpression)
+            t = t.replacingOccurrences(of: #"^\s*〈[^〉]*〉\s*"#, with: "", options: .regularExpression)
+            t = t.replacingOccurrences(of: #"^\s*(拟声|[形动名助副量代介连叹数])\s+"#, with: "", options: .regularExpression)   // POS
+            if t == before { break }
+        }
         t = t.replacingOccurrences(of: #"〔[^〕]*〕"#, with: "", options: .regularExpression)
-        t = t.replacingOccurrences(of: #"^\s*(拟声|[形动名助副量代介连叹数])\s+"#, with: "", options: .regularExpression)   // POS
         t = t.replacingOccurrences(of: #"\s*〈[^〉]*〉\s*"#, with: "", options: .regularExpression)
         if let end = t.firstIndex(where: { "。：；|\n".contains($0) }) { t = String(t[..<end]) }
         t = t.replacingOccurrences(of: char, with: "～").trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "，、,.")))
@@ -169,49 +178,81 @@ public enum HanziGloss {
     }
 }
 
-/// Round 1 = 4 characters per band; round 2 = 10 more in the bands where recognition drops through
-/// 50%. Every third character (and every round-2 one) answered 认识 gets a spot-check that
-/// alternates between its reading (4 pinyin) and its meaning (4 glosses; distractors are glosses of
-/// characters with the same radical, i.e. look-alikes). A failed check discounts the claim.
+/// Adaptive 识字量 test (see `Adaptive`): starts around rank 1500. Every 3rd character answered 认识
+/// gets a spot-check that alternates between its reading (4 pinyin) and its meaning (4 glosses;
+/// distractors are glosses of same-radical look-alikes). In the fit a failed check counts as 不认识
+/// and an unchecked 认识 counts as the guess-corrected share of checks passed.
 public struct HanziTestRun: Sendable {
     public typealias Glosser = @Sendable (HanziList.Char) -> String?
     public let bands: [VocabBand]
-    private let pool: [[HanziList.Char]]
     private let list: [HanziList.Char]
+    private let xs: [Double]
     private let byRadical: [Int: [Int]]
     private let allReadings: [String]
     private let gloss: Glosser
     private var checks = 0
+    private var knownClaims = 0
+    private var used = Set<Int>()
+    private var estimates: [Double] = []
     public private(set) var items: [HanziTestItem] = []
-    public private(set) var index = 0
-    public private(set) var round = 1
     /// True while the current item waits for its spot-check answer.
     public private(set) var askingCheck = false
-    public static let perBand = 4
-    public static let round2 = 10
+    public static let startRank = 1500
+    public static let checkEvery = 3
+    public var round: Int { 1 }
 
     /// `gloss` defaults to the bundled English gloss; the app passes Chinese glosses from 规范/新华.
     public init<R: RandomNumberGenerator>(list: HanziList, gloss: Glosser? = nil, using rng: inout R) {
-        let bands = HanziTestScoring.bands(total: list.chars.count)
-        var pool: [[HanziList.Char]] = []
-        for b in bands { pool.append(Array(list.chars[(b.lo - 1)..<b.hi]).filter { !$0.readings.isEmpty }.shuffled(using: &rng)) }
-        self.bands = bands; self.pool = pool; self.list = list.chars
+        bands = HanziTestScoring.bands(total: list.chars.count)
+        self.list = list.chars
+        xs = list.chars.indices.map { log(Double($0 + 1)) }
         var rad: [Int: [Int]] = [:]
         for (i, c) in list.chars.enumerated() where c.radical > 0 { rad[c.radical, default: []].append(i) }
         byRadical = rad
         allReadings = Array(Set(list.chars.flatMap(\.readings))).sorted()
         self.gloss = gloss ?? { $0.gloss.isEmpty ? nil : $0.gloss }
-        var real: [HanziTestItem] = []
-        var k = 0
-        for i in bands.indices {
-            for c in pool[i].prefix(Self.perBand) { real.append(makeItem(c, band: i, check: k % 3 == 0, using: &rng)); k += 1 }
-        }
-        items = real.shuffled(using: &rng)
+        appendNext()
     }
 
-    private mutating func makeItem<R: RandomNumberGenerator>(_ c: HanziList.Char, band: Int, check: Bool, using rng: inout R) -> HanziTestItem {
-        var it = HanziTestItem(char: c.char, readings: c.readings, band: band, check: check)
-        guard check else { return it }
+    private func bandOf(_ rank: Int) -> Int { bands.firstIndex { ($0.lo...$0.hi).contains(rank) } ?? bands.count - 1 }
+    private var answeredItems: [HanziTestItem] { items.filter { $0.known != nil && !(askingCheck && $0 == items.last) } }
+    private var xMax: Double { xs.last ?? 9 }
+
+    public var verified: Double {
+        let c = items.filter { $0.checkCorrect != nil }
+        return HanziTestScoring.verified(correct: c.filter { $0.checkCorrect == true }.count, of: c.count)
+    }
+
+    static func label(_ it: HanziTestItem, verified v: Double) -> Double {
+        guard it.known == true else { return 0 }
+        if let c = it.checkCorrect { return c ? 1 : 0 }
+        return v
+    }
+
+    private func currentFit() -> Adaptive.Fit? {
+        let r = answeredItems
+        guard !r.isEmpty else { return nil }
+        let v = verified
+        return Adaptive.fit(r.map { (log(Double($0.rank)), Self.label($0, verified: v)) }, xMax: xMax)
+    }
+
+    private mutating func appendNext() {
+        let hist = answeredItems.map { (x: log(Double($0.rank)), known: $0.known! && $0.checkCorrect != false) }
+        let target = Adaptive.nextTarget(history: hist, fit: currentFit(), startX: log(Double(Self.startRank)), xMax: xMax)
+        var i = Adaptive.nearest(target, in: xs, used: used)
+        while let j = i, list[j].readings.isEmpty { used.insert(j); i = Adaptive.nearest(target, in: xs, used: used) }
+        guard let k = i else { return }
+        used.insert(k)
+        var it = HanziTestItem(char: list[k].char, readings: list[k].readings, band: bandOf(k + 1), check: false)
+        it.rank = k + 1
+        items.append(it)
+    }
+
+    /// Set up the spot-check on `it` (alternating reading / meaning).
+    private mutating func configureCheck(_ it: inout HanziTestItem) {
+        guard let c = list.first(where: { $0.char == it.char }) else { return }
+        var rng = SystemRandomNumberGenerator()
+        it.check = true
         let wantMeaning = checks % 2 == 1
         checks += 1
         if wantMeaning, let m = meaningChoices(for: c, using: &rng) {
@@ -219,7 +260,6 @@ public struct HanziTestRun: Sendable {
         } else {
             it.checkKind = .reading; it.choices = Self.choices(for: c.readings, all: allReadings, using: &rng); it.correct = Set(c.readings)
         }
-        return it
     }
 
     /// Right gloss + 3 glosses of same-radical characters (nearest in frequency first), else any.
@@ -253,50 +293,66 @@ public struct HanziTestRun: Sendable {
         return out.shuffled(using: &rng)
     }
 
-    public var current: HanziTestItem? { index < items.count ? items[index] : nil }
+    public var current: HanziTestItem? { items.last.flatMap { $0.known == nil || askingCheck ? $0 : nil } }
     public var finished: Bool { current == nil }
-    public var answered: Int { index }
+    public var answered: Int { answeredItems.count }
+    public var expectedTotal: Int { Adaptive.maxItems }
 
     public mutating func answer(_ known: Bool) {
-        guard index < items.count, !askingCheck else { return }
-        items[index].known = known
-        if known && items[index].check && !items[index].choices.isEmpty { askingCheck = true } else { index += 1 }
+        guard !askingCheck, let i = items.indices.last, items[i].known == nil else { return }
+        items[i].known = known
+        if known {
+            knownClaims += 1
+            if knownClaims % Self.checkEvery == 1 {
+                var it = items[i]; configureCheck(&it); items[i] = it
+                if !it.choices.isEmpty { askingCheck = true; return }
+            }
+        }
+        advance()
     }
 
     /// Answer the spot-check ("" = 不确定, counts as failed).
     public mutating func answerCheck(_ choice: String) {
-        guard askingCheck, index < items.count else { return }
-        items[index].checkCorrect = items[index].correct.contains(choice)
-        askingCheck = false; index += 1
+        guard askingCheck, let i = items.indices.last else { return }
+        items[i].checkCorrect = items[i].correct.contains(choice)
+        askingCheck = false
+        advance()
+    }
+
+    private mutating func advance() {
+        estimates.append(Double(result().estimate))
+        if Adaptive.shouldStop(estimates: estimates, answered: answered) { return }
+        appendNext()
     }
 
     public mutating func undo() {
-        if askingCheck { askingCheck = false; items[index].known = nil; return }
-        if index > 0 { index -= 1; items[index].known = nil; items[index].checkCorrect = nil }
-    }
-
-    @discardableResult
-    public mutating func startRound2<R: RandomNumberGenerator>(using rng: inout R) -> Bool {
-        guard round == 1, finished else { return false }
-        round = 2
-        let asItems = items.map { VocabTestItem(word: $0.char, band: $0.band, known: $0.known) }
-        let focus = VocabTestScoring.focusBands(asItems, bandCount: bands.count)
-        guard !focus.isEmpty else { return false }
-        var real: [HanziTestItem] = []
-        var k = 0
-        while real.count < Self.round2 {
-            var added = false
-            for b in focus where real.count < Self.round2 {
-                let idx = Self.perBand + k
-                if idx < pool[b].count { real.append(makeItem(pool[b][idx], band: b, check: true, using: &rng)); added = true }
-            }
-            if !added { break }
-            k += 1
+        if askingCheck, let i = items.indices.last {
+            askingCheck = false; items[i].known = nil; items[i].check = false; items[i].choices = []; knownClaims -= 1; checks -= 1; return
         }
-        guard !real.isEmpty else { return false }
-        items += real.shuffled(using: &rng)
-        return true
+        if let last = items.last, last.known == nil { items.removeLast(); used.remove(last.rank - 1) }
+        guard let i = items.indices.last else { appendNext(); return }
+        if !estimates.isEmpty { estimates.removeLast() }
+        if items[i].known == true { knownClaims -= 1 }
+        if items[i].check { checks -= 1 }
+        items[i].known = nil; items[i].checkCorrect = nil; items[i].check = false; items[i].choices = []
     }
 
-    public func result(date: Date = Date()) -> VocabTestResult { HanziTestScoring.score(items, bands: bands, date: date) }
+    @discardableResult public mutating func startRound2<R: RandomNumberGenerator>(using rng: inout R) -> Bool { false }
+
+    public func result(date: Date = Date()) -> VocabTestResult {
+        let ranks = Array(1...max(1, list.count))
+        let v = verified
+        guard let fit = currentFit() else {
+            return VocabTestResult(date: date, estimate: 0, low: 0, high: 0, falseAlarm: 1 - v, bands: [], bandRanges: bands, knownBands: [], checkBands: [])
+        }
+        let est = Adaptive.expected(ranks, mu: fit.mu, s: fit.slope)
+        let lo = Adaptive.expected(ranks, mu: fit.mu - 1.96 * fit.sdMu, s: fit.slope)
+        let hi = Adaptive.expected(ranks, mu: fit.mu + 1.96 * fit.sdMu, s: fit.slope)
+        var asked: [Int: (Int, Int)] = [:]
+        for it in answeredItems { let a = asked[it.band] ?? (0, 0); asked[it.band] = (a.0 + 1, a.1 + (it.known! ? 1 : 0)) }
+        let byBand = bands.map { Array($0.lo...$0.hi) }
+        let scores = Adaptive.bands(bands, ranksByBand: byBand, asked: asked) { Adaptive.sigma(log(Double($0)), mu: fit.mu, s: fit.slope) }
+        return VocabTestResult(date: date, estimate: Int(est.rounded()), low: Int(lo.rounded()), high: Int(hi.rounded()),
+                               falseAlarm: 1 - v, bands: scores, bandRanges: bands, knownBands: [], checkBands: [])
+    }
 }

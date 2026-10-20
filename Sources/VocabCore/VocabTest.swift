@@ -13,6 +13,13 @@ public struct VocabTestItem: Equatable, Sendable, Codable {
     /// nil = pseudoword.
     public var band: Int?
     public var known: Bool? = nil
+    /// Frequency rank (adaptive test); nil for pseudowords and old results.
+    public var rank: Int? = nil
+    /// 4-choice meaning spot-check when answered 认识 (choices filled in when asked).
+    public var check = false
+    public var choices: [String] = []
+    public var correctChoice: String? = nil
+    public var checkCorrect: Bool? = nil
 }
 
 public struct BandScore: Equatable, Sendable, Codable {
@@ -108,75 +115,162 @@ public enum VocabTestScoring {
     }
 }
 
-/// Runs a test: round 1 = 4 words per band, round 2 = ~10 more in the focus bands, ~15% pseudowords.
+/// Adaptive 词汇量 test (see `Adaptive`): starts around rank 3000, ~15% pseudowords interleaved;
+/// the pseudoword false-alarm rate corrects the fitted curve (P → (P − f)/(1 − f)).
 public struct VocabTestRun: Sendable {
+    /// Right gloss + 3 distractor glosses for a word (the quiz's confusable-word logic), or nil.
+    public typealias MeaningMaker = @Sendable (String) -> (right: String, choices: [String])?
+    public var meaning: MeaningMaker? = nil
+    public static let checkEvery = 3      // every 3rd real word answered 认识 gets a meaning check
+    public private(set) var askingCheck = false
+    private var knownClaims = 0
     public let bands: [VocabBand]
-    private let pool: [[String]]
+    private let words: [String]
+    private let ranks: [Int]
+    private let xs: [Double]
+    private let ranksByBand: [[Int]]
     private var pseudo: [String]
+    private var used = Set<Int>()
+    private var estimates: [Double] = []
+    private var stopped = false
     public private(set) var items: [VocabTestItem] = []
-    public private(set) var index = 0
-    public private(set) var round = 1
-    public static let perBand = 4
-    public static let round2 = 10
-    public static let pseudoShare = 0.15
+    public static let startRank = 3000
+    public static let pseudoEvery = 6      // one pseudoword after every 6 real words (≈ 14%)
 
     public init<R: RandomNumberGenerator>(lists: WordLists, using rng: inout R) {
-        var bands: [VocabBand] = []; var pool: [[String]] = []
         let b = VocabTestScoring.bounds
+        var cands: [(word: String, rank: Int)] = []
         for i in 0..<(b.count - 1) {
             let lo = i == 0 ? 1 : b[i] + 1, hi = b[i + 1]
-            let ws = lists.lemmas(rank: lo, hi).filter { $0.count >= 3 }
-            bands.append(VocabBand(lo: lo, hi: hi, size: ws.count)); pool.append(ws.shuffled(using: &rng))
+            cands += lists.lemmasRanked(rank: lo, hi).filter { $0.word.count >= 3 }
         }
-        self.init(bands: bands, pool: pool, pseudo: lists.pseudowords().shuffled(using: &rng), using: &rng)
+        self.init(candidates: cands, pseudo: lists.pseudowords().shuffled(using: &rng), using: &rng)
     }
 
-    public init<R: RandomNumberGenerator>(bands: [VocabBand], pool: [[String]], pseudo: [String], using rng: inout R) {
-        self.bands = bands; self.pool = pool; self.pseudo = pseudo
-        var real: [VocabTestItem] = []
-        for i in bands.indices { real += pool[i].prefix(Self.perBand).map { VocabTestItem(word: $0, band: i) } }
-        items = Self.withPseudo(real, &self.pseudo, using: &rng)
+    /// `candidates` sorted by rank (ties shuffled so equal ranks don't repeat a pattern).
+    public init<R: RandomNumberGenerator>(candidates: [(word: String, rank: Int)], pseudo: [String], using rng: inout R) {
+        let c = candidates.shuffled(using: &rng).sorted { $0.rank < $1.rank }
+        words = c.map(\.word); ranks = c.map(\.rank); xs = ranks.map { log(Double(max(1, $0))) }
+        let b = VocabTestScoring.bounds
+        var bands: [VocabBand] = [], byBand: [[Int]] = []
+        for i in 0..<(b.count - 1) {
+            let lo = i == 0 ? 1 : b[i] + 1, hi = b[i + 1]
+            let rs = ranks.filter { (lo...hi).contains($0) }
+            bands.append(VocabBand(lo: lo, hi: hi, size: rs.count)); byBand.append(rs)
+        }
+        self.bands = bands; ranksByBand = byBand; self.pseudo = pseudo
+        appendNext()
     }
 
-    static func withPseudo<R: RandomNumberGenerator>(_ real: [VocabTestItem], _ pseudo: inout [String], using rng: inout R) -> [VocabTestItem] {
-        let n = Int((Double(real.count) * pseudoShare / (1 - pseudoShare)).rounded())
-        let ps = pseudo.prefix(n).map { VocabTestItem(word: $0, band: nil) }
-        pseudo.removeFirst(min(n, pseudo.count))
-        return (real + ps).shuffled(using: &rng)
+    private func bandOf(_ rank: Int) -> Int { bands.firstIndex { (($0.lo)...($0.hi)).contains(rank) } ?? bands.count - 1 }
+    private var real: [VocabTestItem] { items.filter { $0.band != nil && $0.known != nil } }
+    private var xMax: Double { xs.last ?? 10 }
+
+    private func currentFit() -> Adaptive.Fit? {
+        let r = real
+        guard !r.isEmpty else { return nil }
+        return Adaptive.fit(r.map { (log(Double($0.rank ?? 1)), Self.label($0, verified: verified)) }, xMax: xMax)
     }
 
-    public var current: VocabTestItem? { index < items.count ? items[index] : nil }
+    /// Share of meaning checks passed, guess-corrected (1 when none asked yet).
+    public var verified: Double {
+        let c = items.filter { $0.checkCorrect != nil }
+        return HanziTestScoring.verified(correct: c.filter { $0.checkCorrect == true }.count, of: c.count)
+    }
+
+    /// Soft label: 不认识 0; checked 认识 1 or 0; unchecked 认识 = verified share.
+    static func label(_ it: VocabTestItem, verified v: Double) -> Double {
+        guard it.known == true else { return 0 }
+        if let c = it.checkCorrect { return c ? 1 : 0 }
+        return v
+    }
+
+    private mutating func appendNext() {
+        let realCount = items.filter { $0.band != nil }.count
+        if realCount > 0, realCount % Self.pseudoEvery == 0, items.last?.band != nil, !pseudo.isEmpty {
+            items.append(VocabTestItem(word: pseudo.removeFirst(), band: nil)); return
+        }
+        let hist = real.map { (x: log(Double($0.rank ?? 1)), known: $0.known! && $0.checkCorrect != false) }
+        let target = Adaptive.nextTarget(history: hist, fit: currentFit(), startX: log(Double(Self.startRank)), xMax: xMax)
+        guard let i = Adaptive.nearest(target, in: xs, used: used) else { stopped = true; return }
+        used.insert(i)
+        items.append(VocabTestItem(word: words[i], band: bandOf(ranks[i]), rank: ranks[i]))
+    }
+
+    public var current: VocabTestItem? { items.last.flatMap { $0.known == nil || askingCheck ? $0 : nil } }
     public var finished: Bool { current == nil }
-    public var answered: Int { index }
+    public var answered: Int { items.filter { $0.known != nil }.count - (askingCheck ? 1 : 0) }
+    /// Real (non-pseudo) words answered; the stop rule counts these.
+    public var answeredReal: Int { real.count }
+    /// Upper bound for the progress bar.
+    public var expectedTotal: Int { Int(Double(Adaptive.maxItems) * Double(Self.pseudoEvery + 1) / Double(Self.pseudoEvery)) }
 
     public mutating func answer(_ known: Bool) {
-        guard index < items.count else { return }
-        items[index].known = known; index += 1
-    }
-
-    public mutating func undo() { if index > 0 { index -= 1; items[index].known = nil } }
-
-    /// After round 1: append round 2. Returns false when there's nothing to add.
-    @discardableResult
-    public mutating func startRound2<R: RandomNumberGenerator>(using rng: inout R) -> Bool {
-        guard round == 1, finished else { return false }
-        round = 2
-        let focus = VocabTestScoring.focusBands(items, bandCount: bands.count)
-        guard !focus.isEmpty else { return false }
-        var real: [VocabTestItem] = []
-        var k = 0
-        while real.count < Self.round2 {
-            var added = false
-            for b in focus where real.count < Self.round2 {
-                let idx = Self.perBand + k
-                if idx < pool[b].count { real.append(VocabTestItem(word: pool[b][idx], band: b)); added = true }
+        guard !askingCheck, let i = items.indices.last, items[i].known == nil else { return }
+        items[i].known = known
+        if known, items[i].band != nil {
+            knownClaims += 1
+            if knownClaims % Self.checkEvery == 1, let m = meaning?(items[i].word) {
+                items[i].check = true; items[i].choices = m.choices; items[i].correctChoice = m.right
+                askingCheck = true; return
             }
-            if !added { break }
-            k += 1
         }
-        items += Self.withPseudo(real, &pseudo, using: &rng)
-        return true
+        advance()
     }
 
-    public func result(date: Date = Date()) -> VocabTestResult { VocabTestScoring.score(items, bands: bands, date: date) }
+    /// Answer the meaning check ("" = 不确定, counts as failed).
+    public mutating func answerCheck(_ choice: String) {
+        guard askingCheck, let i = items.indices.last else { return }
+        items[i].checkCorrect = choice == items[i].correctChoice
+        askingCheck = false
+        advance()
+    }
+
+    private mutating func advance() {
+        guard let i = items.indices.last else { return }
+        if items[i].band != nil { estimates.append(Double(result().estimate)) }
+        if items[i].band != nil && Adaptive.shouldStop(estimates: estimates, answered: answeredReal) { stopped = true; return }
+        appendNext()
+    }
+
+    public mutating func undo() {
+        if askingCheck, let i = items.indices.last {
+            askingCheck = false; items[i].known = nil; items[i].check = false; items[i].choices = []; knownClaims -= 1; return
+        }
+        if let last = items.last, last.known == nil {
+            items.removeLast()
+            if let r = last.rank, let i = ranks.indices.first(where: { ranks[$0] == r && words[$0] == last.word }) { used.remove(i) }
+            if last.band == nil { pseudo.insert(last.word, at: 0) }
+        }
+        guard let i = items.indices.last else { appendNext(); return }
+        if items[i].band != nil, !estimates.isEmpty { estimates.removeLast() }
+        if items[i].known == true, items[i].band != nil { knownClaims -= 1 }
+        items[i].known = nil; items[i].checkCorrect = nil; items[i].check = false; items[i].choices = []
+        stopped = false
+    }
+
+    /// Kept for API compatibility: the adaptive test has no second round.
+    @discardableResult public mutating func startRound2<R: RandomNumberGenerator>(using rng: inout R) -> Bool { false }
+    public var round: Int { 1 }
+
+    public func result(date: Date = Date()) -> VocabTestResult {
+        let ps = items.filter { $0.band == nil && $0.known != nil }
+        let f = ps.isEmpty ? 0 : Double(ps.filter { $0.known == true }.count) / Double(ps.count)
+        let correct: (Double) -> Double = { p in f >= 1 ? 0 : max(0, (p - f) / (1 - f)) }
+        guard let fit = currentFit() else {
+            return VocabTestResult(date: date, estimate: 0, low: 0, high: 0, falseAlarm: f, bands: [], bandRanges: bands, knownBands: [], checkBands: [])
+        }
+        let est = Adaptive.expected(ranks, mu: fit.mu, s: fit.slope, correct: correct)
+        let lo = Adaptive.expected(ranks, mu: fit.mu - 1.96 * fit.sdMu, s: fit.slope, correct: correct)
+        let hi = Adaptive.expected(ranks, mu: fit.mu + 1.96 * fit.sdMu, s: fit.slope, correct: correct)
+        var asked: [Int: (Int, Int)] = [:]
+        for it in real { let b = it.band!; let a = asked[b] ?? (0, 0); asked[b] = (a.0 + 1, a.1 + (it.known! ? 1 : 0)) }
+        let scores = Adaptive.bands(bands, ranksByBand: ranksByBand, asked: asked) { r in
+            correct(Adaptive.sigma(log(Double(max(1, r))), mu: fit.mu, s: fit.slope))
+        }
+        let known = scores.filter { $0.corrected >= VocabTestScoring.knownThreshold }.map(\.band)
+        let check = scores.filter { VocabTestScoring.checkRange.contains($0.corrected) }.map(\.band)
+        return VocabTestResult(date: date, estimate: Int(est.rounded()), low: Int(lo.rounded()), high: Int(hi.rounded()),
+                               falseAlarm: f, bands: scores, bandRanges: bands, knownBands: known, checkBands: check)
+    }
 }
