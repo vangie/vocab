@@ -42,6 +42,9 @@ private struct StartScreen: View {
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                 .padding([.horizontal, .top], 16)
             }
+            // Corner tools: a row of its own (not an overlay), so it never covers the rings.
+            HStack { Spacer(); TestLinks() }
+                .padding(.horizontal, 14).padding(.top, 10)
             content
         }
     }
@@ -55,13 +58,11 @@ private struct StartScreen: View {
                 VStack(spacing: 10) {
                     if p.reviews + p.new == 0 {
                         Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3.weight(.medium))
-                        TestLinks()
                     } else {
                         Button { session.start() } label: { Text("开始").font(.title2.weight(.semibold)).frame(minWidth: 200, minHeight: 48) }
                             .keyboardShortcut(.defaultAction).controlSize(.large)
                             .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                         Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.secondary)
-                        TestLinks()
                     }
                 }
                 .padding(.top, 18)   // + the stack's 14 pt = 32 pt below the pills
@@ -80,7 +81,6 @@ private struct StartScreen: View {
                     .keyboardShortcut(.defaultAction).controlSize(.extraLarge)
                     .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.top, 6)
                 Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.tertiary)
-                        TestLinks()
             }
             Spacer()
         }
@@ -611,31 +611,39 @@ private struct Ring: View, Animatable {
     }
 }
 
-/// Small gray links under 开始: 测词汇量 · 测识字量 (underline on hover).
+/// Top-right corner: 测词汇量 / 测识字量 as small borderless icon buttons.
 private struct TestLinks: View {
     @State private var vocab = false
     @State private var hanzi = false
     var body: some View {
         HStack(spacing: 4) {
-            HoverLink(title: "测词汇量") { vocab = true }
-            Text("·").foregroundStyle(.tertiary)
-            HoverLink(title: "测识字量") { hanzi = true }
+            CornerButton(title: "测词汇量", symbol: "textformat.abc", help: "测一下英语词汇量") { vocab = true }
+            CornerButton(title: "测识字量", symbol: "character.book.closed.zh", help: "测一下认识多少个汉字") { hanzi = true }
         }
-        .font(.caption)
-        .padding(.top, 2)
         .sheet(isPresented: $vocab) { VocabTestSheet() }
         .sheet(isPresented: $hanzi) { HanziTestSheet() }
     }
 }
 
-private struct HoverLink: View {
+private struct CornerButton: View {
     let title: String
+    let symbol: String
+    let help: String
     let action: () -> Void
     @State private var hover = false
     var body: some View {
-        Button(action: action) { Text(title).underline(hover).foregroundStyle(.secondary) }
-            .buttonStyle(.plain)
-            .onHover { hover = $0; if $0 { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
-            .accessibilityAddTraits(.isLink)
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 12))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(hover ? Color.primary : Color.secondary)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hover ? 0.08 : 0)))
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hover = $0 }
+        .animation(.easeOut(duration: 0.12), value: hover)
     }
 }
