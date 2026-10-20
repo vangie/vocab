@@ -617,7 +617,7 @@ private struct TestLinks: View {
     @State private var hanzi = false
     var body: some View {
         HStack(spacing: 4) {
-            CornerButton(title: "测词汇量", symbol: "textformat.abc", help: "测一下英语词汇量") { vocab = true }
+            CornerButton(title: "测词汇量", symbol: "a.book.closed", help: "测一下英语词汇量") { vocab = true }
             CornerButton(title: "测识字量", symbol: "character.book.closed.zh", help: "测一下认识多少个汉字") { hanzi = true }
         }
         .sheet(isPresented: $vocab) { VocabTestSheet() }
