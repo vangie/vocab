@@ -49,16 +49,22 @@ private struct StartScreen: View {
     private var content: some View {
         VStack(spacing: 14) {
             Spacer()
-            if plan.plan.configured { PlanDashboard(session: session, plan: plan.plan).padding(.bottom, 8) }
             let p = session.preview
-            if p.reviews + p.new == 0 {
+            if plan.plan.configured {
+                PlanDashboard(session: session, plan: plan.plan)
+                if p.reviews + p.new == 0 {
+                    Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
+                } else {
+                    Button("开始（还剩 \(max(0, session.today.newQuota - session.today.newDone)) 新词 · \(max(0, session.today.reviewTarget - session.today.reviewsDone)) 复习）") { session.start() }
+                        .keyboardShortcut(.defaultAction).controlSize(.large).padding(.top, 4)
+                    Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.tertiary)
+                }
+            } else if p.reviews + p.new == 0 {
                 Image(systemName: "checkmark.circle").font(.system(size: 46, weight: .light)).foregroundStyle(.green)
                 Text("今天没有要复习的单词").font(.title3)
                 Text("新词上限 \(ReviewSession.dailyNewCap) 个，今天已学 \(ReviewSession.introducedToday) 个").foregroundStyle(.secondary)
             } else {
-                if !plan.plan.configured {
-                    Image(systemName: "rectangle.stack").font(.system(size: 42, weight: .light)).foregroundStyle(.secondary)
-                }
+                Image(systemName: "rectangle.stack").font(.system(size: 42, weight: .light)).foregroundStyle(.secondary)
                 Text("今日背单词").font(.title2.weight(.semibold))
                 HStack(spacing: 28) {
                     Stat(value: p.reviews, label: "待复习")
@@ -437,41 +443,50 @@ private struct SummaryScreen: View {
     }
 }
 
-/// Start screen summary when a plan exists: overall, today and streak.
+/// Start screen summary when a plan exists: Activity-style rings (今日新词 · 今日复习 · 总进度),
+/// a legend, the target pace and the streak.
 private struct PlanDashboard: View {
     @ObservedObject var session: ReviewSession
     let plan: StudyPlan
 
+    static let newColor = Color(nsColor: .systemPink)
+    static let reviewColor = Color(nsColor: .systemGreen)
+    static let totalColor = Color(nsColor: .systemTeal)
+
+    private func frac(_ a: Int, _ b: Int) -> Double { b > 0 ? Double(a) / Double(b) : (a > 0 ? 1 : 0) }
+
     var body: some View {
         let o = session.overall, t = session.today
-        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
-            GridRow {
-                Text("总进度").foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    ProgressView(value: o.fraction).frame(width: 220)
-                    Text("已学 \(o.learned) · 已掌握 \(o.mastered) / 共 \(o.total) 词").font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                    if let target = targetLine { Text(target).font(.caption).foregroundStyle(.secondary) }
+        HStack(alignment: .center, spacing: 26) {
+            ActivityRings(values: [frac(t.newDone, t.newQuota), frac(t.reviewsDone, t.reviewTarget), o.fraction],
+                          colors: [Self.newColor, Self.reviewColor, Self.totalColor])
+                .frame(width: 132, height: 132)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 9) {
+                LegendRow(color: Self.newColor, label: "新词", value: "\(t.newDone)/\(t.newQuota)")
+                LegendRow(color: Self.reviewColor, label: "复习", value: "\(t.reviewsDone)/\(t.reviewTarget)")
+                LegendRow(color: Self.totalColor, label: "总进度",
+                          value: "\(o.learned.formatted())/\(o.total.formatted())", detail: "已掌握 \(o.mastered.formatted())")
+                if let target = targetLine {
+                    Text(target).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            GridRow {
-                Text("今天").foregroundStyle(.secondary)
-                HStack(spacing: 16) {
-                    Label("新词 \(t.newDone)/\(t.newQuota)", systemImage: t.newDone >= t.newQuota ? "checkmark.circle.fill" : "circle")
-                    Label("复习 \(t.reviewsDone)/\(t.reviewTarget)", systemImage: t.reviewsDone >= t.reviewTarget ? "checkmark.circle.fill" : "circle")
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Image(systemName: "flame.fill").foregroundStyle(session.streak > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
+                    if session.streak > 0 {
+                        Text("\(session.streak)").font(.system(.title2, design: .rounded).weight(.bold)).monospacedDigit()
+                        Text("天连续完成").foregroundStyle(.secondary)
+                    } else {
+                        Text("今天完成就开始连续计数").foregroundStyle(.secondary)
+                    }
                 }
-                .monospacedDigit()
-                .symbolRenderingMode(.hierarchical)
+                .help("每天完成当天的新词和到期复习算一天；今天还没完成不会中断。")
+                .padding(.top, 2)
             }
-            GridRow {
-                Text("连续").foregroundStyle(.secondary)
-                Label(session.streak > 0 ? "\(session.streak) 天" : "今天完成就开始计数",
-                      systemImage: "flame").foregroundStyle(session.streak > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                    .help("每天完成当天的新词和到期复习算一天；今天还没完成不会中断。")
-            }
+            .font(.callout)
+            .fixedSize(horizontal: true, vertical: false)
         }
-        .font(.callout)
-        .padding(14)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 22).padding(.vertical, 16)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var targetLine: String? {
@@ -486,5 +501,66 @@ private struct PlanDashboard: View {
             s += late > 0 ? " · 按现在的速度晚 \(late) 天" : " · 按计划进行"
         }
         return s
+    }
+}
+
+private struct LegendRow: View {
+    let color: Color, label: String, value: String
+    var detail: String? = nil
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle().fill(color).frame(width: 8, height: 8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+            Text(label).foregroundStyle(.secondary)
+            Text(value).fontWeight(.semibold).monospacedDigit().foregroundStyle(color)
+            if let detail { Text("· \(detail)").foregroundStyle(.secondary).monospacedDigit() }
+        }
+    }
+}
+
+/// Concentric rings, outermost first. Values above 1 wrap into a second lap with an end shadow.
+struct ActivityRings: View {
+    let values: [Double]
+    let colors: [Color]
+    var lineWidth: CGFloat = 15
+    var gap: CGFloat = 3
+    @State private var shown: [Double] = []
+
+    var body: some View {
+        ZStack {
+            ForEach(values.indices, id: \.self) { i in
+                let inset = CGFloat(i) * (lineWidth + gap) + lineWidth / 2
+                Ring(value: i < shown.count ? shown[i] : 0, color: colors[i], lineWidth: lineWidth)
+                    .padding(inset)
+            }
+        }
+        .onAppear {
+            shown = values.map { _ in 0 }
+            withAnimation(.spring(response: 0.9, dampingFraction: 0.85)) { shown = values }
+        }
+        .onChange(of: values) { _, v in withAnimation(.easeInOut(duration: 0.6)) { shown = v } }
+    }
+}
+
+private struct Ring: View, Animatable {
+    var value: Double
+    let color: Color
+    let lineWidth: CGFloat
+    var animatableData: Double { get { value } set { value = newValue } }
+
+    var body: some View {
+        let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+        let v = max(0, min(value, 2))
+        ZStack {
+            Circle().stroke(color.opacity(0.18), style: style)
+            Circle().trim(from: 0, to: min(v, 1)).stroke(color, style: style).rotationEffect(.degrees(-90))
+            if v > 1 {
+                // Second lap: a cap with a soft shadow shows where it overlaps.
+                Circle().trim(from: 0, to: v - 1).stroke(color, style: style).rotationEffect(.degrees(-90))
+                    .shadow(color: .black.opacity(0.35), radius: 2)
+            } else if v > 0.001 {
+                // Keep a visible dot for tiny non-zero values.
+                Circle().trim(from: 0, to: 0.0001).stroke(color, style: style).rotationEffect(.degrees(-90))
+            }
+        }
     }
 }
