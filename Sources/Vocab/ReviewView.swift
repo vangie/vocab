@@ -139,6 +139,10 @@ private struct QuestionScreen: View {
     private var header: some View {
         VStack(spacing: 8) {
             HStack {
+                // Top-left, mirroring 斩 top-right; far from 继续 (bottom-right).
+                Button { session.end() } label: { Label("结束", systemImage: "xmark") }
+                    .help("结束本轮，查看小结（Esc）")
+                    .keyboardShortcut(.cancelAction)
                 if let q = session.question {
                     Text(q.type.label).font(.callout.weight(.medium)).foregroundStyle(.secondary)
                         .padding(.horizontal, 10).padding(.vertical, 3)
@@ -184,8 +188,6 @@ private struct QuestionScreen: View {
 
     @ViewBuilder private var footer: some View {
         HStack {
-            // 结束 sits bottom-left, far from 斩 (top-right) and 继续 (bottom-right).
-            Button("结束") { session.end() }.help("结束本轮，查看小结").buttonStyle(.borderless).foregroundStyle(.secondary)
             Spacer()
             if session.phase == .answered {
                 Button { session.next() } label: {
