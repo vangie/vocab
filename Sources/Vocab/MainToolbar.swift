@@ -142,14 +142,19 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     }
 
     /// 小 / 大 drawn as template images at distinct sizes (11 pt / 15 pt), like Dictionary.app.
+    /// 小/大 like Dictionary.app: different glyph sizes on one fixed canvas (so the toolbar doesn't
+    /// scale them to the same height), medium weight, primary label colour (not template-dimmed).
     static func glyph(_ s: String, size: CGFloat) -> NSImage {
-        let font = NSFont.systemFont(ofSize: size, weight: .regular)
-        let str = NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: NSColor.black])
-        let sz = str.size()
-        let img = NSImage(size: NSSize(width: ceil(sz.width), height: ceil(sz.height)), flipped: false) { r in
-            str.draw(at: .zero); return true
+        let canvas = NSSize(width: 18, height: 16)
+        let img = NSImage(size: canvas, flipped: false) { r in
+            let str = NSAttributedString(string: s, attributes: [
+                .font: NSFont.systemFont(ofSize: size, weight: .medium),
+                .foregroundColor: NSColor.labelColor])   // dynamic: resolved per appearance at draw time
+            let sz = str.size()
+            str.draw(at: NSPoint(x: (r.width - sz.width) / 2, y: (r.height - sz.height) / 2))
+            return true
         }
-        img.isTemplate = true
+        img.isTemplate = false
         img.accessibilityDescription = s
         return img
     }
@@ -212,7 +217,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             return it
         case fontID:
             let g = NSToolbarItemGroup(itemIdentifier: id,
-                                       images: [Self.glyph("小", size: 11), Self.glyph("大", size: 15)],
+                                       images: [Self.glyph("小", size: 11), Self.glyph("大", size: 14)],
                                        selectionMode: .momentary,
                                        labels: ["缩小文字", "放大文字"], target: self, action: #selector(font(_:)))
             g.label = "文字大小"
