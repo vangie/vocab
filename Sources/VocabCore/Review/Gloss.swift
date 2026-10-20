@@ -32,8 +32,24 @@ public enum GlossExtractor {
         return out
     }
 
+    /// Homograph numbers: "<sup>1</sup>" -> "¹", so 'lie¹' doesn't flatten to 'lie1'.
+    static func superscriptDigits(_ html: String) -> String {
+        guard html.range(of: "<sup", options: .caseInsensitive) != nil,
+              let re = try? NSRegularExpression(pattern: "<sup\\b[^>]*>\\s*((?:<[^>]+>)*)\\s*([0-9]+)\\s*((?:</[^>]+>)*)\\s*</sup>",
+                                                options: .caseInsensitive) else { return html }
+        let sup: [Character: Character] = ["0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹"]
+        let ns = html as NSString
+        var out = ""; var last = 0
+        for m in re.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            out += String(ns.substring(with: m.range(at: 2)).map { sup[$0] ?? $0 })
+            last = m.range.location + m.range.length
+        }
+        return out + ns.substring(from: last)
+    }
+
     public static func text(_ html: String) -> String {
-        var s = html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        var s = superscriptDigits(html).replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         for (a, b) in [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&nbsp;", " ")] {
             s = s.replacingOccurrences(of: a, with: b)
         }
