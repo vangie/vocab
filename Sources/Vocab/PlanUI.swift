@@ -105,7 +105,7 @@ final class PlanModel: ObservableObject {
 
     private func exclusions(_ queues: [PlanMixer.Queue]) -> Set<String> {
         var ex = (try? book.store?.planExclusions()) ?? []
-        let top = listExclusions()
+        let top = skippedCommonWords()   // same filter as the review queue (ReviewSession.plan)
         guard !top.isEmpty else { return ex }
         // Only list words are skipped; a common word the user saved in a wordbook still gets learned.
         let bookWords = Set(queues.filter { $0.id.isBook }.flatMap(\.words).map { $0.lowercased() })
@@ -186,6 +186,7 @@ struct PlanSettingsView: View {
     @State private var testing = false
     @State private var hanziTesting = false
     @AppStorage(ReviewSession.retentionKey) private var retention = 0.9
+    @AppStorage(ReviewSession.studyGoalKey) private var studyGoal = 15
     @AppStorage(ReviewSession.learningKey) private var learningSteps = "1m 10m"
     @AppStorage(ReviewSession.relearningKey) private var relearningSteps = "10m"
     @State private var showAdvanced = false
@@ -294,6 +295,9 @@ struct PlanSettingsView: View {
                         }
                     }
                     Toggle("生词本优先", isOn: $model.plan.wordbookFirst)
+                    LabeledContent("每日学习时长目标") {
+                        Stepper("\(studyGoal) 分钟", value: $studyGoal, in: 5...120, step: 5).monospacedDigit()
+                    }
                     Toggle("跳过最常见的 1000 词", isOn: $skipTop).disabled(!model.results.isEmpty)
                         .onChange(of: skipTop) { _, _ in refresh() }
                     Text(model.results.isEmpty ? "还没测词汇量时，词书里最常见的 1000 个词先不背；测完后按测试结果跳过认识的词。"

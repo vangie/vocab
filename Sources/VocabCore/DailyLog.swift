@@ -5,9 +5,22 @@ public struct DayRecord: Codable, Equatable, Sendable {
     public var newQuota = 0, newDone = 0
     public var reviewTarget = 0, reviewsDone = 0
     public var completed = false
+    /// Active study time in quiz sessions (seconds; idle gaps over 60 s not counted).
+    public var studySeconds: Double = 0
     /// Nothing was scheduled that day: it neither counts nor breaks the streak.
     public var isRest: Bool { newQuota + reviewTarget == 0 }
     public init() {}
+
+    enum CodingKeys: String, CodingKey { case newQuota, newDone, reviewTarget, reviewsDone, completed, studySeconds }
+    public init(from d: Decoder) throws {   // tolerate records saved before studySeconds existed
+        let c = try d.container(keyedBy: CodingKeys.self)
+        newQuota = try c.decodeIfPresent(Int.self, forKey: .newQuota) ?? 0
+        newDone = try c.decodeIfPresent(Int.self, forKey: .newDone) ?? 0
+        reviewTarget = try c.decodeIfPresent(Int.self, forKey: .reviewTarget) ?? 0
+        reviewsDone = try c.decodeIfPresent(Int.self, forKey: .reviewsDone) ?? 0
+        completed = try c.decodeIfPresent(Bool.self, forKey: .completed) ?? false
+        studySeconds = try c.decodeIfPresent(Double.self, forKey: .studySeconds) ?? 0
+    }
 }
 
 /// Per-day progress, kept in UserDefaults (no wordbook schema change). Streak = consecutive days
@@ -29,10 +42,21 @@ public struct DailyLog: Codable, Equatable, Sendable {
         var r = days[k] ?? DayRecord()
         r.newDone = max(r.newDone, newDone); r.reviewsDone = max(r.reviewsDone, reviewsDone)
         r.newQuota = max(r.newQuota, r.newDone + newLeft)
-        r.reviewTarget = max(r.reviewTarget, r.reviewsDone + reviewsLeft)
+        // Reviews: done + what is still queueable now (not a high-water mark), so a card that leaves the
+        // queue (斩, or filtered as a known-common word) also leaves the denominator: 13/14 can't stick.
+        r.reviewTarget = r.reviewsDone + reviewsLeft
         if newLeft == 0 && reviewsLeft == 0 && !r.isRest { r.completed = true }
         days[k] = r
         prune(now, calendar)
+    }
+
+    /// Adds active study time between two interactions; a gap longer than `idleCap` is idle and not counted.
+    public mutating func addStudy(_ seconds: Double, at now: Date, idleCap: Double = 60, calendar: Calendar = .current) {
+        guard seconds > 0, seconds <= idleCap else { return }   // longer gap = idle, not counted
+        let k = Self.key(now, calendar)
+        var r = days[k] ?? DayRecord()
+        r.studySeconds += seconds
+        days[k] = r
     }
 
     public func today(_ now: Date, calendar: Calendar = .current) -> DayRecord { days[Self.key(now, calendar)] ?? DayRecord() }

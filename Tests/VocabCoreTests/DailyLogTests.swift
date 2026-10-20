@@ -54,3 +54,24 @@ final class DailyLogTests: XCTestCase {
         XCTAssertEqual(p.fraction, 0.75)
     }
 }
+
+final class DailyLogTargetTests: XCTestCase {
+    /// Regression (今日复习 13/14 while done): the review target follows what is still queueable.
+    func testReviewTargetShrinksWhenCardLeavesQueue() {
+        var log = DailyLog(); let now = Date()
+        log.snapshot(now, newLeft: 0, reviewsLeft: 14, newDone: 0, reviewsDone: 0)
+        log.snapshot(now, newLeft: 0, reviewsLeft: 1, newDone: 0, reviewsDone: 13)
+        log.snapshot(now, newLeft: 0, reviewsLeft: 0, newDone: 0, reviewsDone: 13)   // last card 斩/filtered
+        let t = log.today(now)
+        XCTAssertEqual(t.reviewsDone, 13); XCTAssertEqual(t.reviewTarget, 13); XCTAssertTrue(t.completed)
+    }
+
+    func testStudyTimeSkipsIdleGapsAndOldRecordsDecode() throws {
+        var log = DailyLog(); let now = Date()
+        log.addStudy(20, at: now); log.addStudy(40, at: now); log.addStudy(300, at: now)   // 300 s = idle
+        XCTAssertEqual(log.today(now).studySeconds, 60)
+        let old = #"{"days":{"2026-01-01":{"newQuota":1,"newDone":1,"reviewTarget":0,"reviewsDone":0,"completed":true}}}"#
+        let d = try JSONDecoder().decode(DailyLog.self, from: Data(old.utf8))
+        XCTAssertEqual(d.days["2026-01-01"]?.studySeconds, 0); XCTAssertEqual(d.days["2026-01-01"]?.newDone, 1)
+    }
+}
