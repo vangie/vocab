@@ -597,14 +597,25 @@ private struct Ring: View, Animatable {
     var body: some View {
         let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
         let v = max(0, min(value, 2))
+        // Exactly full (allow float noise): one seamless ring, no caps meeting at 12 o'clock.
+        let full = abs(v - 1) < 0.0005
         let lap = v > 1 ? v - 1 : v
         let start = color.opacity(0.72)
         GeometryReader { g in
             let r = min(g.size.width, g.size.height) / 2
             ZStack {
                 Circle().stroke(color.opacity(0.18), style: style)
-                if v > 1 { Circle().stroke(color, style: style) }
-                if v > 0.002 {
+                if full {
+                    Circle().stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+                } else if v > 1 {
+                    // Past 100%: a solid full ring, then the extra lap in the same solid colour so its
+                    // start blends in; only the leading cap gets a shadow, making the overlap read as intentional.
+                    Circle().stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+                    Circle().trim(from: 0, to: max(lap, 0.0001)).stroke(color, style: style)
+                    Circle().fill(color).frame(width: lineWidth, height: lineWidth)
+                        .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 0)
+                        .offset(x: r * cos(2 * .pi * lap), y: r * sin(2 * .pi * lap))
+                } else if v > 0.002 {
                     Circle().trim(from: 0, to: max(lap, 0.0001))
                         .stroke(AngularGradient(colors: [start, color], center: .center,
                                                 startAngle: .degrees(0), endAngle: .degrees(360 * max(lap, 0.01))), style: style)
