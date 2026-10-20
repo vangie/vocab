@@ -52,14 +52,17 @@ private struct StartScreen: View {
             let p = session.preview
             if plan.plan.configured {
                 PlanDashboard(session: session, plan: plan.plan)
-                if p.reviews + p.new == 0 {
-                    Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
-                } else {
-                    Button { session.start() } label: { Text("开始").font(.title3.weight(.semibold)).frame(minWidth: 160, minHeight: 40) }
-                    .keyboardShortcut(.defaultAction).controlSize(.extraLarge)
-                    .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.top, 4)
-                    Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.tertiary)
+                VStack(spacing: 8) {
+                    if p.reviews + p.new == 0 {
+                        Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3.weight(.medium))
+                    } else {
+                        Button { session.start() } label: { Text("开始").font(.headline).frame(minWidth: 140, minHeight: 36) }
+                            .keyboardShortcut(.defaultAction).controlSize(.large)
+                            .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                        Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.top, 18)
             } else if p.reviews + p.new == 0 {
                 Image(systemName: "checkmark.circle").font(.system(size: 46, weight: .light)).foregroundStyle(.green)
                 Text("今天没有要复习的单词").font(.title3)
@@ -445,50 +448,63 @@ private struct SummaryScreen: View {
     }
 }
 
-/// Start screen summary when a plan exists: Activity-style rings (今日新词 · 今日复习 · 总进度),
-/// a legend, the target pace and the streak.
+/// Start screen summary when a plan exists, Activity-summary style: big rings, stat column,
+/// and a row with the target pace and the streak.
 private struct PlanDashboard: View {
     @ObservedObject var session: ReviewSession
     let plan: StudyPlan
 
-    static let newColor = Color(nsColor: .systemPink)
-    static let reviewColor = Color(nsColor: .systemGreen)
-    static let totalColor = Color(nsColor: .systemTeal)
+    static let newColor = Color(red: 0.98, green: 0.07, blue: 0.31)      // Activity "move" pink-red
+    static let reviewColor = Color(red: 0.62, green: 0.98, blue: 0.0)    // "exercise" green
+    static let totalColor = Color(red: 0.0, green: 0.88, blue: 0.95)     // "stand" cyan
 
     private func frac(_ a: Int, _ b: Int) -> Double { b > 0 ? Double(a) / Double(b) : (a > 0 ? 1 : 0) }
 
     var body: some View {
         let o = session.overall, t = session.today
-        HStack(alignment: .center, spacing: 26) {
-            ActivityRings(values: [frac(t.newDone, t.newQuota), frac(t.reviewsDone, t.reviewTarget), o.fraction],
-                          colors: [Self.newColor, Self.reviewColor, Self.totalColor])
-                .frame(width: 132, height: 132)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 9) {
-                LegendRow(color: Self.newColor, label: "新词", value: "\(t.newDone)/\(t.newQuota)")
-                LegendRow(color: Self.reviewColor, label: "复习", value: "\(t.reviewsDone)/\(t.reviewTarget)")
-                LegendRow(color: Self.totalColor, label: "总进度",
-                          value: "\(o.learned.formatted())/\(o.total.formatted())", detail: "已掌握 \(o.mastered.formatted())")
-                if let target = targetLine {
-                    Text(target).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Image(systemName: "flame.fill").foregroundStyle(session.streak > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
-                    if session.streak > 0 {
-                        Text("\(session.streak)").font(.system(.title2, design: .rounded).weight(.bold)).monospacedDigit()
-                        Text("天连续完成").foregroundStyle(.secondary)
-                    } else {
-                        Text("今天完成就开始连续计数").foregroundStyle(.secondary)
-                    }
-                }
-                .help("每天完成当天的新词和到期复习算一天；今天还没完成不会中断。")
-                .padding(.top, 2)
-            }
-            .font(.callout)
-            .fixedSize(horizontal: true, vertical: false)
+        let rings = ActivityRings(values: [frac(t.newDone, t.newQuota), frac(t.reviewsDone, t.reviewTarget), o.fraction],
+                                  colors: [Self.newColor, Self.reviewColor, Self.totalColor])
+            .frame(width: 210, height: 210)
+            .accessibilityHidden(true)
+        let stats = VStack(alignment: .leading, spacing: 14) {
+            StatRow(label: "今日新词", value: t.newDone, total: t.newQuota, color: Self.newColor)
+            StatRow(label: "今日复习", value: t.reviewsDone, total: t.reviewTarget, color: Self.reviewColor)
+            StatRow(label: "总进度", value: o.learned, total: o.total, color: Self.totalColor,
+                    detail: "已掌握 \(o.mastered.formatted())")
         }
-        .padding(.horizontal, 22).padding(.vertical, 16)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+        .fixedSize()
+        VStack(spacing: 22) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 40) { rings; stats }
+                VStack(spacing: 20) { rings; stats }
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { targetPill; streakPill }
+                VStack(spacing: 8) { targetPill; streakPill }
+            }
+        }
+    }
+
+    @ViewBuilder private var targetPill: some View {
+        if let t = targetLine {
+            Pill { Label(t, systemImage: "flag.checkered").foregroundStyle(.secondary) }
+        }
+    }
+
+    private var streakPill: some View {
+        let on = session.streak > 0
+        return Pill {
+            HStack(spacing: 5) {
+                Image(systemName: "flame.fill").foregroundStyle(on ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
+                if on {
+                    Text("\(session.streak)").font(.system(.body, design: .rounded).weight(.bold)).monospacedDigit()
+                    Text("天连续完成").foregroundStyle(.secondary)
+                } else {
+                    Text("今天完成就开始连续计数").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .help("每天完成当天的新词和到期复习算一天；今天还没完成不会中断。")
     }
 
     private var targetLine: String? {
@@ -497,47 +513,59 @@ private struct PlanDashboard: View {
         let left = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: target).day ?? 0
         let remaining = max(0, session.overall.total - session.overall.learned)
         let due = WordbookModel.shared.dueItems.filter { !SessionPlanner.isNew($0) }.count
-        var s = "目标 \(target.formatted(date: .abbreviated, time: .omitted))，还有 \(max(0, left)) 天"
+        var s = "目标 \(target.formatted(.dateTime.month().day())) · 还有 \(max(0, left)) 天"
         if let end = PlanMath.projectedDate(remaining: remaining, plan: plan, due: due, now: Date()) {
             let late = cal.dateComponents([.day], from: target, to: end).day ?? 0
-            s += late > 0 ? " · 按现在的速度晚 \(late) 天" : " · 按计划进行"
+            s += late > 0 ? " · 晚 \(late) 天" : " · 按计划"
         }
         return s
     }
 }
 
-private struct LegendRow: View {
-    let color: Color, label: String, value: String
+private struct StatRow: View {
+    let label: String, value: Int, total: Int, color: Color
     var detail: String? = nil
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Circle().fill(color).frame(width: 8, height: 8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-            Text(label).foregroundStyle(.secondary)
-            Text(value).fontWeight(.semibold).monospacedDigit().foregroundStyle(color)
-            if let detail { Text("· \(detail)").foregroundStyle(.secondary).monospacedDigit() }
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value.formatted()).font(.system(.title, design: .rounded).weight(.semibold)).foregroundStyle(color)
+                Text("/\(total.formatted())").font(.system(.title3, design: .rounded)).foregroundStyle(.secondary)
+                if let detail { Text(detail).font(.caption).foregroundStyle(.tertiary).padding(.leading, 8) }
+            }
+            .monospacedDigit()
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
-/// Concentric rings, outermost first. Values above 1 wrap into a second lap with an end shadow.
+private struct Pill<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        content.font(.callout).lineLimit(1).fixedSize()
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(.quaternary.opacity(0.5), in: Capsule())
+    }
+}
+
+/// Concentric Activity-style rings, outermost first. Values above 1 wrap into a second lap.
 struct ActivityRings: View {
     let values: [Double]
     let colors: [Color]
-    var lineWidth: CGFloat = 15
+    var lineWidth: CGFloat = 20
     var gap: CGFloat = 3
     @State private var shown: [Double] = []
 
     var body: some View {
         ZStack {
             ForEach(values.indices, id: \.self) { i in
-                let inset = CGFloat(i) * (lineWidth + gap) + lineWidth / 2
                 Ring(value: i < shown.count ? shown[i] : 0, color: colors[i], lineWidth: lineWidth)
-                    .padding(inset)
+                    .padding(CGFloat(i) * (lineWidth + gap) + lineWidth / 2)
             }
         }
         .onAppear {
             shown = values.map { _ in 0 }
-            withAnimation(.spring(response: 0.9, dampingFraction: 0.85)) { shown = values }
+            withAnimation(.spring(response: 1.0, dampingFraction: 0.85).delay(0.1)) { shown = values }
         }
         .onChange(of: values) { _, v in withAnimation(.easeInOut(duration: 0.6)) { shown = v } }
     }
@@ -552,17 +580,25 @@ private struct Ring: View, Animatable {
     var body: some View {
         let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
         let v = max(0, min(value, 2))
-        ZStack {
-            Circle().stroke(color.opacity(0.18), style: style)
-            Circle().trim(from: 0, to: min(v, 1)).stroke(color, style: style).rotationEffect(.degrees(-90))
-            if v > 1 {
-                // Second lap: a cap with a soft shadow shows where it overlaps.
-                Circle().trim(from: 0, to: v - 1).stroke(color, style: style).rotationEffect(.degrees(-90))
-                    .shadow(color: .black.opacity(0.35), radius: 2)
-            } else if v > 0.001 {
-                // Keep a visible dot for tiny non-zero values.
-                Circle().trim(from: 0, to: 0.0001).stroke(color, style: style).rotationEffect(.degrees(-90))
+        let lap = v > 1 ? v - 1 : v
+        let start = color.opacity(0.72)
+        GeometryReader { g in
+            let r = min(g.size.width, g.size.height) / 2
+            ZStack {
+                Circle().stroke(color.opacity(0.18), style: style)
+                if v > 1 { Circle().stroke(color, style: style) }
+                if v > 0.0005 {
+                    Circle().trim(from: 0, to: max(lap, 0.0001))
+                        .stroke(AngularGradient(colors: [start, color], center: .center,
+                                                startAngle: .degrees(0), endAngle: .degrees(360 * max(lap, 0.01))), style: style)
+                    // End cap with a soft shadow, as on Activity rings.
+                    Circle().fill(color).frame(width: lineWidth, height: lineWidth)
+                        .shadow(color: .black.opacity(v > 0.05 ? 0.35 : 0), radius: 3, x: 0, y: 0)
+                        .offset(x: r * cos(2 * .pi * lap), y: r * sin(2 * .pi * lap))
+                }
             }
+            .rotationEffect(.degrees(-90))
+            .frame(width: g.size.width, height: g.size.height)
         }
     }
 }
