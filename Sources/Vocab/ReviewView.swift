@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VocabCore
 
@@ -617,7 +618,7 @@ private struct TestLinks: View {
     @State private var hanzi = false
     var body: some View {
         HStack(spacing: 4) {
-            CornerButton(title: "测词汇量", symbol: "a.book.closed", help: "测一下英语词汇量") { vocab = true }
+            CornerButton(title: "测词汇量", symbol: LatinBookIcon.name, help: "测一下英语词汇量") { vocab = true }
             CornerButton(title: "测识字量", symbol: "character.book.closed.zh", help: "测一下认识多少个汉字") { hanzi = true }
         }
         .sheet(isPresented: $vocab) { VocabTestSheet() }
@@ -633,7 +634,9 @@ private struct CornerButton: View {
     @State private var hover = false
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: symbol)
+            Label { Text(title) } icon: {
+                if symbol == LatinBookIcon.name { Image(nsImage: LatinBookIcon.image(pointSize: 12)) } else { Image(systemName: symbol) }
+            }
                 .font(.system(size: 12))
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(hover ? Color.primary : Color.secondary)
@@ -645,5 +648,30 @@ private struct CornerButton: View {
         .help(help)
         .onHover { hover = $0 }
         .animation(.easeOut(duration: 0.12), value: hover)
+    }
+}
+
+
+/// Closed book with a Latin "A": `a.book.closed` swaps in 字 under a Chinese UI, so draw our own
+/// template from the non-localizing `book.closed` plus a Latin letter.
+enum LatinBookIcon {
+    static let name = "vocab.latin.book"
+    static func image(pointSize: CGFloat, weight: NSFont.Weight = .regular) -> NSImage {
+        let base = NSImage(systemSymbolName: "book.closed", accessibilityDescription: "测词汇量")!
+            .withSymbolConfiguration(.init(pointSize: pointSize, weight: weight))!
+        let size = base.size
+        let img = NSImage(size: size, flipped: false) { r in
+            base.draw(in: r)
+            // Cover area: right of the spine, upper ~75% of the book.
+            let cover = NSRect(x: r.minX + r.width * 0.30, y: r.minY + r.height * 0.22, width: r.width * 0.58, height: r.height * 0.66)
+            let font = NSFont.systemFont(ofSize: pointSize * 0.62, weight: weight == .regular ? .semibold : weight)
+            let a = NSAttributedString(string: "A", attributes: [.font: font, .foregroundColor: NSColor.black])
+            let sz = a.size()
+            a.draw(at: NSPoint(x: cover.midX - sz.width / 2, y: cover.midY - sz.height / 2 - font.descender * 0.5))
+            return true
+        }
+        img.isTemplate = true
+        img.accessibilityDescription = "测词汇量"
+        return img
     }
 }
