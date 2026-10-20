@@ -12,6 +12,11 @@ final class AppState: ObservableObject {
     @Published var wordScope: WordbookScope = .all
     /// Sidebar grouping in 生词本 (wordbook, tag or source).
     @Published var wordGroup: WordGroup = .all
+    /// 背诵计划 / 词汇量测试 sheets (menu bar, toolbar pull-down, first visit).
+    @Published var showPlan = false
+    @Published var showTest = false
+    func openPlan() { mode = .review; showTest = false; showPlan = true }
+    func openTest() { mode = .review; showPlan = false; showTest = true }
     /// Table scroll offset, kept while the user looks a word up and comes back.
     var wordTableScroll: CGFloat?
     var wordSortKey: String = UserDefaults.standard.string(forKey: "wordSortKey") ?? "added" {
@@ -33,6 +38,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     private let fontID = NSToolbarItem.Identifier("vocab.font")
     private let searchID = NSToolbarItem.Identifier("vocab.search")
     private let newBookID = NSToolbarItem.Identifier("vocab.newBook")
+    private let studyID = NSToolbarItem.Identifier("vocab.study")
 
     private weak var window: NSWindow?
     private var navGroup: NSToolbarItemGroup?
@@ -97,6 +103,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         // (removing items keeps AppKit's layout and » overflow exact, and the AX tree honest).
         setPresentAtStart(newBookID, state.mode == .wordbook)
         setPresent(fontID, lookupMode, before: searchID)
+        setPresent(studyID, state.mode == .review, before: searchID)
         setPresent(navID, lookupMode, before: lookupMode ? fontID : searchID)
         if let f = searchItem?.searchField {
             f.placeholderString = state.mode == .wordbook ? "搜索生词本" : "搜索"
@@ -157,7 +164,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     // MARK: NSToolbarDelegate
 
     func toolbarAllowedItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [newBookID, .sidebarTrackingSeparator, navID, .flexibleSpace, modeID, fontID, searchID]
+        [newBookID, studyID, .sidebarTrackingSeparator, navID, .flexibleSpace, modeID, fontID, searchID]
     }
 
     func toolbarDefaultItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -217,6 +224,19 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             it.autovalidates = false
             it.visibilityPriority = .high
             return it
+        case studyID:
+            let it = NSMenuToolbarItem(itemIdentifier: id)
+            it.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "学习选项")
+            it.label = "学习"
+            it.toolTip = "背诵计划、词汇量测试"
+            it.showsIndicator = false
+            let m = NSMenu()
+            let a = NSMenuItem(title: "背诵计划…", action: #selector(openPlan), keyEquivalent: ""); a.target = self
+            let b = NSMenuItem(title: "词汇量测试…", action: #selector(openTest), keyEquivalent: ""); b.target = self
+            m.addItem(a); m.addItem(b)
+            it.menu = m
+            it.autovalidates = false
+            return it
         case searchID:
             let s = NSSearchToolbarItem(itemIdentifier: id)
             s.searchField.placeholderString = "搜索"
@@ -243,6 +263,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         let i = g.selectedIndex
         if Mode.allCases.indices.contains(i) { state.mode = Mode.allCases[i] }
     }
+
+    @objc private func openPlan() { state.openPlan() }
+    @objc private func openTest() { state.openTest() }
 
     @objc private func newBook(_ sender: Any?) { WordbookModel.shared.promptNewBook() }
 

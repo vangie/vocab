@@ -4,6 +4,7 @@ import VocabCore
 /// 背单词: mixed question types, keyboard first (1–4 pick, space flips, ↩ submits/continues).
 struct ReviewView: View {
     @ObservedObject var session = ReviewSession.shared
+    @ObservedObject var state = AppState.shared
     @EnvironmentObject var book: WordbookModel
 
     var body: some View {
@@ -18,28 +19,19 @@ struct ReviewView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { session.refreshPreview() }
+        .sheet(isPresented: $state.showPlan, onDismiss: { session.refreshPreview() }) { PlanSheet() }
+        .sheet(isPresented: $state.showTest, onDismiss: { session.refreshPreview() }) { VocabTestSheet() }
     }
 }
 
 private struct StartScreen: View {
     @ObservedObject var session: ReviewSession
     @ObservedObject var plan = PlanModel.shared
-    @State private var showPlan = false
-    @State private var showTest = false
     var body: some View {
         content
-            .overlay(alignment: .topTrailing) {
-                HStack(spacing: 8) {
-                    Button { showTest = true } label: { Label("词汇量测试", systemImage: "gauge.with.dots.needle.50percent") }
-                    Button { showPlan = true } label: { Label("计划", systemImage: "calendar") }
-                }
-                .padding(14)
-            }
-            .sheet(isPresented: $showPlan, onDismiss: { session.refreshPreview() }) { PlanSheet() }
-            .sheet(isPresented: $showTest, onDismiss: { session.refreshPreview() }) { VocabTestSheet() }
             .onAppear {
                 // First visit: set up the plan.
-                if !plan.plan.configured { DispatchQueue.main.async { showPlan = true } }
+                if !plan.plan.configured { DispatchQueue.main.async { AppState.shared.showPlan = true } }
             }
     }
 
