@@ -277,7 +277,9 @@ final class PlanTests: XCTestCase {
         let r = VocabTestResult(date: Date(timeIntervalSince1970: 1_800_000_000), estimate: 5200, low: 4800, high: 5600, falseAlarm: 0.1,
                                 bands: [], bandRanges: [], knownBands: [0], checkBands: [3])
         try s.saveTestResult(r)
-        XCTAssertEqual(try s.testResults(), [r])
+        let loaded = try s.testResults()
+        XCTAssertNotNil(loaded.first?.rowID)
+        XCTAssertEqual(loaded.map { var x = $0; x.rowID = nil; return x }, [r])
     }
 }
 

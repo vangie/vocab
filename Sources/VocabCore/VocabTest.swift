@@ -44,6 +44,8 @@ public struct VocabTestResult: Equatable, Sendable, Codable {
     /// Bands that get a quick 认识吗 check when their words first come up in the plan.
     public var checkBands: [Int]
     /// Answer reliability from pseudo-items (0 good, 1 fair, 2 low); nil for old results.
+    /// Database row id when loaded from the store (for deletion); not meaningful in the JSON.
+    public var rowID: Int64? = nil
     public var reliability: Int? = nil
     /// Stratified (per-band yes-rate) estimate, shown as a cross-check.
     public var crossCheck: Int? = nil

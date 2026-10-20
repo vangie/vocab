@@ -106,6 +106,22 @@ final class HanziTests: XCTestCase {
         XCTAssertEqual(try store.testResults().count, 0)
     }
 
+    func testDeleteSingleResult() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("del-\(UUID()).sqlite")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = try WordStore(url: url)
+        var a = HanziTestScoring.score([], bands: HanziTestScoring.bands(total: 6000)); a.estimate = 111
+        var b = a; b.estimate = 222; b.date = a.date.addingTimeInterval(60)
+        try store.saveTestResult(a); try store.saveTestResult(b); try store.saveHanziResult(a)
+        let saved = try store.testResults()
+        XCTAssertEqual(saved.map(\.estimate), [222, 111]); XCTAssertNotNil(saved[0].rowID)
+        try store.deleteTestResult(id: saved[0].rowID!, hanzi: false)
+        XCTAssertEqual(try store.testResults().map(\.estimate), [111])
+        XCTAssertEqual(try store.hanziResults().count, 1)        // other table untouched
+        try store.deleteTestResult(id: try store.hanziResults()[0].rowID!, hanzi: true)
+        XCTAssertEqual(try store.hanziResults().count, 0); XCTAssertEqual(try store.testResults().count, 1)
+    }
+
     func testGlossParser() {
         XCTAssertEqual(HanziGloss.firstSense("明 1 míng ①形 亮（跟“暗”相对）。月明星稀 | 明珠 ②动 特指天亮。", char: "明"), "亮（跟“暗”相对）")
         XCTAssertNil(HanziGloss.firstSense("鸳 yuān （鴛）名 指鸳鸯。双鸳戏水", char: "鸳"))   // compound, falls through to 新华

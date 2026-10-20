@@ -144,6 +144,10 @@ final class PlanModel: ObservableObject {
 
     func save(_ r: VocabTestResult) { try? book.store?.saveTestResult(r); reloadResults() }
     func saveHanzi(_ r: VocabTestResult) { try? book.store?.saveHanziResult(r); reloadResults() }
+    func delete(_ r: VocabTestResult, hanzi: Bool) {
+        guard let id = r.rowID else { return }
+        try? book.store?.deleteTestResult(id: id, hanzi: hanzi); reloadResults()
+    }
 
     /// Words in the bands the test marked as known.
     func knownWords(_ r: VocabTestResult) -> [String] {
@@ -216,11 +220,12 @@ struct PlanSettingsView: View {
                 Section("词汇量") {
                     if let r = model.results.first {
                         LabeledContent("上次结果", value: "约 \(r.estimate) 词（\(r.low)–\(r.high)）")
+                            .modifier(DeletableResult(result: r, hanzi: false))
                         LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
                         if model.results.count > 1 {
                             RowDisclosureLocal("历史记录") {
                                 ForEach(Array(model.results.dropFirst().enumerated()), id: \.offset) { _, h in
-                                    LabeledContent(h.date.formatted(date: .abbreviated, time: .omitted), value: "约 \(h.estimate) 词")
+                                    ResultRow(result: h, unit: "词", hanzi: false)
                                 }
                             }
                         }
@@ -244,11 +249,12 @@ struct PlanSettingsView: View {
                 Section("识字量") {
                     if let r = model.hanziResults.first {
                         LabeledContent("上次结果", value: "约 \(r.estimate) 字（\(r.low)–\(r.high)）")
+                            .modifier(DeletableResult(result: r, hanzi: true))
                         LabeledContent("测试时间", value: r.date.formatted(date: .abbreviated, time: .shortened))
                         if model.hanziResults.count > 1 {
                             RowDisclosureLocal("历史记录") {
                                 ForEach(Array(model.hanziResults.dropFirst().enumerated()), id: \.offset) { _, h in
-                                    LabeledContent(h.date.formatted(date: .abbreviated, time: .omitted), value: "约 \(h.estimate) 字")
+                                    ResultRow(result: h, unit: "字", hanzi: true)
                                 }
                             }
                         }
@@ -441,6 +447,7 @@ struct VocabTestSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var run: VocabTestRun?
     @State private var result: VocabTestResult?
+    @State private var saved = false
     @State private var retired = false
 
     var body: some View {
@@ -523,7 +530,7 @@ struct VocabTestSheet: View {
 
     private func finish(_ r: VocabTestRun) {
         run = r
-        if r.finished { let res = r.result(); model.save(res); result = res }
+        if r.finished { result = r.result(); saved = false }   // saved only on 「保存为我的成绩」
     }
 
     private func resultView(_ r: VocabTestResult) -> some View {
@@ -558,13 +565,18 @@ struct VocabTestSheet: View {
             HStack {
                 Button("再测一次") { start() }
                 Spacer()
-                if known > 0 && !retired {
+                if !saved {
+                    Button("不保存") { dismiss() }.keyboardShortcut(.cancelAction)
+                        .help("别人来测时用：结果不会记录，也不影响计划")
+                    Button("保存为我的成绩") { model.save(r); saved = true }.keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                } else if known > 0 && !retired {
                     Button("斩掉 \(known) 个熟词") { model.bulkRetire(r); retired = true }
                         .help("作为一批操作，可在计划里撤销")
                 } else if retired {
                     Button("撤销斩词") { model.undoLastBatch(); retired = false }
                 }
-                Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+                if saved { Button("完成") { dismiss() }.keyboardShortcut(.defaultAction) }
             }
             .padding(12)
         }
@@ -632,6 +644,7 @@ struct HanziTestSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var run: HanziTestRun?
     @State private var result: VocabTestResult?
+    @State private var saved = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -717,7 +730,7 @@ struct HanziTestSheet: View {
     private func reading(_ c: String) { guard var r = run else { return }; r.answerCheck(c); finish(&r) }
 
     private func finish(_ r: inout HanziTestRun) {
-        if r.finished { let res = r.result(); model.saveHanzi(res); result = res }
+        if r.finished { result = r.result(); saved = false }   // saved only on 「保存为我的成绩」
         run = r
     }
 
@@ -751,7 +764,15 @@ struct HanziTestSheet: View {
             HStack {
                 Button("再测一次") { start() }
                 Spacer()
-                Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+                if saved {
+                    Text("已保存").font(.caption).foregroundStyle(.secondary)
+                    Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+                } else {
+                    Button("不保存") { dismiss() }.keyboardShortcut(.cancelAction)
+                        .help("别人来测时用：结果不会记录")
+                    Button("保存为我的成绩") { model.saveHanzi(r); saved = true }.keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
             }
             .padding(12)
         }
@@ -825,5 +846,45 @@ struct PseudoGlyph: View {
         } else {
             Text(parts).font(.system(size: size * 0.6, design: .serif))
         }
+    }
+}
+
+
+/// A saved test result in 历史记录; delete via context menu, hover trash button or ⌫ (with confirmation).
+struct ResultRow: View {
+    let result: VocabTestResult
+    let unit: String
+    let hanzi: Bool
+    var body: some View {
+        LabeledContent(result.date.formatted(date: .abbreviated, time: .omitted), value: "约 \(result.estimate) \(unit)")
+            .modifier(DeletableResult(result: result, hanzi: hanzi))
+    }
+}
+
+struct DeletableResult: ViewModifier {
+    @ObservedObject var model = PlanModel.shared
+    let result: VocabTestResult
+    let hanzi: Bool
+    @State private var confirm = false
+    @State private var hover = false
+    @FocusState private var focused: Bool
+    func body(content: Content) -> some View {
+        HStack(spacing: 6) {
+            content
+            Button { confirm = true } label: { Image(systemName: "trash") }
+                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .opacity(hover || focused ? 1 : 0).help("删除这条成绩")
+                .accessibilityLabel("删除这条成绩")
+        }
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
+        .focusable().focused($focused)
+        .onDeleteCommand { confirm = true }
+        .onKeyPress(.delete) { confirm = true; return .handled }
+        .contextMenu { Button("删除这条成绩…", role: .destructive) { confirm = true } }
+        .confirmationDialog("删除 \(result.date.formatted(date: .abbreviated, time: .shortened)) 的成绩？", isPresented: $confirm) {
+            Button("删除", role: .destructive) { model.delete(result, hanzi: hanzi) }
+            Button("取消", role: .cancel) {}
+        } message: { Text("删除后无法恢复。") }
     }
 }

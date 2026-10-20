@@ -38,18 +38,26 @@ extension WordStore {
     public func hanziResults() throws -> [VocabTestResult] {
         try runPublic(Self.hanziSQL, [])
         var out: [VocabTestResult] = []
-        try runPublic("SELECT json FROM hanzi_results ORDER BY taken DESC, id DESC", []) { st in
-            if let t = sqlite3_column_text(st, 0), let r = try? JSONDecoder().decode(VocabTestResult.self, from: Data(String(cString: t).utf8)) {
+        try runPublic("SELECT json, id FROM hanzi_results ORDER BY taken DESC, id DESC", []) { st in
+            if let t = sqlite3_column_text(st, 0), var r = try? JSONDecoder().decode(VocabTestResult.self, from: Data(String(cString: t).utf8)) {
+                r.rowID = sqlite3_column_int64(st, 1)
                 out.append(r)
             }
         }
         return out
     }
 
+    /// Deletes one saved result (row id from `testResults()` / `hanziResults()`).
+    public func deleteTestResult(id: Int64, hanzi: Bool) throws {
+        if hanzi { try runPublic(Self.hanziSQL, []) }
+        try runPublic("DELETE FROM \(hanzi ? "hanzi_results" : "test_results") WHERE id = ?", [id])
+    }
+
     public func testResults() throws -> [VocabTestResult] {
         var out: [VocabTestResult] = []
-        try runPublic("SELECT json FROM test_results ORDER BY taken DESC, id DESC", []) { st in
-            if let t = sqlite3_column_text(st, 0), let r = try? JSONDecoder().decode(VocabTestResult.self, from: Data(String(cString: t).utf8)) {
+        try runPublic("SELECT json, id FROM test_results ORDER BY taken DESC, id DESC", []) { st in
+            if let t = sqlite3_column_text(st, 0), var r = try? JSONDecoder().decode(VocabTestResult.self, from: Data(String(cString: t).utf8)) {
+                r.rowID = sqlite3_column_int64(st, 1)
                 out.append(r)
             }
         }
