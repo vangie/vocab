@@ -179,6 +179,9 @@ struct PanelView: View {
     @State private var added = false
     @State private var editing = false
     @State private var draft = ""
+    @StateObject private var scroller = EntryScroller()
+    @State private var currentSection = 0
+    @State private var namesVersion = 0
     @FocusState private var fieldFocused: Bool
 
     init(word: String, context: String?, surface: String? = nil, source: WordSource? = nil,
@@ -189,13 +192,18 @@ struct PanelView: View {
     }
 
     var body: some View {
+        let _ = namesVersion
         VStack(spacing: 0) {
             header
+                .onReceive(NotificationCenter.default.publisher(for: .vocabDictionaryPrefsChanged)) { _ in namesVersion += 1 }
             Divider().opacity(0.6)
+            if resultDicts.count > 1 { chips; Divider().opacity(0.4) }
             // Every dictionary's full entry at once, rendered like the main window (audio buttons play).
             EntryWebView(entries: entries, showTitles: true, panel: true,
                          emptyMessage: "没有找到「\(word)」",
-                         onLookup: { relookup($0) })
+                         onLookup: { relookup($0) },
+                         scroller: scroller,
+                         onSection: { currentSection = $0 })
             Divider().opacity(0.6)
             footerRow("在「生词」中打开", "book") { openInMain() }
             Divider().opacity(0.6).padding(.leading, 14)
@@ -207,6 +215,40 @@ struct PanelView: View {
             .padding(.bottom, 4)
         }
         .onAppear { added = WordbookModel.shared.contains(word) }
+    }
+
+    /// Dictionaries with results, in display order (one chip per entry section).
+    private var resultDicts: [DictionaryInfo] {
+        var seen = Set<String>(); var out: [DictionaryInfo] = []
+        for e in entries where seen.insert(e.dictionary.id).inserted { out.append(e.dictionary) }
+        return out
+    }
+
+    /// Compact chips (main-window tab style): click scrolls to the section; scroll-spy highlights.
+    private var chips: some View {
+        let _ = namesVersion
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(Array(resultDicts.enumerated()), id: \.element.id) { i, d in
+                        Button { currentSection = i; scroller.scroll(to: i) } label: {
+                            Text(d.displayName)
+                                .font(.system(size: 11.5))
+                                .lineLimit(1)
+                                .padding(.horizontal, 8).padding(.vertical, 2.5)
+                                .background(currentSection == i ? Color.primary.opacity(0.14) : .clear, in: Capsule())
+                                .foregroundStyle(currentSection == i ? Color.primary : Color.secondary)
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .id(i)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 5)
+            }
+            .onChange(of: currentSection) { _, i in withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(i, anchor: .center) } }
+        }
+        .onChange(of: entries.map(\.id)) { _, _ in currentSection = 0 }
     }
 
     private var header: some View {

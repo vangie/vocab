@@ -83,8 +83,9 @@ struct DictionarySettingsView: View {
                     .frame(height: max(150, (geo.size.height - 40) * 0.4))
                     .padding(.bottom, 8)
                 let tableH = max(150, (geo.size.height - 40) * 0.4)
-                let room = max(40, geo.size.height - 40 - 26 - tableH - 16)
+                let room = max(40, geo.size.height - 40 - 26 - tableH - 16 - 32)
                 if let id = selection, let d = dicts.first(where: { $0.id == id }) {
+                    ShortNameField(dictionary: d).id("short-" + d.id).padding(.bottom, 8)
                     // Like native: the box hugs its content (a short description is a short box),
                     // and scrolls inside only when the content is taller than the space left.
                     DictionaryDetailView(dictionary: d, height: $contentHeight).id(d.id)
@@ -405,5 +406,31 @@ struct DictionaryPrefsWebView: NSViewRepresentable {
                 decisionHandler(.allow)
             }
         }
+    }
+}
+
+/// 简称: optional short name used everywhere the dictionary is named. Empty = original name.
+struct ShortNameField: View {
+    let dictionary: DictionaryInfo
+    @State private var text = ""
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("简称：").font(.system(size: 13))
+            TextField("", text: $text, prompt: Text(dictionary.name))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 220)
+                .onSubmit(commit)
+                .onChange(of: text) { _, _ in commit() }
+            Text("留空则使用原名").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(height: 24)
+        .onAppear { text = DictionaryNames.custom(dictionary.id) ?? "" }
+    }
+
+    private func commit() {
+        guard (DictionaryNames.custom(dictionary.id) ?? "") != text.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        DictionaryNames.set(text, for: dictionary.id)
+        NotificationCenter.default.post(name: .vocabDictionaryPrefsChanged, object: nil)
     }
 }

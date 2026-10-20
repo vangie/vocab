@@ -166,3 +166,29 @@ public final class DictionaryService: @unchecked Sendable {
         queue.sync { infos.values.compactMap { $0.bundleURL?.resolvingSymlinksInPath().path } }
     }
 }
+
+/// User-chosen short names (Settings › 词典 › 简称), keyed by dictionary identifier.
+/// No entry (or empty) = the dictionary's original name.
+public enum DictionaryNames {
+    public static let key = "dictionaryShortNames"
+    nonisolated(unsafe) public static var store: UserDefaults = .standard
+
+    public static func custom(_ id: String) -> String? {
+        let s = (store.dictionary(forKey: key) as? [String: String])?[id]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (s?.isEmpty ?? true) ? nil : s
+    }
+
+    public static func set(_ name: String?, for id: String) {
+        var m = (store.dictionary(forKey: key) as? [String: String]) ?? [:]
+        let t = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if t.isEmpty { m[id] = nil } else { m[id] = t }
+        store.set(m, forKey: key)
+    }
+
+    public static func display(_ d: DictionaryInfo) -> String { custom(d.id) ?? d.name }
+}
+
+public extension DictionaryInfo {
+    /// Name to show in the UI: the user's 简称, else the original name.
+    var displayName: String { DictionaryNames.display(self) }
+}

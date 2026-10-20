@@ -230,7 +230,7 @@ struct LookupDetailView: View {
     /// every enabled dictionary, one per line — centred.
     private var emptyState: some View {
         let enabled = DictionarySelection.enabled()
-        let names = lookup.selectedDictionary.flatMap { id in enabled.first { $0.id == id }.map { [$0.name] } } ?? enabled.map(\.name)
+        let names = lookup.selectedDictionary.flatMap { id in enabled.first { $0.id == id }.map { [$0.displayName] } } ?? enabled.map(\.displayName)
         return ScrollView {
             VStack(spacing: 14) {
                 Text("请键入要查询的字词…")
@@ -261,7 +261,7 @@ struct DictionaryTabStrip<Trailing: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            let items: [(id: String?, name: String)] = [(nil, "全部")] + dictionaries.map { ($0.id, $0.name) }
+            let items: [(id: String?, name: String)] = [(nil, "全部")] + dictionaries.map { ($0.id, $0.displayName) }
             let avail = geo.size.width - 24 - 60   // margins, » and the trailing button
             let (shown, hidden) = split(items, avail)
             HStack(spacing: 2) {
@@ -325,6 +325,8 @@ struct EntryWebView: NSViewRepresentable {
     var emptyMessage: String
     var zoom: Double = 1.0
     var onLookup: (String) -> Void
+    var scroller: EntryScroller? = nil
+    var onSection: ((Int) -> Void)? = nil
 
     @MainActor final class Coordinator {
         let factory = EntryWebViewFactory()
@@ -339,8 +341,10 @@ struct EntryWebView: NSViewRepresentable {
 
     func updateNSView(_ wv: WKWebView, context: Context) {
         context.coordinator.factory.onLookup = onLookup
+        context.coordinator.factory.onSection = onSection
+        scroller?.webView = wv
         if abs(wv.pageZoom - zoom) > 0.001 { wv.pageZoom = zoom }
-        let token = entries.map(\.id).joined(separator: "|") + "\(showTitles)\(emptyMessage)"
+        let token = entries.map { $0.id + "@" + $0.dictionary.displayName }.joined(separator: "|") + "\(showTitles)\(emptyMessage)"
         guard token != context.coordinator.token else { return }
         context.coordinator.token = token
         let url = EntryWebViewFactory.pageURL(for: entries, showTitles: showTitles, panel: panel, emptyMessage: emptyMessage)
@@ -396,4 +400,10 @@ struct SettingsView: View {
             .tag("review")
         }
     }
+}
+
+/// Lets SwiftUI (popup chips) scroll the entry page to a dictionary section.
+@MainActor final class EntryScroller: ObservableObject {
+    weak var webView: WKWebView?
+    func scroll(to i: Int) { webView?.evaluateJavaScript("window.vocabScrollTo && window.vocabScrollTo(\(i))") }
 }

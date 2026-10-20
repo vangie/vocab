@@ -157,6 +157,8 @@ public enum VocabScripts {
 public final class EntryWebViewFactory: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     public var onLookup: ((String) -> Void)?
     public var onAudio: ((String, Bool) -> Void)?
+    /// Scroll-spy: index of the dictionary section at the top of the view.
+    public var onSection: ((Int) -> Void)?
     private let schemeHandler = VocabSchemeHandler()
 
     public override init() { super.init() }
@@ -168,6 +170,7 @@ public final class EntryWebViewFactory: NSObject, WKScriptMessageHandler, WKNavi
         ucc.addUserScript(WKUserScript(source: VocabScripts.audio, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         ucc.addUserScript(WKUserScript(source: VocabScripts.autosize, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         ucc.add(WeakMessageHandler(self), name: "vocabAudio")
+        ucc.add(WeakMessageHandler(self), name: "vocabSection")
         config.userContentController = ucc
         config.mediaTypesRequiringUserActionForPlayback = []
         let wv = WKWebView(frame: .zero, configuration: config)
@@ -177,6 +180,7 @@ public final class EntryWebViewFactory: NSObject, WKScriptMessageHandler, WKNavi
     }
 
     public func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "vocabSection" { if let i = (message.body as? NSNumber)?.intValue { onSection?(i) }; return }
         guard message.name == "vocabAudio", let s = message.body as? String else { return }
         let ok = AudioPlayer.shared.play(urlString: s)
         onAudio?(s, ok)
@@ -206,7 +210,7 @@ public final class EntryWebViewFactory: NSObject, WKScriptMessageHandler, WKNavi
         for e in entries {
             let doc = EntryHTML.prepare(panel ? e.panelHTML : e.html, resourceDirectory: e.resourceDirectory)
             let u = EntryDocumentStore.shared.register(doc).absoluteString
-            if groups[e.dictionary.id] == nil { order.append(e.dictionary.id); groups[e.dictionary.id] = (e.dictionary.name, []) }
+            if groups[e.dictionary.id] == nil { order.append(e.dictionary.id); groups[e.dictionary.id] = (e.dictionary.displayName, []) }
             groups[e.dictionary.id]!.1.append(u)
         }
         let sections = order.map { EntryHTML.Section(title: groups[$0]!.0, frameURLs: groups[$0]!.1) }

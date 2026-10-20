@@ -123,6 +123,26 @@ public enum EntryHTML {
 
     /// The outer page: one titled section per dictionary, each record in its own iframe
     /// so every dictionary keeps its own <base> and stylesheet.
+    /// Scroll-spy: reports the index of the section at the top of the viewport (vocabSection),
+    /// and window.vocabScrollTo(i) smooth-scrolls to a section.
+    static let spyScript = """
+    (function(){
+      var last = -1;
+      function report(){
+        var secs = document.querySelectorAll('section'); var cur = 0;
+        for (var k = 0; k < secs.length; k++) { if (secs[k].getBoundingClientRect().top <= 48) cur = k; }
+        if ((window.innerHeight + window.scrollY) >= document.body.scrollHeight - 2 && secs.length) {
+          var lastTop = secs[secs.length-1].getBoundingClientRect().top; if (lastTop < window.innerHeight) cur = Math.max(cur, secs.length-1);
+        }
+        if (cur !== last) { last = cur; try { webkit.messageHandlers.vocabSection.postMessage(cur); } catch(e){} }
+      }
+      window.addEventListener('scroll', report, {passive:true});
+      window.vocabScrollTo = function(i){ var s = document.getElementById('vsec-'+i); if (!s) return;
+        window.scrollTo({top: i === 0 ? 0 : s.getBoundingClientRect().top + window.scrollY - 4, behavior: 'smooth'}); };
+      report();
+    })();
+    """
+
     public static func page(sections: [Section], showTitles: Bool, emptyMessage: String = "") -> String {
         func esc(_ s: String) -> String {
             s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
@@ -131,8 +151,8 @@ public enum EntryHTML {
         if sections.isEmpty && !emptyMessage.isEmpty {
             body = "<div class=\"empty\">\(esc(emptyMessage))</div>"
         }
-        for s in sections {
-            body += "<section>"
+        for (i, s) in sections.enumerated() {
+            body += "<section id=\"vsec-\(i)\" data-i=\"\(i)\">"
             if showTitles { body += "<h2 class=\"dict\"><span>\(esc(s.title))</span></h2>" }
             for u in s.frameURLs { body += "<iframe src=\"\(u)\" scrolling=\"no\"></iframe>" }
             body += "</section>"
@@ -147,7 +167,8 @@ public enum EntryHTML {
                   color: #8a8a8e; margin: 22px 0 6px; }
         h2.dict::before, h2.dict::after { content: ""; flex: 1; border-top: 1px solid rgba(128,128,128,.45); }
         .empty { color: #8a8a8e; text-align: center; margin-top: 80px; font-size: 15px; }
-        </style></head><body>\(body)</body></html>
+        section:first-child h2.dict { margin-top: 6px; }
+        </style></head><body>\(body)<script>\(spyScript)</script></body></html>
         """
     }
 }
