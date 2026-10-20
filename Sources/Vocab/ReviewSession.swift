@@ -68,6 +68,19 @@ final class ReviewSession: ObservableObject {
         UserDefaults.standard.set([todayKey: introducedToday + 1], forKey: introducedKey)
     }
 
+    private static let reviewedKey = "reviewedToday"
+    /// Distinct due reviews answered today.
+    static var reviewedToday: Int {
+        (UserDefaults.standard.dictionary(forKey: reviewedKey)?[todayKey] as? Int) ?? 0
+    }
+    private static func noteReviewed() {
+        UserDefaults.standard.set([todayKey: reviewedToday + 1], forKey: reviewedKey)
+    }
+    /// Today's record and the streak, refreshed with the preview.
+    @Published private(set) var today = DayRecord()
+    @Published private(set) var streak = 0
+    @Published private(set) var overall = PlanProgress()
+
     /// Word-list words not yet in the wordbook get a temporary negative id; they're written to the
     /// wordbook (source 词书·…) only when first answered.
     private var virtualSource: [Int64: ExamList] = [:]
@@ -120,6 +133,14 @@ final class ReviewSession: ObservableObject {
         guard phase == .idle || phase == .summary else { return }
         let p = plan()
         preview = (p.filter { !SessionPlanner.isNew($0) }.count, p.filter(SessionPlanner.isNew).count)
+        guard PlanModel.shared.plan.configured else { return }
+        var log = DailyLog.load()
+        let now = Date()
+        log.snapshot(now, newLeft: preview.new, reviewsLeft: preview.reviews,
+                     newDone: Self.introducedToday, reviewsDone: Self.reviewedToday)
+        log.save()
+        today = log.today(now); streak = log.streak(now)
+        overall = PlanModel.shared.progress()
     }
 
     func start() {
@@ -276,7 +297,9 @@ final class ReviewSession: ObservableObject {
 
     private func apply(_ r: ReviewRating, correct: Bool) {
         guard let q = question, let item = items[q.itemID] else { return }
-        if SessionPlanner.isNew(item) && !answeredOnce.contains(item.id) { Self.noteIntroduced() }
+        if !answeredOnce.contains(item.id) {
+            if SessionPlanner.isNew(item) { Self.noteIntroduced() } else { Self.noteReviewed() }
+        }
         answeredOnce.insert(item.id)
         if let rid = materialize(item.id), var updated = try? book.store?.review(id: rid, rating: r) {
             updated.id = item.id   // keep the session's key

@@ -91,6 +91,18 @@ final class PlanModel: ObservableObject {
         return ex
     }
 
+    /// Overall progress over the selected sources (for the review start screen).
+    func progress() -> PlanProgress {
+        let qs = queues(liveItems: book.items)
+        let words = Set(qs.flatMap(\.words).map { $0.lowercased() })
+        let bookWords = Set(qs.filter { $0.id.isBook }.flatMap(\.words).map { $0.lowercased() })
+        // Book queues only list new words; add the answered ones from those books.
+        let bookIDs = Set(qs.compactMap { if case .book(let b) = $0.id { return b }; return nil })
+        let answered = Set(book.items.filter { $0.bookID.map(bookIDs.contains) ?? false }.map { $0.word.lowercased() })
+        let skipped = ((try? book.store?.poolSkips()) ?? []).union(listExclusions().subtracting(bookWords))
+        return PlanProgress.compute(words: words.union(answered), skipped: skipped, items: book.items)
+    }
+
     func drawNew(count: Int, liveItems: [WordItem]) -> [(word: String, source: PlanSourceID)] {
         let qs = queues(liveItems: liveItems)
         let exclude = exclusions(qs)

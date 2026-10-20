@@ -49,13 +49,16 @@ private struct StartScreen: View {
     private var content: some View {
         VStack(spacing: 14) {
             Spacer()
+            if plan.plan.configured { PlanDashboard(session: session, plan: plan.plan).padding(.bottom, 8) }
             let p = session.preview
             if p.reviews + p.new == 0 {
                 Image(systemName: "checkmark.circle").font(.system(size: 46, weight: .light)).foregroundStyle(.green)
                 Text("今天没有要复习的单词").font(.title3)
                 Text("新词上限 \(ReviewSession.dailyNewCap) 个，今天已学 \(ReviewSession.introducedToday) 个").foregroundStyle(.secondary)
             } else {
-                Image(systemName: "rectangle.stack").font(.system(size: 42, weight: .light)).foregroundStyle(.secondary)
+                if !plan.plan.configured {
+                    Image(systemName: "rectangle.stack").font(.system(size: 42, weight: .light)).foregroundStyle(.secondary)
+                }
                 Text("今日背单词").font(.title2.weight(.semibold))
                 HStack(spacing: 28) {
                     Stat(value: p.reviews, label: "待复习")
@@ -131,7 +134,6 @@ private struct QuestionScreen: View {
                 Button { session.retire() } label: { Label("斩", systemImage: "scissors") }
                     .help("已掌握：不再复习这个词（⌘K）")
                     .keyboardShortcut("k", modifiers: .command)
-                Button("结束") { session.end() }.help("结束本轮，查看小结")
             }
             ProgressView(value: session.queue.progress).progressViewStyle(.linear)
         }
@@ -167,6 +169,8 @@ private struct QuestionScreen: View {
 
     @ViewBuilder private var footer: some View {
         HStack {
+            // 结束 sits bottom-left, far from 斩 (top-right) and 继续 (bottom-right).
+            Button("结束") { session.end() }.help("结束本轮，查看小结").buttonStyle(.borderless).foregroundStyle(.secondary)
             Spacer()
             if session.phase == .answered {
                 Button { session.next() } label: {
@@ -430,5 +434,57 @@ private struct SummaryScreen: View {
             .controlSize(.large).padding(.top, 6)
             Spacer()
         }
+    }
+}
+
+/// Start screen summary when a plan exists: overall, today and streak.
+private struct PlanDashboard: View {
+    @ObservedObject var session: ReviewSession
+    let plan: StudyPlan
+
+    var body: some View {
+        let o = session.overall, t = session.today
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
+            GridRow {
+                Text("总进度").foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: o.fraction).frame(width: 220)
+                    Text("已学 \(o.learned) · 已掌握 \(o.mastered) / 共 \(o.total) 词").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    if let target = targetLine { Text(target).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+            GridRow {
+                Text("今天").foregroundStyle(.secondary)
+                HStack(spacing: 16) {
+                    Label("新词 \(t.newDone)/\(t.newQuota)", systemImage: t.newDone >= t.newQuota ? "checkmark.circle.fill" : "circle")
+                    Label("复习 \(t.reviewsDone)/\(t.reviewTarget)", systemImage: t.reviewsDone >= t.reviewTarget ? "checkmark.circle.fill" : "circle")
+                }
+                .monospacedDigit()
+                .symbolRenderingMode(.hierarchical)
+            }
+            GridRow {
+                Text("连续").foregroundStyle(.secondary)
+                Label(session.streak > 0 ? "\(session.streak) 天" : "今天完成就开始计数",
+                      systemImage: "flame").foregroundStyle(session.streak > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .help("每天完成当天的新词和到期复习算一天；今天还没完成不会中断。")
+            }
+        }
+        .font(.callout)
+        .padding(14)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var targetLine: String? {
+        guard let target = plan.targetDate else { return nil }
+        let cal = Calendar.current
+        let left = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: target).day ?? 0
+        let remaining = max(0, session.overall.total - session.overall.learned)
+        let due = WordbookModel.shared.dueItems.filter { !SessionPlanner.isNew($0) }.count
+        var s = "目标 \(target.formatted(date: .abbreviated, time: .omitted))，还有 \(max(0, left)) 天"
+        if let end = PlanMath.projectedDate(remaining: remaining, plan: plan, due: due, now: Date()) {
+            let late = cal.dateComponents([.day], from: target, to: end).day ?? 0
+            s += late > 0 ? " · 按现在的速度晚 \(late) 天" : " · 按计划进行"
+        }
+        return s
     }
 }

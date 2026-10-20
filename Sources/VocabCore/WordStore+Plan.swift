@@ -91,6 +91,13 @@ extension WordStore {
     }
 
     /// Words the plan must not serve as new: skipped by a test, or learned / 斩 in the wordbook.
+    /// Words a vocabulary test skipped (not undone).
+    public func poolSkips() throws -> Set<String> {
+        var out = Set<String>()
+        try runPublic("SELECT word FROM pool_skips", []) { out.insert(String(cString: sqlite3_column_text($0, 0)).lowercased()) }
+        return out
+    }
+
     public func planExclusions() throws -> Set<String> {
         var out = Set<String>()
         try runPublic("SELECT word FROM pool_skips", []) { out.insert(String(cString: sqlite3_column_text($0, 0)).lowercased()) }
