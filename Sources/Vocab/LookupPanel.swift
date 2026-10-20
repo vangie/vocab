@@ -211,22 +211,31 @@ struct PanelView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            if editing {
-                TextField("单词", text: $draft)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 15, weight: .semibold))
-                    .focused($fieldFocused)
-                    .onSubmit { relookup(draft) }
-                    .onExitCommand { editing = false }
-                    .frame(maxWidth: 260)
-            } else {
-                Button { draft = word; editing = true; DispatchQueue.main.async { fieldFocused = true } } label: {
-                    Text(word).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+            // Label and field share one fixed-height slot, same font/baseline: no jump when editing.
+            ZStack(alignment: .leading) {
+                if editing {
+                    TextField("单词", text: $draft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 17, weight: .semibold))
+                        .focusEffectDisabled()
+                        .focused($fieldFocused)
+                        .onSubmit { relookup(draft) }
+                        .onExitCommand { editing = false }
+                        .padding(.horizontal, 4)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.07)))
+                        .overlay(alignment: .bottom) { Rectangle().fill(Color.accentColor).frame(height: 1.5).padding(.horizontal, 4) }
+                        .frame(maxWidth: 260, alignment: .leading)
+                } else {
+                    Button { draft = word; editing = true; DispatchQueue.main.async { fieldFocused = true } } label: {
+                        Text(word).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 4)
+                    .help("点按修改要查的词")
+                    .onHover { $0 ? NSCursor.iBeam.push() : NSCursor.pop() }
                 }
-                .buttonStyle(.plain)
-                .help("点按修改要查的词")
-                .onHover { $0 ? NSCursor.iBeam.push() : NSCursor.pop() }
             }
+            .frame(height: 24)
             Spacer()
             Button {
                 if let e = entries.first {
