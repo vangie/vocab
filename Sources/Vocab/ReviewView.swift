@@ -637,12 +637,12 @@ private struct CornerButton: View {
     var body: some View {
         Button(action: action) {
             Label { Text(title) } icon: {
-                if symbol == LatinBookIcon.name { Image(nsImage: LatinBookIcon.image(pointSize: 12)) } else { Image(systemName: symbol) }
+                if symbol == LatinBookIcon.name { Image(nsImage: LatinBookIcon.image(pointSize: 13)) } else { Image(systemName: symbol) }
             }
-                .font(.system(size: 12))
+                .font(.system(size: 13))
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(hover ? Color.primary : Color.secondary)
-                .padding(.horizontal, 8).padding(.vertical, 4)
+                .padding(.horizontal, 10).padding(.vertical, 5)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hover ? 0.08 : 0)))
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }
