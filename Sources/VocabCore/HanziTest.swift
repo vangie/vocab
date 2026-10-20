@@ -214,6 +214,9 @@ public struct HanziTestRun: Sendable {
     private var knownClaims = 0
     private var used = Set<Int>()
     private var pseudo: [String]
+    private var gen: Adaptive.Gen
+    private var startX: Double
+    private var pseudoAt: Set<Int>
     public static let pseudoEvery = 6
     public private(set) var items: [HanziTestItem] = []
     /// True while the current item waits for its spot-check answer.
@@ -223,7 +226,8 @@ public struct HanziTestRun: Sendable {
     public var round: Int { 1 }
 
     /// `gloss` defaults to the bundled English gloss; the app passes Chinese glosses from 规范/新华.
-    public init<R: RandomNumberGenerator>(list: HanziList, gloss: Glosser? = nil, using rng: inout R) {
+    /// `avoid`: characters (and pseudo-characters) shown in recent runs; skipped where possible.
+    public init<R: RandomNumberGenerator>(list: HanziList, gloss: Glosser? = nil, avoid: Set<String> = [], using rng: inout R) {
         bands = HanziTestScoring.bands(total: list.chars.count)
         self.list = list.chars
         xs = list.chars.indices.map { log(Double($0 + 1)) }
@@ -232,7 +236,15 @@ public struct HanziTestRun: Sendable {
         byRadical = rad
         allReadings = Array(Set(list.chars.flatMap(\.readings))).sorted()
         self.gloss = gloss ?? { $0.gloss.isEmpty ? nil : $0.gloss }
-        pseudo = HanziPseudo.shared.shuffled(using: &rng)
+        let ps = HanziPseudo.shared.shuffled(using: &rng)
+        pseudo = ps.filter { !avoid.contains($0) } + ps.filter { avoid.contains($0) }
+        gen = Adaptive.Gen(from: &rng)
+        startX = log(Double(Self.startRank)) + Double.random(in: -Adaptive.startJitter...Adaptive.startJitter, using: &rng)
+        pseudoAt = Adaptive.pseudoSchedule(using: &rng)
+        if !avoid.isEmpty {
+            let hit = list.chars.indices.filter { avoid.contains(list.chars[$0].char) }
+            if hit.count < list.chars.count / 4 { used.formUnion(hit) }
+        }
         appendNext()
     }
 
@@ -260,15 +272,15 @@ public struct HanziTestRun: Sendable {
 
     private mutating func appendNext() {
         let realCount = items.filter { !$0.isPseudo }.count
-        if realCount > 0, realCount % Self.pseudoEvery == 0, items.last?.isPseudo == false, !pseudo.isEmpty {
+        if pseudoAt.contains(realCount), items.last?.isPseudo == false, !pseudo.isEmpty {
             var p = HanziTestItem(char: pseudo.removeFirst(), readings: [], band: -1, check: false)
             p.isPseudo = true
             items.append(p); return
         }
-        let target = Adaptive.nextTarget(fit: currentFit(), x0: log(Double(Self.startRank)), xMax: xMax)
-        var i = Adaptive.nearest(target, in: xs, used: used)
-        while let j = i, list[j].readings.isEmpty { used.insert(j); i = Adaptive.nearest(target, in: xs, used: used) }
-        guard let k = i else { return }
+        let fit = currentFit()
+        let target = fit == nil ? startX : Adaptive.nextTarget(fit: fit, x0: log(Double(Self.startRank)), xMax: xMax)
+        let chars = list
+        guard let k = Adaptive.pick(target, in: xs, used: used, allowed: { !chars[$0].readings.isEmpty }, using: &gen) else { return }
         used.insert(k)
         var it = HanziTestItem(char: list[k].char, readings: list[k].readings, band: bandOf(k + 1), check: false)
         it.rank = k + 1

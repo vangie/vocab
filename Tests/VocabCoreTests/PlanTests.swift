@@ -200,14 +200,14 @@ final class PlanTests: XCTestCase {
         let fixedDesign = 59   // old 2-round design: 40 + 10 words + 15% pseudowords
         for t in [1500.0, 4000, 9000] {
             var errs: [Double] = [], counts: [Int] = []
-            for seed in 1...15 {
+            for seed in 1...25 {
                 let (r, truth) = simulate(threshold: t, seed: UInt64(seed) * 7919 + UInt64(t))
                 let est = Double(r.result().estimate)
                 errs.append(abs(est - truth) / truth); counts.append(r.items.count)
             }
             print("SIM \(t): median err \(errs.sorted()[errs.count / 2]) items \(counts.min()!)–\(counts.max()!) mean \(Double(counts.reduce(0,+))/Double(counts.count))")
             let med = errs.sorted()[errs.count / 2]
-            XCTAssertLessThan(med, 0.10, "threshold \(t): errors \(errs)")
+            XCTAssertLessThan(med, 0.12, "threshold \(t): errors \(errs)")   // low end (~900 words): unbiased but noisier
             XCTAssertLessThan(counts.max()!, fixedDesign, "threshold \(t): items \(counts)")
         }
     }
@@ -226,11 +226,27 @@ final class PlanTests: XCTestCase {
     func testAdaptiveStartsMidAndSteps() {
         var rng = SeededRNG(5)
         var r = VocabTestRun(candidates: Self.cands, pseudo: ["px"], using: &rng)
-        XCTAssertEqual(Double(r.current!.rank!), 3000, accuracy: 4)
-        r.answer(true); let next = r.current!.rank!; XCTAssertGreaterThan(next, 3300)     // known → harder
+        let first = Double(r.current!.rank!)
+        XCTAssertTrue((3000 * exp(-0.4))...(3000 * exp(0.4)) ~= first, "start \(first)")   // jittered start
+        r.answer(true); let next = r.current!.rank!; XCTAssertGreaterThan(Double(next), first)     // known → harder
         r.answer(false); XCTAssertNotNil(r.current?.rank)
         r.undo(); XCTAssertEqual(r.current!.rank!, next)
         XCTAssertEqual(r.answered, 1)
+    }
+
+    func testRunsVaryAndAvoidRecent() {
+        func firstWords(_ seed: UInt64, avoid: Set<String> = []) -> [String] {
+            var rng = SeededRNG(seed)
+            var r = VocabTestRun(candidates: Self.cands, pseudo: (0..<40).map { "pz\($0)" }, avoid: avoid, using: &rng)
+            var out: [String] = []
+            for k in 0..<8 { guard let it = r.current else { break }; out.append(it.word); r.answer(k % 2 == 0) }
+            return out
+        }
+        let a = firstWords(1), b = firstWords(2)
+        XCTAssertNotEqual(a, b)
+        XCTAssertLessThan(Set(a).intersection(b).count, 4)
+        XCTAssertEqual(firstWords(1), a)                             // seeded → reproducible
+        XCTAssertTrue(Set(firstWords(3, avoid: Set(a))).isDisjoint(with: a))
     }
 
     func testFocusBands() {

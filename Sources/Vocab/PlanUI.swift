@@ -473,7 +473,7 @@ struct VocabTestSheet: View {
     private func start() {
         guard let lists = WordLists.shared else { return }
         var rng = SystemRandomNumberGenerator()
-        var r = VocabTestRun(lists: lists, using: &rng)
+        var r = VocabTestRun(lists: lists, avoid: RecentTestItems.load("vocab"), using: &rng)
         r.meaning = VocabMeaningMaker.make()
         run = r
         result = nil; retired = false
@@ -538,7 +538,7 @@ struct VocabTestSheet: View {
 
     private func finish(_ r: VocabTestRun) {
         run = r
-        if r.finished { result = r.result(); saved = false }   // saved only on 「保存为我的成绩」
+        if r.finished { result = r.result(); saved = false; RecentTestItems.note("vocab", r.items.map(\.word)) }   // saved only on 「保存为我的成绩」
     }
 
     private func resultView(_ r: VocabTestResult) -> some View {
@@ -671,7 +671,7 @@ struct HanziTestSheet: View {
             // Glosses come from the installed 现代汉语规范词典 / 新华字典 (a few ms per character).
             let r = await Task.detached(priority: .userInitiated) { () -> HanziTestRun in
                 var rng = SystemRandomNumberGenerator()
-                return HanziTestRun(list: list, gloss: HanziGlosser.make(), using: &rng)
+                return HanziTestRun(list: list, gloss: HanziGlosser.make(), avoid: RecentTestItems.load("hanzi"), using: &rng)
             }.value
             run = r
         }
@@ -738,7 +738,7 @@ struct HanziTestSheet: View {
     private func reading(_ c: String) { guard var r = run else { return }; r.answerCheck(c); finish(&r) }
 
     private func finish(_ r: inout HanziTestRun) {
-        if r.finished { result = r.result(); saved = false }   // saved only on 「保存为我的成绩」
+        if r.finished { result = r.result(); saved = false; RecentTestItems.note("hanzi", r.items.map(\.char)) }   // saved only on 「保存为我的成绩」
         run = r
     }
 
@@ -894,5 +894,20 @@ struct DeletableResult: ViewModifier {
             Button("删除", role: .destructive) { model.delete(result, hanzi: hanzi) }
             Button("取消", role: .cancel) {}
         } message: { Text("删除后无法恢复。") }
+    }
+}
+
+
+/// Items shown in the last few test runs (saved or not), avoided by the next runs so they differ.
+enum RecentTestItems {
+    static let runs = 3
+    static func key(_ kind: String) -> String { "recentTestItems.\(kind)" }
+    static func load(_ kind: String) -> Set<String> {
+        Set(((UserDefaults.standard.array(forKey: key(kind)) as? [[String]]) ?? []).flatMap { $0 })
+    }
+    static func note(_ kind: String, _ items: [String]) {
+        var all = (UserDefaults.standard.array(forKey: key(kind)) as? [[String]]) ?? []
+        all.append(items); if all.count > runs { all.removeFirst(all.count - runs) }
+        UserDefaults.standard.set(all, forKey: key(kind))
     }
 }

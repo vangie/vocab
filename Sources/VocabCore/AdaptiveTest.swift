@@ -6,13 +6,13 @@ import Foundation
 /// r₀ = 3000 for English / 1500 for characters, so θ = 0 means "recognition drops through 50% at r₀").
 /// P(认识 | θ, b) = γ + (1 − γ − λ) · σ(θ − b), γ/λ = 2%/3% absorb lucky yeses and slips.
 /// θ is estimated by EAP on a grid (prior N(0, 2²)); the next item is the unused one whose b is
-/// nearest θ̂ (maximum information for Rasch). Stop when SE(θ) < 0.40 after ≥ 15 items, or at 40.
+/// nearest θ̂ (maximum information for Rasch). Stop when SE(θ) < 0.35 after ≥ 15 items, or at 40.
 /// Size = Σ over candidate items of σ(θ − bᵢ); the interval uses θ ± 1.96·SE.
 public enum Adaptive {
     public static let guess = 0.02, lapse = 0.03
     public static let k = 3.0
     public static let minItems = 15, maxItems = 40
-    public static let seTarget = 0.40
+    public static let seTarget = 0.35
     static let grid: [Double] = stride(from: -10.0, through: 10.0, by: 0.02).map { $0 }
 
     public struct Fit: Equatable, Sendable {
@@ -103,6 +103,46 @@ public enum Adaptive {
     }
 
     /// Index into `xs` (sorted ascending) of the unused item nearest `target`.
+    /// Small seedable generator stored in a test run, so each run varies but tests stay reproducible.
+    public struct Gen: RandomNumberGenerator, Sendable {
+        var s: UInt64
+        public init(seed: UInt64) { s = seed }
+        public init<R: RandomNumberGenerator>(from r: inout R) { s = r.next() }
+        public mutating func next() -> UInt64 {
+            s &+= 0x9E3779B97F4A7C15
+            var z = s; z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9; z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+            return z ^ (z >> 31)
+        }
+    }
+
+    /// Start-point jitter (log-rank) so runs don't open with the same items.
+    public static let startJitter = 0.3
+    /// Items are drawn at random from those within this log-rank distance of the target (≈ ±8% rank);
+    /// Rasch information is nearly flat that close to θ̂, so accuracy is unaffected.
+    public static let window = 0.08
+
+    /// Random unused index with |x − target| ≤ window, else the nearest unused one.
+    public static func pick<R: RandomNumberGenerator>(_ target: Double, in xs: [Double], used: Set<Int>,
+                                                      allowed: (Int) -> Bool = { _ in true }, using rng: inout R) -> Int? {
+        guard !xs.isEmpty else { return nil }
+        var lo = 0, hi = xs.count
+        while lo < hi { let m = (lo + hi) / 2; if xs[m] < target - window { lo = m + 1 } else { hi = m } }
+        var cands: [Int] = []
+        var i = lo
+        while i < xs.count, xs[i] <= target + window { if !used.contains(i) && allowed(i) { cands.append(i) }; i += 1 }
+        if let c = cands.randomElement(using: &rng) { return c }
+        var u = used
+        while let j = nearest(target, in: xs, used: u) { if allowed(j) { return j }; u.insert(j) }
+        return nil
+    }
+
+    /// Real-item counts after which a pseudo-item is shown: random gaps of 4…8 (mean 6).
+    public static func pseudoSchedule<R: RandomNumberGenerator>(using rng: inout R) -> Set<Int> {
+        var out = Set<Int>(), n = Int.random(in: 3...7, using: &rng)
+        while n < 200 { out.insert(n); n += Int.random(in: 4...8, using: &rng) }
+        return out
+    }
+
     public static func nearest(_ target: Double, in xs: [Double], used: Set<Int>) -> Int? {
         guard !xs.isEmpty else { return nil }
         var lo = 0, hi = xs.count

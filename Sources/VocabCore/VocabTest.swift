@@ -141,22 +141,26 @@ public struct VocabTestRun: Sendable {
     private var pseudo: [String]
     private var used = Set<Int>()
     private var stopped = false
+    private var gen: Adaptive.Gen
+    private var startX: Double
+    private var pseudoAt: Set<Int>
     public private(set) var items: [VocabTestItem] = []
     public static let startRank = 3000
     public static let pseudoEvery = 6      // one pseudoword after every 6 real words (≈ 14%)
 
-    public init<R: RandomNumberGenerator>(lists: WordLists, using rng: inout R) {
+    public init<R: RandomNumberGenerator>(lists: WordLists, avoid: Set<String> = [], using rng: inout R) {
         let b = VocabTestScoring.bounds
         var cands: [(word: String, rank: Int)] = []
         for i in 0..<(b.count - 1) {
             let lo = i == 0 ? 1 : b[i] + 1, hi = b[i + 1]
             cands += lists.lemmasRanked(rank: lo, hi).filter { $0.word.count >= 3 }
         }
-        self.init(candidates: cands, pseudo: lists.pseudowords().shuffled(using: &rng), using: &rng)
+        self.init(candidates: cands, pseudo: lists.pseudowords().shuffled(using: &rng), avoid: avoid, using: &rng)
     }
 
     /// `candidates` sorted by rank (ties shuffled so equal ranks don't repeat a pattern).
-    public init<R: RandomNumberGenerator>(candidates: [(word: String, rank: Int)], pseudo: [String], using rng: inout R) {
+    /// `avoid`: words shown in recent runs; skipped while enough other candidates remain.
+    public init<R: RandomNumberGenerator>(candidates: [(word: String, rank: Int)], pseudo: [String], avoid: Set<String> = [], using rng: inout R) {
         let c = candidates.shuffled(using: &rng).sorted { $0.rank < $1.rank }
         words = c.map(\.word); ranks = c.map(\.rank); xs = ranks.map { log(Double(max(1, $0))) }
         let b = VocabTestScoring.bounds
@@ -166,7 +170,16 @@ public struct VocabTestRun: Sendable {
             let rs = ranks.filter { (lo...hi).contains($0) }
             bands.append(VocabBand(lo: lo, hi: hi, size: rs.count)); byBand.append(rs)
         }
-        self.bands = bands; ranksByBand = byBand; self.pseudo = pseudo
+        self.bands = bands; ranksByBand = byBand
+        let lowAvoid = Set(avoid.map { $0.lowercased() })
+        self.pseudo = pseudo.filter { !lowAvoid.contains($0.lowercased()) } + pseudo.filter { lowAvoid.contains($0.lowercased()) }
+        gen = Adaptive.Gen(from: &rng)
+        startX = log(Double(Self.startRank)) + Double.random(in: -Adaptive.startJitter...Adaptive.startJitter, using: &rng)
+        pseudoAt = Adaptive.pseudoSchedule(using: &rng)
+        if !lowAvoid.isEmpty {
+            let hit = words.indices.filter { lowAvoid.contains(words[$0].lowercased()) }
+            if hit.count < words.count / 4 { used.formUnion(hit) }
+        }
         appendNext()
     }
 
@@ -195,11 +208,12 @@ public struct VocabTestRun: Sendable {
 
     private mutating func appendNext() {
         let realCount = items.filter { $0.band != nil }.count
-        if realCount > 0, realCount % Self.pseudoEvery == 0, items.last?.band != nil, !pseudo.isEmpty {
+        if pseudoAt.contains(realCount), items.last?.band != nil, !pseudo.isEmpty {
             items.append(VocabTestItem(word: pseudo.removeFirst(), band: nil)); return
         }
-        let target = Adaptive.nextTarget(fit: currentFit(), x0: log(Double(Self.startRank)), xMax: xMax)
-        guard let i = Adaptive.nearest(target, in: xs, used: used) else { stopped = true; return }
+        let fit = currentFit()
+        let target = fit == nil ? startX : Adaptive.nextTarget(fit: fit, x0: log(Double(Self.startRank)), xMax: xMax)
+        guard let i = Adaptive.pick(target, in: xs, used: used, using: &gen) else { stopped = true; return }
         used.insert(i)
         items.append(VocabTestItem(word: words[i], band: bandOf(ranks[i]), rank: ranks[i]))
     }

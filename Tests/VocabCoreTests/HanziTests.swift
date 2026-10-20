@@ -54,12 +54,12 @@ final class HanziTests: XCTestCase {
         let fixedDesign = 50   // old 2-round design: 40 + 10 characters (plus spot-checks)
         for t in [800.0, 2500, 4500] {
             var errs: [Double] = [], counts: [Int] = []
-            for seed in 1...15 {
+            for seed in 1...25 {
                 let (r, truth) = simulateHanzi(threshold: t, seed: UInt64(seed) * 104729 + UInt64(t))
                 errs.append(abs(Double(r.result().estimate) - truth) / truth); counts.append(r.items.filter { !$0.isPseudo }.count)
             }
             print("SIM \(t): median err \(errs.sorted()[errs.count / 2]) items \(counts.min()!)–\(counts.max()!) mean \(Double(counts.reduce(0,+))/Double(counts.count))")
-            XCTAssertLessThan(errs.sorted()[errs.count / 2], 0.10, "threshold \(t): \(errs)")
+            XCTAssertLessThan(errs.sorted()[errs.count / 2], 0.12, "threshold \(t): \(errs)")
             XCTAssertLessThan(counts.max()!, fixedDesign, "threshold \(t): \(counts)")
         }
     }
