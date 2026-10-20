@@ -11,7 +11,7 @@ final class ReviewSession: ObservableObject {
     static let capKey = "reviewDailyNewCap"
     static let introducedKey = "reviewNewIntroduced"
 
-    enum Phase: Equatable { case idle, loading, asking, answered, summary }
+    enum Phase: Equatable { case idle, loading, check, asking, answered, summary }
 
     struct Stats {
         var answered = 0, correct = 0, wrong = 0, retired = 0
@@ -54,10 +54,7 @@ final class ReviewSession: ObservableObject {
         Scheduler.shared = f
     }
 
-    static var dailyNewCap: Int {
-        let v = UserDefaults.standard.object(forKey: capKey) as? Int
-        return max(0, v ?? 20)
-    }
+    static var dailyNewCap: Int { max(0, PlanModel.shared.plan.dailyNew) }
 
     private static var todayKey: String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
@@ -71,9 +68,51 @@ final class ReviewSession: ObservableObject {
         UserDefaults.standard.set([todayKey: introducedToday + 1], forKey: introducedKey)
     }
 
+    /// Word-list words not yet in the wordbook get a temporary negative id; they're written to the
+    /// wordbook (source 词书·…) only when first answered.
+    private var virtualSource: [Int64: ExamList] = [:]
+    /// Words that get a quick 认识吗 first (middle bands of the last vocabulary test).
+    private var quickCheck: Set<Int64> = []
+    private var realID: [Int64: Int64] = [:]
+
     private func plan() -> [WordItem] {
         book.reload()
-        return SessionPlanner.plan(book.items, now: Date(), newCap: Self.dailyNewCap, newIntroducedToday: Self.introducedToday)
+        let now = Date()
+        let p = PlanModel.shared.plan
+        let live = book.items.filter { !Scheduler.isMastered($0.review) }
+        let due = live.filter { !SessionPlanner.isNew($0) && $0.review.due <= now }.sorted { $0.review.due < $1.review.due }
+        let reviews = Array(due.prefix(PlanMath.reviewsToday(plan: p, due: due.count)))
+        let room = PlanMath.newToday(plan: p, due: due.count, introducedToday: Self.introducedToday)
+        virtualSource = [:]; quickCheck = []; realID = [:]
+        guard room > 0 else { return reviews }
+        let picks = PlanModel.shared.drawNew(count: room, liveItems: live)
+        var fresh: [WordItem] = []
+        var next: Int64 = -1
+        let checkWords = PlanModel.shared.quickCheckWords
+        for (w, src) in picks {
+            if let it = book.items.first(where: { $0.word.caseInsensitiveCompare(w) == .orderedSame }) { fresh.append(it); continue }
+            guard case .list(let l) = src else { continue }
+            var it = WordItem(id: next, word: w, definition: WordLists.shared?.shortChinese(w) ?? "", dictionary: "",
+                              context: nil, added: now,
+                              review: ReviewState(state: .new, step: nil, stability: nil, difficulty: nil, intervalDays: 0,
+                                                  repetitions: 0, lapses: 0, due: now, lastReviewed: nil))
+            it.sourceApp = l.sourceApp
+            virtualSource[next] = l
+            if checkWords.contains(w.lowercased()) { quickCheck.insert(next) }
+            fresh.append(it); next -= 1
+        }
+        return reviews + fresh
+    }
+
+    /// Write a word-list word into the wordbook the first time it is studied.
+    private func materialize(_ id: Int64) -> Int64? {
+        if id > 0 { return id }
+        if let r = realID[id] { return r }
+        guard let item = items[id], let l = virtualSource[id], let store = book.store else { return nil }
+        guard let added = try? store.add(word: item.word, definition: item.definition, dictionary: "ECDICT",
+                                         source: WordSource(app: l.sourceApp, title: l.title)) else { return nil }
+        realID[id] = added.id
+        return added.id
     }
 
     /// Counts for the start screen.
@@ -101,6 +140,12 @@ final class ReviewSession: ObservableObject {
     private func loadCurrent() {
         revealed = false; typed = ""; chosen = nil; marks = []; lastRating = nil
         guard let id = queue.current, let item = items[id], let factory else { end(); return }
+        if quickCheck.contains(id) {
+            quickCheck.remove(id)
+            checkWord = item.word
+            phase = .check
+            return
+        }
         phase = .loading
         let prev = previousType
         Task.detached(priority: .userInitiated) {
@@ -127,6 +172,22 @@ final class ReviewSession: ObservableObject {
         if let a = q.audio, AudioPlayer.shared.play(file: a) { return }
         let u = AVSpeechUtterance(string: q.word); u.voice = AVSpeechSynthesisVoice(language: "en-US")
         speech.stopSpeaking(at: .immediate); speech.speak(u)
+    }
+
+    /// The word of the current 认识吗 check.
+    @Published private(set) var checkWord: String?
+
+    /// 认识吗: 认识 → 斩 (written to the wordbook as retired), 不认识 → learn it now.
+    func answerCheck(known: Bool) {
+        guard phase == .check, let id = queue.current else { return }
+        checkWord = nil
+        if known {
+            if let rid = materialize(id) { _ = try? book.store?.retire(id: rid) }
+            queue.retire(); stats.retired += 1
+            if queue.finished { end() } else { loadCurrent() }
+        } else {
+            loadCurrent()
+        }
     }
 
     // MARK: answering
@@ -169,7 +230,10 @@ final class ReviewSession: ObservableObject {
         guard let q = question, let item = items[q.itemID] else { return }
         if SessionPlanner.isNew(item) && !answeredOnce.contains(item.id) { Self.noteIntroduced() }
         answeredOnce.insert(item.id)
-        if let updated = try? book.store?.review(id: item.id, rating: r) { items[item.id] = updated }
+        if let rid = materialize(item.id), var updated = try? book.store?.review(id: rid, rating: r) {
+            updated.id = item.id   // keep the session's key
+            items[item.id] = updated
+        }
         lastRating = r
         stats.answered += 1
         if correct { stats.correct += 1 } else { stats.wrong += 1 }
@@ -186,7 +250,7 @@ final class ReviewSession: ObservableObject {
     /// 斩 / 已掌握: retire the word for good.
     func retire() {
         guard let q = question, phase == .asking || phase == .answered else { return }
-        _ = try? book.store?.retire(id: q.itemID)
+        if let rid = materialize(q.itemID) { _ = try? book.store?.retire(id: rid) }
         if phase == .asking { queue.retire() }
         else { queue.dropCurrentRequeue(q.itemID) }
         stats.retired += 1

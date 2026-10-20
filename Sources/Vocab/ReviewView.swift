@@ -13,6 +13,7 @@ struct ReviewView: View {
             case .summary: SummaryScreen(session: session)
             case .loading: if session.question == nil { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) } else { QuestionScreen(session: session) }
             case .asking, .answered: QuestionScreen(session: session)
+            case .check: CheckScreen(session: session)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -22,7 +23,27 @@ struct ReviewView: View {
 
 private struct StartScreen: View {
     @ObservedObject var session: ReviewSession
+    @ObservedObject var plan = PlanModel.shared
+    @State private var showPlan = false
+    @State private var showTest = false
     var body: some View {
+        content
+            .overlay(alignment: .topTrailing) {
+                HStack(spacing: 8) {
+                    Button { showTest = true } label: { Label("词汇量测试", systemImage: "gauge.with.dots.needle.50percent") }
+                    Button { showPlan = true } label: { Label("计划", systemImage: "calendar") }
+                }
+                .padding(14)
+            }
+            .sheet(isPresented: $showPlan, onDismiss: { session.refreshPreview() }) { PlanSheet() }
+            .sheet(isPresented: $showTest, onDismiss: { session.refreshPreview() }) { VocabTestSheet() }
+            .onAppear {
+                // First visit: set up the plan.
+                if !plan.plan.configured { DispatchQueue.main.async { showPlan = true } }
+            }
+    }
+
+    private var content: some View {
         VStack(spacing: 14) {
             Spacer()
             let p = session.preview
@@ -41,6 +62,26 @@ private struct StartScreen: View {
                     .keyboardShortcut(.defaultAction).controlSize(.large).padding(.top, 6)
                 Text("1–4 选择 · 空格 翻面 · ↩ 提交 / 继续 · ⌘K 斩").font(.caption).foregroundStyle(.tertiary)
             }
+            Spacer()
+        }
+    }
+}
+
+/// 认识吗: a middle-band word from the vocabulary test, before it is learned.
+private struct CheckScreen: View {
+    @ObservedObject var session: ReviewSession
+    var body: some View {
+        VStack(spacing: 18) {
+            Spacer()
+            Text(session.checkWord ?? "").font(.system(size: 40, weight: .semibold, design: .serif))
+            Text("认识这个词吗？").foregroundStyle(.secondary)
+            HStack(spacing: 16) {
+                Button { session.answerCheck(known: false) } label: { Text("不认识，学一下").frame(width: 130) }
+                    .controlSize(.large).keyboardShortcut(.leftArrow, modifiers: [])
+                Button { session.answerCheck(known: true) } label: { Text("认识，斩").frame(width: 130) }
+                    .controlSize(.large).keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(.borderedProminent)
+            }
+            Text("← 不认识 · → 认识").font(.caption).foregroundStyle(.tertiary)
             Spacer()
         }
     }

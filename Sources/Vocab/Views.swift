@@ -339,7 +339,7 @@ struct EntryWebView: NSViewRepresentable {
 
 struct SettingsView: View {
     @EnvironmentObject var settings: SettingsModel
-    @AppStorage(ReviewSession.capKey) private var dailyNewCap = 20
+    @ObservedObject private var planModel = PlanModel.shared
     @AppStorage(ReviewSession.retentionKey) private var retention = 0.9
     @AppStorage(ReviewSession.learningKey) private var learningSteps = "1m 10m"
     @AppStorage(ReviewSession.relearningKey) private var relearningSteps = "10m"
@@ -368,8 +368,8 @@ struct SettingsView: View {
                     if let e = settings.lastError { Text(e).foregroundStyle(.red).font(.caption) }
                 }
                 Section("背单词") {
-                    Stepper(value: $dailyNewCap, in: 0...200, step: 5) {
-                        Text("每日新词上限：\(dailyNewCap)")
+                    Stepper(value: $planModel.plan.dailyNew, in: 0...200, step: 5) {
+                        Text("每日新词上限：\(planModel.plan.dailyNew)")
                     }
                     Text("每次先复习到期的单词，再学新词；当天学过的新词计入上限。").font(.caption).foregroundStyle(.secondary)
                     LabeledContent("目标记忆率") {
