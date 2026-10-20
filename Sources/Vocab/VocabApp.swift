@@ -15,10 +15,11 @@ struct VocabApp: App {
                 .environmentObject(lookup)
                 .environmentObject(book)
                 .environmentObject(settings)
-                .frame(minWidth: 640, minHeight: 480)
+                .frame(minWidth: 680, minHeight: 520)
                 .modifier(SettingsOpener())
         }
         .defaultSize(width: 860, height: 680)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("新建生词本…") { book.promptNewBook() }.keyboardShortcut("n", modifiers: [.command, .shift])

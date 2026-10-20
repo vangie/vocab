@@ -12,10 +12,10 @@ struct ReviewView: View {
         Group {
             switch session.phase {
             case .idle: StartScreen(session: session)
-            case .summary: SummaryScreen(session: session)
+            case .summary: ScrollIfShort { SummaryScreen(session: session) }
             case .loading: if session.question == nil { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) } else { QuestionScreen(session: session) }
             case .asking, .answered: QuestionScreen(session: session)
-            case .check: CheckScreen(session: session)
+            case .check: ScrollIfShort { CheckScreen(session: session) }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -46,7 +46,7 @@ private struct StartScreen: View {
             // Corner tools: a row of its own (not an overlay), so it never covers the rings.
             HStack { Spacer(); TestLinks() }
                 .padding(.horizontal, 14).padding(.top, 10)
-            content
+            ScrollIfShort { content }
         }
     }
 
@@ -128,15 +128,20 @@ private struct QuestionScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Header and the 继续 footer stay pinned; only the question scrolls when the window is short.
             header
-            Spacer(minLength: 16)
-            if let q = session.question {
-                content(q).frame(maxWidth: 560).padding(.horizontal, 32)
-                    .id(q.id)
-                    .contentShape(Rectangle())
-                    .onHover { session.autoPaused = $0 }
+            ScrollIfShort {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 16)
+                    if let q = session.question {
+                        content(q).frame(maxWidth: 560).padding(.horizontal, 32)
+                            .id(q.id)
+                            .contentShape(Rectangle())
+                            .onHover { session.autoPaused = $0 }
+                    }
+                    Spacer(minLength: 16)
+                }
             }
-            Spacer(minLength: 16)
             footer
         }
     }
@@ -697,5 +702,20 @@ enum LatinBookIcon {
         img.isTemplate = true
         img.accessibilityDescription = "测词汇量"
         return img
+    }
+}
+
+
+/// Centres its content in the available height, and scrolls instead of overflowing (which would
+/// push views up under the toolbar and clip the bottom) when the window is too short.
+struct ScrollIfShort<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        GeometryReader { g in
+            ScrollView(.vertical) {
+                content().frame(maxWidth: .infinity, minHeight: g.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
     }
 }
