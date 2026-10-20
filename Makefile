@@ -38,8 +38,10 @@ install: app    ## Build release and install to $(INSTALL_DIR)/Vocab.app (data i
 	-osascript -e 'tell application id "io.github.vangie.vocab" to quit' >/dev/null 2>&1
 	@for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -x Vocab >/dev/null || break; sleep 0.5; done
 	-pkill -x Vocab
+	rm -rf "$(INSTALL_DIR)/.Vocab.app.new"
+	ditto build/Vocab.app "$(INSTALL_DIR)/.Vocab.app.new"
 	rm -rf "$(INSTALL_DIR)/Vocab.app"
-	ditto build/Vocab.app "$(INSTALL_DIR)/Vocab.app"
+	mv "$(INSTALL_DIR)/.Vocab.app.new" "$(INSTALL_DIR)/Vocab.app"
 	-xattr -dr com.apple.quarantine "$(INSTALL_DIR)/Vocab.app"
 	$(LSREGISTER) -f "$(INSTALL_DIR)/Vocab.app"
 	open "$(INSTALL_DIR)/Vocab.app"

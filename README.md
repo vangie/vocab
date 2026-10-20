@@ -83,3 +83,14 @@ Put your own 1024px PNG at `Local/AppIcon.png` (gitignored) to override the icon
 
 Ad-hoc signatures change on every build, which invalidates the Accessibility grant. Run `scripts/setup-signing.sh` once: it creates a self-signed "Vocab Local Signing" identity in a dedicated keychain (login keychain untouched, no prompts), and `make app` then signs with it. Grant Accessibility once more; later rebuilds keep the grant. `VOCAB_SIGN_IDENTITY` overrides the identity.
 
+
+
+## Install / deploy
+
+    make install
+
+Builds a release, signs it (local signing identity if set up by `scripts/setup-signing.sh`, otherwise
+ad-hoc), quits the running app, replaces `/Applications/Vocab.app` (`INSTALL_DIR=~/Applications` to
+override), clears quarantine, registers it with LaunchServices and relaunches. Safe to run repeatedly;
+data in `~/Library/Application Support/Vocab` is never touched. With an ad-hoc signature macOS may ask
+for Accessibility permission again after an install — the app's permission guide opens when needed.
