@@ -201,16 +201,29 @@ struct PlanSheet: View {
                     Text("新词按比例轮流抽取；某个来源抽完后，它的份额分给其他来源。每个词只学一次，在任何地方学过或斩过的都会跳过。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Section("每日") {
-                    Stepper(value: $model.plan.dailyNew, in: 0...200, step: 5) { LabeledContent("新词上限", value: "\(model.plan.dailyNew)") }
-                    Stepper(value: Binding(get: { model.plan.dailyReview }, set: { model.plan.dailyReview = $0; model.plan.reviewEdited = true }), in: 10...1000, step: 10) { LabeledContent("复习上限", value: "\(model.plan.dailyReview)") }
-                    Text("先复习，再学新词。今天的新词 = min(新词上限, 复习上限 − 到期数)。").font(.caption).foregroundStyle(.secondary)
-                    Toggle("目标日期", isOn: Binding(get: { model.plan.targetDate != nil },
-                                                  set: { model.plan.targetDate = $0 ? Calendar.current.date(byAdding: .month, value: 3, to: Date()) : nil }))
-                    if let t = model.plan.targetDate {
-                        DatePicker("完成日期", selection: Binding(get: { t }, set: { model.plan.targetDate = $0 }), in: Date()..., displayedComponents: .date)
+                Section("目标") {
+                    Picker("目标", selection: Binding(get: { model.plan.targetDate == nil ? "none" : (model.plan.targetPreset ?? .custom).rawValue },
+                                                     set: { v in PlanMath.setTarget(&model.plan, preset: TargetPreset(rawValue: v), remaining: remaining, now: Date()) })) {
+                        Text("不设").tag("none")
+                        ForEach(TargetPreset.allCases) { t in Text(t.title).tag(t.rawValue) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    if model.plan.targetDate != nil, model.plan.targetPreset == .custom || model.plan.targetPreset == nil {
+                        DatePicker("完成日期", selection: Binding(get: { model.plan.targetDate ?? Date() },
+                                                              set: { PlanMath.setTarget(&model.plan, preset: .custom, date: $0, remaining: remaining, now: Date()) }),
+                                   in: (Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date())..., displayedComponents: .date)
                     }
                     projection
+                }
+                Section("每日") {
+                    Stepper(value: Binding(get: { model.plan.dailyNew },
+                                           set: { model.plan.dailyNew = $0; PlanMath.limitsChanged(&model.plan, remaining: remaining, due: due, now: Date()) }),
+                            in: 0...PlanMath.newBounds.upperBound, step: 5) { LabeledContent("新词上限", value: "\(model.plan.dailyNew)") }
+                    Stepper(value: Binding(get: { model.plan.dailyReview },
+                                           set: { model.plan.dailyReview = $0; model.plan.reviewEdited = true
+                                                  PlanMath.limitsChanged(&model.plan, remaining: remaining, due: due, now: Date()) }),
+                            in: 10...1000, step: 10) { LabeledContent("复习上限", value: "\(model.plan.dailyReview)") }
+                    Text("先复习，再学新词。今天的新词 = min(新词上限, 复习上限 − 到期数)。").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("词汇量") {
                     if let r = model.results.first {
@@ -251,16 +264,27 @@ struct PlanSheet: View {
 
     private func refresh() { remaining = model.remainingNew() }
 
+    private var due: Int { WordbookModel.shared.dueItems.filter { !SessionPlanner.isNew($0) }.count }
+
     private var projection: some View {
-        let p = PlanMath.projection(remaining: remaining, plan: model.plan)
-        return VStack(alignment: .leading, spacing: 2) {
-            if remaining == 0 { Text("所选来源没有新词了").foregroundStyle(.secondary) }
-            else if let f = p.finish {
-                Text("剩余 \(remaining) 个新词，按每天 \(model.plan.dailyNew) 个约需 \(p.days) 天，预计 \(f.formatted(date: .abbreviated, time: .omitted)) 学完")
-            } else { Text("剩余 \(remaining) 个新词") }
-            if let need = p.neededPerDay {
-                Text(need <= model.plan.dailyNew ? "可以在目标日期前学完" : "要在目标日期前学完，每天需要约 \(need) 个新词")
-                    .foregroundStyle(need <= model.plan.dailyNew ? Color.secondary : Color.orange)
+        let p = model.plan
+        let eff = PlanMath.effectiveNew(plan: p, due: due)
+        let end = PlanMath.projectedDate(remaining: remaining, plan: p, due: due, now: Date())
+        return VStack(alignment: .leading, spacing: 4) {
+            LabeledContent("剩余新词", value: "\(remaining) 个")
+            if remaining == 0 {
+                Text("所选来源没有新词了").foregroundStyle(.secondary)
+            } else if let end {
+                LabeledContent("预计学完", value: end.formatted(date: .long, time: .omitted))
+                Text("每天 \(eff) 个新词").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("复习上限已被到期的单词占满，暂时不学新词").foregroundStyle(.secondary)
+            }
+            if eff < p.dailyNew, end != nil {
+                Text("复习上限只留出 \(eff) 个新词的位置，日期按此推算").font(.caption).foregroundStyle(.secondary)
+            }
+            if p.dailyNew > PlanMath.heavyDaily {
+                Text("每天 \(p.dailyNew) 个新词偏多，之后的复习量也会很大，可以考虑把目标放宽一些。").font(.caption).foregroundStyle(.orange)
             }
         }
         .font(.callout)

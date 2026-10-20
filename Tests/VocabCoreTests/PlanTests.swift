@@ -65,6 +65,42 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(StudyPlan.self, from: JSONEncoder().encode(mine)).dailyReview, 200)
     }
 
+    func testTargetLinkage() {
+        let cal = Calendar(identifier: .gregorian)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = cal.startOfDay(for: now)
+        var p = StudyPlan(); p.dailyReview = 200
+        // Target → daily new.
+        PlanMath.setTarget(&p, preset: .quarter, remaining: 4500, now: now, calendar: cal)
+        XCTAssertEqual(p.dailyNew, 50)
+        XCTAssertEqual(p.targetDate, cal.date(byAdding: .day, value: 90, to: today))
+        PlanMath.setTarget(&p, preset: .month, remaining: 100, now: now, calendar: cal)
+        XCTAssertEqual(p.dailyNew, 4)                                             // ceil(100/30)
+        PlanMath.setTarget(&p, preset: .month, remaining: 90_000, now: now, calendar: cal)
+        XCTAssertEqual(p.dailyNew, 500)                                           // clamped
+        // Daily new → date.
+        PlanMath.setTarget(&p, preset: .quarter, remaining: 4500, now: now, calendar: cal)
+        p.dailyNew = 25
+        PlanMath.limitsChanged(&p, remaining: 4500, due: 0, now: now, calendar: cal)
+        XCTAssertEqual(p.targetDate, cal.date(byAdding: .day, value: 180, to: today))
+        XCTAssertEqual(p.targetPreset, .half)
+        // Review limit constrains the effective new words → date moves out.
+        p.dailyReview = 30
+        PlanMath.limitsChanged(&p, remaining: 4500, due: 15, now: now, calendar: cal)
+        XCTAssertEqual(PlanMath.effectiveNew(plan: p, due: 15), 15)
+        XCTAssertEqual(p.targetDate, cal.date(byAdding: .day, value: 300, to: today))
+        XCTAssertEqual(p.targetPreset, .custom)
+        // Custom date.
+        let d = cal.date(byAdding: .day, value: 45, to: today)!
+        PlanMath.setTarget(&p, preset: .custom, date: d, remaining: 4500, now: now, calendar: cal)
+        XCTAssertEqual(p.dailyNew, 100); XCTAssertEqual(p.targetDate, d)
+        // No target: limits don't touch a date.
+        PlanMath.setTarget(&p, preset: nil, remaining: 4500, now: now, calendar: cal)
+        PlanMath.limitsChanged(&p, remaining: 4500, due: 0, now: now, calendar: cal)
+        XCTAssertNil(p.targetDate)
+        XCTAssertNil(PlanMath.projectedDate(remaining: 10, plan: p, due: 999, now: now, calendar: cal))
+    }
+
     func testRatios() {
         XCTAssertEqual(PlanRatios.equal(3), [35, 35, 30])
         XCTAssertEqual(PlanRatios.equal(1), [100])

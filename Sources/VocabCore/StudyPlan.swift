@@ -22,13 +22,15 @@ public struct StudyPlan: Codable, Equatable, Sendable {
     /// The user changed the review limit (so a stored 200 is theirs, not the old default).
     public var reviewEdited = false
     public var targetDate: Date? = nil
+    /// Which quick pick set the target (nil = none / custom date).
+    public var targetPreset: TargetPreset? = nil
     /// Wordbook words are drawn before word-list words.
     public var wordbookFirst = true
     /// Set once the user has seen the plan sheet.
     public var configured = false
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case sources, dailyNew, dailyReview, reviewEdited, targetDate, wordbookFirst, configured }
+    enum CodingKeys: String, CodingKey { case sources, dailyNew, dailyReview, reviewEdited, targetDate, targetPreset, wordbookFirst, configured }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         sources = try c.decodeIfPresent([PlanSource].self, forKey: .sources) ?? []
@@ -36,6 +38,7 @@ public struct StudyPlan: Codable, Equatable, Sendable {
         dailyReview = try c.decodeIfPresent(Int.self, forKey: .dailyReview) ?? 20
         reviewEdited = try c.decodeIfPresent(Bool.self, forKey: .reviewEdited) ?? false
         targetDate = try c.decodeIfPresent(Date.self, forKey: .targetDate)
+        targetPreset = try c.decodeIfPresent(TargetPreset.self, forKey: .targetPreset)
         wordbookFirst = try c.decodeIfPresent(Bool.self, forKey: .wordbookFirst) ?? true
         configured = try c.decodeIfPresent(Bool.self, forKey: .configured) ?? false
         // Old default review limit (200) that was never touched → the new default.
@@ -49,7 +52,66 @@ public struct StudyPlan: Codable, Equatable, Sendable {
     public func save(_ d: UserDefaults = .standard) { d.set(try? JSONEncoder().encode(self), forKey: Self.defaultsKey) }
 }
 
+/// 目标 quick picks.
+public enum TargetPreset: String, Codable, CaseIterable, Sendable, Identifiable {
+    case month, quarter, half, year, custom
+    public var id: String { rawValue }
+    public var days: Int? {
+        switch self { case .month: 30; case .quarter: 90; case .half: 180; case .year: 365; case .custom: nil }
+    }
+    public var title: String {
+        switch self { case .month: "1个月"; case .quarter: "3个月"; case .half: "半年"; case .year: "1年"; case .custom: "自定义" }
+    }
+}
+
 public enum PlanMath {
+    public static let newBounds = 1...500
+    /// Above this the sheet shows a gentle note.
+    public static let heavyDaily = 100
+
+    /// New words actually learned per day: the new limit, capped by what the review limit leaves.
+    public static func effectiveNew(plan: StudyPlan, due: Int) -> Int { max(0, min(plan.dailyNew, plan.dailyReview - due)) }
+
+    /// Daily new words needed to finish `remaining` in `days` (clamped).
+    public static func dailyNeeded(remaining: Int, days: Int) -> Int {
+        let n = Int((Double(remaining) / Double(max(1, days))).rounded(.up))
+        return min(max(n, newBounds.lowerBound), newBounds.upperBound)
+    }
+
+    /// When the current settings finish the remaining words; nil if nothing gets learned.
+    public static func projectedDate(remaining: Int, plan: StudyPlan, due: Int, now: Date, calendar: Calendar = .current) -> Date? {
+        let per = effectiveNew(plan: plan, due: due)
+        guard per > 0 else { return nil }
+        let days = max(1, Int((Double(remaining) / Double(per)).rounded(.up)))
+        return calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now))
+    }
+
+    /// Choose a target: the date moves, the daily new limit follows.
+    public static func setTarget(_ p: inout StudyPlan, preset: TargetPreset?, date: Date? = nil, remaining: Int, now: Date, calendar: Calendar = .current) {
+        guard let preset else { p.targetDate = nil; p.targetPreset = nil; return }
+        let today = calendar.startOfDay(for: now)
+        let target: Date
+        if let d = preset.days { target = calendar.date(byAdding: .day, value: d, to: today)! }
+        else { target = calendar.startOfDay(for: max(date ?? p.targetDate ?? calendar.date(byAdding: .day, value: 30, to: today)!,
+                                                      calendar.date(byAdding: .day, value: 1, to: today)!)) }
+        let days = max(1, calendar.dateComponents([.day], from: today, to: target).day ?? 1)
+        p.targetPreset = preset
+        p.targetDate = target
+        if remaining > 0 { p.dailyNew = dailyNeeded(remaining: remaining, days: days) }
+    }
+
+    /// The daily new or review limit changed: the target date follows the projection.
+    public static func limitsChanged(_ p: inout StudyPlan, remaining: Int, due: Int, now: Date, calendar: Calendar = .current) {
+        p.dailyNew = min(max(p.dailyNew, 0), newBounds.upperBound)
+        guard p.targetDate != nil else { return }
+        guard let d = projectedDate(remaining: remaining, plan: p, due: due, now: now, calendar: calendar) else { return }
+        if d != p.targetDate {
+            p.targetDate = d
+            let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: d).day ?? 0
+            p.targetPreset = TargetPreset.allCases.first { $0.days == days } ?? .custom
+        }
+    }
+
     /// New words for today: min(new limit, review limit − due), minus what was already started today.
     public static func newToday(plan: StudyPlan, due: Int, introducedToday: Int) -> Int {
         max(0, min(plan.dailyNew - introducedToday, plan.dailyReview - due))

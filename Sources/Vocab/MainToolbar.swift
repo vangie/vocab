@@ -36,7 +36,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     private let fontID = NSToolbarItem.Identifier("vocab.font")
     private let searchID = NSToolbarItem.Identifier("vocab.search")
     private let newBookID = NSToolbarItem.Identifier("vocab.newBook")
-    private let studyID = NSToolbarItem.Identifier("vocab.study")
+    private let studyID = NSToolbarItem.Identifier("vocab.plan")
 
     private weak var window: NSWindow?
     private var navGroup: NSToolbarItemGroup?
