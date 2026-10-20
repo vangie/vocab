@@ -262,6 +262,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             s.searchField.placeholderString = "搜索"
             s.searchField.delegate = self
             s.searchField.sendsSearchStringImmediately = true
+            // The ⓧ cancel button clears via the action, not always via controlTextDidChange.
+            s.searchField.target = self
+            s.searchField.action = #selector(searchFieldAction(_:))
             s.preferredWidthForSearchField = 200
             s.resignsFirstResponderWithCancel = false
             s.label = "搜索"
@@ -308,6 +311,16 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         case .lookup: lookup.query = f.stringValue
         }
     }
+
+    @objc private func searchFieldAction(_ f: NSSearchField) {
+        if let tv = f.currentEditor() as? NSTextView, tv.hasMarkedText() { return }
+        switch state.mode {
+        case .words: if state.wordFilter != f.stringValue { state.wordFilter = f.stringValue }
+        case .lookup: if lookup.query != f.stringValue { lookup.query = f.stringValue }
+        }
+    }
+
+    func searchFieldDidEndSearching(_ f: NSSearchField) { searchFieldAction(f) }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
         guard state.mode == .lookup else { return false }

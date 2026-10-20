@@ -49,8 +49,9 @@ final class LookupModel: ObservableObject {
     @Published private(set) var nav: [String] = []
     @Published private(set) var navIndex = -1
     /// Recent lookups for the sidebar (most recent first, persisted).
-    @Published private(set) var recents: [String] = UserDefaults.standard.stringArray(forKey: "recentLookups") ?? []
-    private var recentList = RecentList(UserDefaults.standard.stringArray(forKey: "recentLookups") ?? [])
+    @Published private(set) var history = LookupHistory.load()
+    var recents: [String] { history.words }
+    private var dwellTask: Task<Void, Never>?
     /// Text zoom for entries (小/大, ⌘- / ⌘+), persisted.
     @Published var zoom: Double = UserDefaults.standard.object(forKey: "pageZoom") as? Double ?? 1.0 {
         didSet { UserDefaults.standard.set(zoom, forKey: "pageZoom") }
@@ -75,12 +76,15 @@ final class LookupModel: ObservableObject {
 
     /// Called as the user types: debounce, then refresh the sidebar and show the top match.
     func queryChanged() {
-        suggestTask?.cancel()
-        recentList.refresh(); recents = recentList.displayed
+        suggestTask?.cancel(); dwellTask?.cancel()
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // Drop the previous query's list right away; the new one arrives after the debounce.
         if suggestionsQuery != q { suggestions = []; suggestionsQuery = nil }
-        guard !q.isEmpty else { suggestions = []; selection = nil; entries = []; searchedTerm = ""; return }
+        guard !q.isEmpty else {
+            // Also stop an in-flight lookup, or it would repaint the old word under an empty field.
+            showTask?.cancel(); wikiTask?.cancel()
+            suggestions = []; selection = nil; entries = []; searchedTerm = ""; return
+        }
         suggestTask = Task {
             try? await Task.sleep(nanoseconds: 150_000_000)
             if Task.isCancelled { return }
@@ -95,6 +99,12 @@ final class LookupModel: ObservableObject {
             } else {
                 self.selection = nil
                 self.show(q, record: false)
+            }
+            // A typed result that stays on screen > 1 s counts as a committed lookup.
+            self.dwellTask = Task {
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if Task.isCancelled || q != self.query.trimmingCharacters(in: .whitespacesAndNewlines) { return }
+                if !self.searchedTerm.isEmpty { self.recordHistory(self.searchedTerm) }
             }
         }
     }
@@ -147,6 +157,8 @@ final class LookupModel: ObservableObject {
                 if self.entryCacheOrder.count > 50 { self.entryCache[self.entryCacheOrder.removeFirst()] = nil }
             }
             if Task.isCancelled { return }
+            // The field was cleared meanwhile: never show an entry under an empty search field.
+            if self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
             VocabLog.log("lookup \(word): local \(r.entries.count) entries in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
             let term = r.entries.isEmpty ? word : r.word
             var shown = r.entries
@@ -200,12 +212,12 @@ final class LookupModel: ObservableObject {
         if navIndex >= 0, navIndex < nav.count, nav[navIndex] == t { return }
         if navIndex < nav.count - 1 { nav.removeSubrange((navIndex + 1)...) }
         nav.append(t); navIndex = nav.count - 1
-        // Stored now, displayed order stays frozen until the next typed query.
-        recentList.record(t)
-        UserDefaults.standard.set(recentList.stored, forKey: "recentLookups")
+        recordHistory(t)
     }
 
-    func clearRecents() { recentList.clear(); recents = []; UserDefaults.standard.removeObject(forKey: "recentLookups") }
+    func recordHistory(_ t: String) { history.record(t); history.save() }
+    func removeHistory(_ w: String) { history.remove(w); history.save() }
+    func clearRecents() { history.clear(); history.save() }
 
     func select(_ id: Suggestion.ID?) {
         selection = id

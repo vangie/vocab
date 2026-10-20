@@ -48,7 +48,7 @@ struct MainView: View {
         .onChange(of: lookup.query) { _, q in
             // Like Dictionary.app: empty field collapses the sidebar, typing brings it back.
             if state.mode == .lookup {
-                let want: NavigationSplitViewVisibility = q.trimmingCharacters(in: .whitespaces).isEmpty ? .detailOnly : .all
+                let want: NavigationSplitViewVisibility = q.trimmingCharacters(in: .whitespaces).isEmpty && lookup.recents.isEmpty ? .detailOnly : .all
                 if columns != want { withAnimation { columns = want } }
             }
             if lookup.suppressQueryChange { lookup.suppressQueryChange = false; return }
@@ -62,11 +62,15 @@ struct MainView: View {
             // 记词 opens on 今日 (rings + 开始), with the wordbook sidebar.
             if m == .words { state.wordGroup = .today }
             columns = m == .words ? .all
-                : m == .lookup && lookup.query.trimmingCharacters(in: .whitespaces).isEmpty ? .detailOnly : .all
+                : m == .lookup && lookup.query.trimmingCharacters(in: .whitespaces).isEmpty && lookup.recents.isEmpty ? .detailOnly : .all
             sidebarSelection = nil
         }
-        .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NotificationCenter.default.post(name: .vocabFocusSearch, object: nil) } }
+        .onAppear {
+            if state.mode == .lookup, lookup.query.trimmingCharacters(in: .whitespaces).isEmpty, !lookup.recents.isEmpty { columns = .all }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NotificationCenter.default.post(name: .vocabFocusSearch, object: nil) } }
     }
+
+    @State private var confirmClearHistory = false
 
     private var showingSuggestions: Bool {
         !lookup.query.trimmingCharacters(in: .whitespaces).isEmpty && !lookup.suggestions.isEmpty
@@ -105,16 +109,32 @@ struct MainView: View {
                 case .recents(let words):
                     // Like Dictionary.app: plain history, no header; the current word is a bold pill.
                     ForEach(words, id: \.self) { w in
-                        Text(w).lineLimit(1)
-                            .font(.system(size: 15, weight: sidebarSelection == .recent(w) ? .bold : .regular))
+                        HistoryRow(word: w, date: lookup.history.entries.first { $0.word == w }?.date,
+                                   bold: sidebarSelection == .recent(w)) { lookup.removeHistory(w) }
                             .tag(SidebarItem.recent(w))
+                            .contextMenu {
+                                Button("删除") { lookup.removeHistory(w) }
+                                Button("清空历史…") { confirmClearHistory = true }
+                            }
                     }
                 }
             }
             .listStyle(.sidebar)
-            .contextMenu {
-                if !lookup.recents.isEmpty { Button("清除最近查询") { lookup.clearRecents() } }
+            .safeAreaInset(edge: .bottom) {
+                if lookup.query.trimmingCharacters(in: .whitespaces).isEmpty, !lookup.recents.isEmpty {
+                    HStack {
+                        Spacer()
+                        Button("清空历史") { confirmClearHistory = true }
+                            .buttonStyle(.borderless).font(.callout).foregroundStyle(.secondary)
+                            .focusable(false)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                }
             }
+            .confirmationDialog("清空全部查询历史？", isPresented: $confirmClearHistory) {
+                Button("清空历史", role: .destructive) { lookup.clearRecents() }
+                Button("取消", role: .cancel) {}
+            } message: { Text("此操作无法撤销。") }
         }
     }
 
@@ -412,4 +432,47 @@ struct SettingsView: View {
 @MainActor final class EntryScroller: ObservableObject {
     weak var webView: WKWebView?
     func scroll(to i: Int) { webView?.evaluateJavaScript("window.vocabScrollTo && window.vocabScrollTo(\(i))") }
+}
+
+
+/// A 词典 history row: word, time-ago, and a × on hover (not focusable, so no focus ring).
+struct HistoryRow: View {
+    let word: String
+    let date: Date?
+    let bold: Bool
+    let onDelete: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(word).lineLimit(1).truncationMode(.tail)
+                .font(.system(size: 15, weight: bold ? .bold : .regular))
+                .layoutPriority(1)
+            Spacer(minLength: 4)
+            if hover {
+                Button(action: onDelete) { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .focusable(false).help("从历史中删除")
+            } else if let date {
+                TimelineView(.periodic(from: .now, by: 60)) { ctx in
+                    Text(Self.ago(date, now: ctx.date)).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
+        .help(word)
+    }
+
+    static func ago(_ d: Date, now: Date) -> String {
+        let s = max(0, now.timeIntervalSince(d))
+        if s < 60 { return "刚刚" }
+        if s < 3600 { return "\(Int(s / 60)) 分钟前" }
+        if s < 86400 { return "\(Int(s / 3600)) 小时前" }
+        if s < 86400 * 7 { return "\(Int(s / 86400)) 天前" }
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = Calendar.current.isDate(d, equalTo: now, toGranularity: .year) ? "M月d日" : "yyyy年M月d日"
+        return f.string(from: d)
+    }
 }
