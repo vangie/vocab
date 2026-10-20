@@ -31,6 +31,18 @@ enum WordbookScope: String, CaseIterable, Identifiable {
 }
 
 extension WordItem {
+    /// 来源 column: 词书·高考 for word-list words, else the app (and site) the word was met in.
+    var sourceDisplay: String {
+        let app = sourceApp ?? ""
+        if app.hasPrefix("词书·") { return app }
+        let host = sourceURL.flatMap(URL.init(string:))?.host?.replacingOccurrences(of: "www.", with: "")
+        switch (app.isEmpty, host) {
+        case (false, let h?): return "\(app) · \(h)"
+        case (false, nil): return app
+        case (true, let h?): return h
+        default: return sourceTitle ?? ""
+        }
+    }
     /// Sidebar 来源 group: the app the word came from.
     var sourceGroup: String { sourceApp?.isEmpty == false ? sourceApp! : "其他" }
 }
@@ -211,6 +223,18 @@ struct WordbookSidebar: View {
                     .badge(session.preview.reviews + session.preview.new)
                     .tag(WordGroup.today)
             }
+            Section("学习记录") {
+                ForEach([Familiarity.learning, .familiar, .retired], id: \.self) { f in
+                    Label {
+                        Text(WordbookView.levelTitle(f))
+                    } icon: {
+                        if f == .retired { CleaverIcon.swiftUI } else { Image(systemName: f == .learning ? "graduationcap" : "checkmark.seal") }
+                    }
+                        .badge(book.items.filter { $0.familiarity == f }.count)
+                        .tag(WordGroup.level(f))
+                        .help(f == .familiar ? "记忆稳定度 ≥ 21 天" : "")
+                }
+            }
             Section("生词本") {
                 Label("所有单词", systemImage: "tray.full").badge(book.items.count).tag(WordGroup.all)
                 ForEach(book.books) { b in
@@ -228,33 +252,10 @@ struct WordbookSidebar: View {
                         }
                 }
             }
-            Section("学习记录") {
-                ForEach([Familiarity.learning, .familiar, .retired], id: \.self) { f in
-                    Label(WordbookView.levelTitle(f), systemImage: f == .learning ? "graduationcap" : f == .familiar ? "checkmark.seal" : "scissors")
-                        .badge(book.items.filter { $0.familiarity == f }.count)
-                        .tag(WordGroup.level(f))
-                        .help(f == .familiar ? "记忆稳定度 ≥ 21 天" : "")
-                }
-            }
-            if !book.studiedLists.isEmpty {
-                Section("词书") {
-                    ForEach(book.studiedLists, id: \.list) { e in
-                        Label(e.list.title, systemImage: "text.book.closed").badge(e.count).tag(WordGroup.list(e.list))
-                            .help("从词书背过的词（不在生词本里）")
-                    }
-                }
-            }
             if !book.tags.isEmpty {
                 Section("标签") {
                     ForEach(book.tags, id: \.tag) { t in
                         Label(t.tag, systemImage: "tag").badge(t.count).tag(WordGroup.tag(t.tag))
-                    }
-                }
-            }
-            if !book.sources.isEmpty {
-                Section("来源") {
-                    ForEach(book.sources, id: \.name) { s in
-                        Label(s.name, systemImage: icon(s.name)).badge(s.count).tag(WordGroup.source(s.name))
                     }
                 }
             }
@@ -435,6 +436,15 @@ struct WordTable: NSViewRepresentable {
             tv.addTableColumn(c)
         }
         tv.autosaveTableColumns = true
+        // Header context menu: show / hide columns (the word column always stays).
+        let header = NSMenu()
+        for c in tv.tableColumns where c.identifier.rawValue != "word" {
+            let mi = NSMenuItem(title: c.title, action: #selector(Coordinator.toggleColumn(_:)), keyEquivalent: "")
+            mi.target = context.coordinator; mi.representedObject = c
+            header.addItem(mi)
+        }
+        header.delegate = context.coordinator
+        tv.headerView?.menu = header
         tv.delegate = context.coordinator
         tv.dataSource = context.coordinator
         tv.target = context.coordinator
@@ -487,7 +497,7 @@ struct WordTable: NSViewRepresentable {
                 let r: ComparisonResult
                 switch k {
                 case "definition": r = a.definition.localizedStandardCompare(b.definition)
-                case "source": r = a.sourceLabel.localizedStandardCompare(b.sourceLabel)
+                case "source": r = a.sourceDisplay.localizedStandardCompare(b.sourceDisplay)
                 case "familiarity": r = a.familiarity.rawValue == b.familiarity.rawValue ? .orderedSame : a.familiarity.rawValue < b.familiarity.rawValue ? .orderedAscending : .orderedDescending
                 case "added": r = a.added == b.added ? .orderedSame : a.added < b.added ? .orderedAscending : .orderedDescending
                 case "due": r = a.review.due == b.review.due ? .orderedSame : a.review.due < b.review.due ? .orderedAscending : .orderedDescending
@@ -533,7 +543,7 @@ struct WordTable: NSViewRepresentable {
             let w = sorted[row]
             let id = col.identifier.rawValue
             if id == "source", let s = w.sourceURL, let url = URL(string: s) {
-                let b = NSButton(title: w.sourceLabel, target: self, action: #selector(openSource(_:)))
+                let b = NSButton(title: w.sourceDisplay, target: self, action: #selector(openSource(_:)))
                 b.isBordered = false; b.bezelStyle = .inline
                 b.contentTintColor = .linkColor
                 b.alignment = .left
@@ -562,7 +572,11 @@ struct WordTable: NSViewRepresentable {
                 t.stringValue = w.word; t.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
                 if let l = w.lemma { t.toolTip = "原形：\(l)" }
             case "definition": t.stringValue = w.definition.replacingOccurrences(of: "\n", with: " "); t.toolTip = w.definition
-            case "source": t.stringValue = w.sourceLabel; t.textColor = .secondaryLabelColor
+            case "source":
+                let d = w.sourceDisplay
+                t.stringValue = d.isEmpty ? "未知" : d
+                t.textColor = d.isEmpty ? .tertiaryLabelColor : .secondaryLabelColor
+                t.toolTip = w.sourceTitle
             case "familiarity": t.stringValue = w.familiarity.title; t.textColor = .secondaryLabelColor
             case "added": t.stringValue = w.added.formatted(date: .numeric, time: .omitted)
             case "due":
@@ -594,7 +608,15 @@ struct WordTable: NSViewRepresentable {
             return Set(tv.selectedRowIndexes.compactMap { $0 < sorted.count ? sorted[$0].id : nil })
         }
 
+        @objc func toggleColumn(_ sender: NSMenuItem) {
+            (sender.representedObject as? NSTableColumn)?.isHidden.toggle()
+        }
+
         func menuNeedsUpdate(_ menu: NSMenu) {
+            if menu.items.first?.action == #selector(toggleColumn(_:)) {
+                for mi in menu.items { mi.state = ((mi.representedObject as? NSTableColumn)?.isHidden ?? false) ? .off : .on }
+                return
+            }
             menu.removeAllItems()
             let ids = targets
             guard !ids.isEmpty else { return }
@@ -602,7 +624,9 @@ struct WordTable: NSViewRepresentable {
                 let i = NSMenuItem(title: t, action: sel, keyEquivalent: ""); i.target = self; i.representedObject = obj; return i
             }
             if ids.count == 1 { menu.addItem(item("查词", #selector(lookUp))) }
-            menu.addItem(item(ids.count == 1 ? "斩" : "斩（\(ids.count) 个）", #selector(retire)))
+            let cut = item(ids.count == 1 ? "斩" : "斩（\(ids.count) 个）", #selector(retire))
+            cut.image = CleaverIcon.image()
+            menu.addItem(cut)
             menu.addItem(.separator())
             let move = NSMenuItem(title: "移到生词本", action: nil, keyEquivalent: "")
             let sub = NSMenu()
