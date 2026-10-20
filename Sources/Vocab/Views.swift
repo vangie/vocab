@@ -107,15 +107,17 @@ struct MainView: View {
                 case .noSuggestions:
                     Text("无建议").foregroundStyle(.secondary).selectionDisabled()
                 case .recents(let words):
-                    // Like Dictionary.app: plain history, no header; the current word is a bold pill.
-                    ForEach(words, id: \.self) { w in
-                        HistoryRow(word: w, date: lookup.history.entries.first { $0.word == w }?.date,
-                                   bold: sidebarSelection == .recent(w)) { lookup.removeHistory(w) }
-                            .tag(SidebarItem.recent(w))
-                            .contextMenu {
-                                Button("删除") { lookup.removeHistory(w) }
-                                Button("清空历史…") { confirmClearHistory = true }
-                            }
+                    // History under a 「最近查询」 header; the current word is a bold pill.
+                    Section("最近查询") {
+                        ForEach(words, id: \.self) { w in
+                            HistoryRow(word: w, date: lookup.history.entries.first { $0.word == w }?.date,
+                                       bold: sidebarSelection == .recent(w)) { lookup.removeHistory(w) }
+                                .tag(SidebarItem.recent(w))
+                                .contextMenu {
+                                    Button("删除") { lookup.removeHistory(w) }
+                                    Button("清空历史…") { confirmClearHistory = true }
+                                }
+                        }
                     }
                 }
             }
