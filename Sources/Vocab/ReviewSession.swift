@@ -122,8 +122,9 @@ final class ReviewSession: ObservableObject {
         if id > 0 { return id }
         if let r = realID[id] { return r }
         guard let item = items[id], let l = virtualSource[id], let store = book.store else { return nil }
-        guard let added = try? store.add(word: item.word, definition: item.definition, dictionary: "ECDICT",
-                                         source: WordSource(app: l.sourceApp, title: l.title)) else { return nil }
+        // Studied, not collected: kept for its review state, outside 生词本.
+        guard let added = try? store.addStudied(word: item.word, definition: item.definition, dictionary: "ECDICT",
+                                                source: WordSource(app: l.sourceApp, title: l.title)) else { return nil }
         realID[id] = added.id
         return added.id
     }

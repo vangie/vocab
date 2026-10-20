@@ -253,3 +253,59 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(try s.testResults(), [r])
     }
 }
+
+final class StudiedWordsTests: XCTestCase {
+    func tempURL() -> URL {
+        let d = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d.appendingPathComponent("vocab.sqlite")
+    }
+
+    func testStudiedWordsStayOutOfWordbookUntilCollected() throws {
+        let url = tempURL(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let s = try WordStore(url: url)
+        let w = try s.addStudied(word: "harbor", definition: "港口", dictionary: "ECDICT", source: WordSource(app: "词书·高考", title: "高考"))
+        XCTAssertNil(w.bookID)
+        let reviewed = try XCTUnwrap(s.review(id: w.id, rating: .good))
+        // Collecting it later keeps the progress and puts it in 生词本.
+        let c = try s.add(word: "harbor", definition: "", dictionary: "")
+        XCTAssertEqual(c.id, w.id); XCTAssertNotNil(c.bookID)
+        XCTAssertEqual(c.review.repetitions, reviewed.review.repetitions); XCTAssertEqual(c.review.stability, reviewed.review.stability)
+        // A second addStudied does not pull it back out.
+        XCTAssertNotNil(try s.addStudied(word: "harbor", definition: "", dictionary: "", source: nil).bookID)
+    }
+
+    func testV4MovesListWordsOutPreservingState() throws {
+        let url = tempURL(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        var ids: (list: Int64, mine: Int64, looked: Int64) = (0, 0, 0)
+        var before: WordItem?
+        do {
+            let s = try WordStore(url: url)
+            let l = try s.add(word: "magazine", definition: "杂志", dictionary: "ECDICT", source: WordSource(app: "词书·高考", title: "高考"))
+            before = try s.review(id: l.id, rating: .good)
+            let r = try s.add(word: "the", definition: "", dictionary: "ECDICT", source: WordSource(app: "词书·中考", title: "中考"))
+            _ = try s.retire(id: r.id)
+            let m = try s.add(word: "Atlantic", definition: "大西洋", dictionary: "x")
+            let k = try s.add(word: "harbor", definition: "", dictionary: "x", context: "a harbor town", source: WordSource(app: "词书·高考", title: "高考"))
+            ids = (l.id, m.id, k.id)
+        }
+        var db: OpaquePointer?
+        sqlite3_open(url.path, &db); sqlite3_exec(db, "PRAGMA user_version = 3;", nil, nil, nil); sqlite3_close(db)
+        let s = try WordStore(url: url)
+        let m = try XCTUnwrap(s.migrationV4)
+        XCTAssertEqual(m.moved, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(m.backup).path))
+        let l = try XCTUnwrap(s.find(id: ids.list))
+        XCTAssertNil(l.bookID)
+        let b = try XCTUnwrap(before?.review)
+        XCTAssertEqual(l.review.state, b.state); XCTAssertEqual(l.review.stability, b.stability)
+        XCTAssertEqual(l.review.repetitions, b.repetitions)
+        XCTAssertEqual(l.review.due.timeIntervalSince1970, b.due.timeIntervalSince1970, accuracy: 0.01)
+        XCTAssertTrue(Scheduler.isMastered(try XCTUnwrap(s.find(word: "the")).review))
+        XCTAssertNil(try s.find(word: "the")?.bookID)
+        XCTAssertNotNil(try s.find(id: ids.mine)?.bookID)
+        XCTAssertNotNil(try s.find(id: ids.looked)?.bookID)     // has a context → the user collected it
+        // Reopening doesn't migrate again.
+        XCTAssertNil(try WordStore(url: url).migrationV4)
+    }
+}

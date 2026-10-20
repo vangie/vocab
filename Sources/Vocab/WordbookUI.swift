@@ -9,6 +9,10 @@ enum WordGroup: Hashable {
     case book(Int64)
     case tag(String)
     case source(String)
+    /// Words studied from a 词书 (in no wordbook).
+    case list(ExamList)
+    /// 学习记录 smart lists: every studied word, wherever it came from.
+    case level(Familiarity)
 }
 
 /// Which words of the group the table shows (scope bar, left).
@@ -54,8 +58,19 @@ final class WordbookModel: ObservableObject {
     }
 
     /// Source groups with counts, most used first.
+    /// Words in some wordbook (collected by the user).
+    var collected: [WordItem] { items.filter { $0.bookID != nil } }
+    /// 词书 words studied but not collected, per list.
+    var studiedLists: [(list: ExamList, count: Int)] {
+        let s = items.filter { $0.bookID == nil }
+        return ExamList.allCases.compactMap { l in
+            let n = s.filter { $0.sourceApp == l.sourceApp }.count
+            return n > 0 ? (l, n) : nil
+        }
+    }
+
     var sources: [(name: String, count: Int)] {
-        Dictionary(grouping: items, by: \.sourceGroup).map { ($0.key, $0.value.count) }
+        Dictionary(grouping: collected, by: \.sourceGroup).map { ($0.key, $0.value.count) }
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -205,6 +220,22 @@ struct WordbookSidebar: View {
                         }
                 }
             }
+            Section("学习记录") {
+                ForEach([Familiarity.learning, .familiar, .retired], id: \.self) { f in
+                    Label(WordbookView.levelTitle(f), systemImage: f == .learning ? "graduationcap" : f == .familiar ? "checkmark.seal" : "scissors")
+                        .badge(book.items.filter { $0.familiarity == f }.count)
+                        .tag(WordGroup.level(f))
+                        .help(f == .familiar ? "记忆稳定度 ≥ 21 天" : "")
+                }
+            }
+            if !book.studiedLists.isEmpty {
+                Section("词书") {
+                    ForEach(book.studiedLists, id: \.list) { e in
+                        Label(e.list.title, systemImage: "text.book.closed").badge(e.count).tag(WordGroup.list(e.list))
+                            .help("从词书背过的词（不在生词本里）")
+                    }
+                }
+            }
             if !book.tags.isEmpty {
                 Section("标签") {
                     ForEach(book.tags, id: \.tag) { t in
@@ -268,7 +299,9 @@ struct WordbookView: View {
         case .all: break
         case .book(let id): base = base.filter { $0.bookID == id }
         case .tag(let t): base = base.filter { $0.tags.contains { $0.caseInsensitiveCompare(t) == .orderedSame } }
-        case .source(let s): base = base.filter { $0.sourceGroup == s }
+        case .source(let s): base = base.filter { $0.bookID != nil && $0.sourceGroup == s }
+        case .list(let l): base = base.filter { $0.bookID == nil && $0.sourceApp == l.sourceApp }
+        case .level(let f): base = base.filter { $0.familiarity == f }
         }
         let q = state.wordFilter.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty {
@@ -287,7 +320,13 @@ struct WordbookView: View {
         case .book(let id): return book.books.first { $0.id == id }?.name ?? "生词本"
         case .tag(let t): return t
         case .source(let s): return s
+        case .list(let l): return "词书 · \(l.title)"
+        case .level(let f): return Self.levelTitle(f)
         }
+    }
+
+    static func levelTitle(_ f: Familiarity) -> String {
+        switch f { case .learning: "学习中"; case .familiar: "已掌握"; case .retired: "已斩"; case .new: "新词" }
     }
 
     var body: some View {

@@ -131,6 +131,45 @@ public final class WordStore: @unchecked Sendable {
         try migrateToFSRS()
         try migrateToV2(existed: existed)
         try migrateToV3()
+        try migrateToV4()
+    }
+
+    /// Schema 4: words studied from a 词书 live outside every wordbook (book_id NULL) — 生词本 holds only
+    /// what the user collected. Moves earlier 词书 words (source 词书·…, never looked up with a context)
+    /// out of their wordbook; FSRS state, 斩 and due dates are untouched. Backed up first.
+    private func migrateToV4() throws {
+        var v = 0
+        try run("PRAGMA user_version", []) { v = Int(sqlite3_column_int64($0, 0)) }
+        guard v < 4 else { return }
+        var n = 0
+        try run("""
+        SELECT COUNT(*) FROM words WHERE book_id IS NOT NULL AND source_app LIKE '词书·%'
+          AND NOT EXISTS (SELECT 1 FROM contexts c WHERE c.word_id = words.id)
+        """, []) { n = Int(sqlite3_column_int64($0, 0)) }
+        var backup: URL?
+        if n > 0 { backup = try backupFile(tag: "v3") }
+        try transaction {
+            try run("""
+            UPDATE words SET book_id = NULL WHERE book_id IS NOT NULL AND source_app LIKE '词书·%'
+              AND NOT EXISTS (SELECT 1 FROM contexts c WHERE c.word_id = words.id)
+            """, [])
+            try exec("PRAGMA user_version = 4")
+        }
+        if n > 0 { migrationV4 = (backup, n) }
+    }
+
+    /// Set when this open moved 词书 words out of the wordbooks (schema 4).
+    public private(set) var migrationV4: (backup: URL?, moved: Int)?
+
+    /// A word-list word studied for the first time: stored for its FSRS state but in no wordbook.
+    @discardableResult
+    public func addStudied(word: String, definition: String, dictionary: String, source: WordSource?, now: Date = Date()) throws -> WordItem {
+        let w = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        try run("""
+        INSERT INTO words(word, definition, dictionary, added, due, source_app, source_title, book_id)
+          VALUES(?,?,?,?,?,?,?,NULL) ON CONFLICT(word) DO NOTHING
+        """, [w, definition, dictionary, now, now, Self.clean(source?.app), Self.clean(source?.title)])
+        return try find(word: w)!
     }
 
     /// Schema 3: test history and bulk-斩 tables (new tables only; existing data untouched, still backed up).
@@ -365,7 +404,8 @@ public final class WordStore: @unchecked Sendable {
               lemma = COALESCE(words.lemma, excluded.lemma),
               source_app = COALESCE(words.source_app, excluded.source_app),
               source_title = COALESCE(words.source_title, excluded.source_title),
-              source_url = COALESCE(words.source_url, excluded.source_url)
+              source_url = COALESCE(words.source_url, excluded.source_url),
+              book_id = COALESCE(words.book_id, excluded.book_id)
             """, [w, definition, dictionary, ctx, now, now, lem, Self.clean(source?.app), Self.clean(source?.title), Self.clean(source?.url), bookID])
             let item = try find(word: w)!
             if let ctx { try addContext(wordID: item.id, sentence: ctx, surface: surface, source: source, now: now) }
