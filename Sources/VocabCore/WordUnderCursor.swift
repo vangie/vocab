@@ -221,7 +221,10 @@ public enum WordUnderCursor {
         // Validate: the word box must contain the point and be smaller than the element.
         if let b = bounds {
             let elFrame = rect(frameOf(el))
-            let tooBig = elFrame.map { b.width >= $0.width * 0.95 && $0.width > 60 } ?? false
+            // A box spanning the whole element is bogus only when the word is a small part of its
+            // text; a link whose text *is* the word (".gitignore", "AGENTS.md") fills its element.
+            let wholeText = total > 0 && Double(w.range.length) >= Double(total) * 0.6
+            let tooBig = !wholeText && (elFrame.map { b.width >= $0.width * 0.95 && $0.width > 60 } ?? false)
             if !b.insetBy(dx: -2, dy: -2).contains(point) || tooBig || b.width <= 0 {
                 dbg("range: rejected \(w.word) bounds \(b)")
                 return nil
@@ -324,11 +327,33 @@ public enum WordUnderCursor {
             CFStringTokenizerGoToTokenAtIndex(tok, probe)
             let r = CFStringTokenizerGetCurrentTokenRange(tok)
             guard r.location != kCFNotFound, r.length > 0 else { continue }
-            let ns = NSRange(location: r.location, length: r.length)
+            var ns = NSRange(location: r.location, length: r.length)
+            ns = subword(in: text as NSString, token: ns, at: probe)
             let t = (text as NSString).substring(with: ns)
             if t.unicodeScalars.contains(where: { CharacterSet.letters.union(.decimalDigits).contains($0) }) { return ns }
         }
         return nil
+    }
+
+    /// File names and identifiers ("CONTRIBUTING.md", ".env.example", "snake_case", "a/b") come out
+    /// of the tokenizer as one token: narrow to the part under the pointer, split at . _ /.
+    static func subword(in ns: NSString, token: NSRange, at offset: Int) -> NSRange {
+        let t = ns.substring(with: token) as NSString
+        let seps = CharacterSet(charactersIn: "._/")
+        guard t.rangeOfCharacter(from: seps).location != NSNotFound else { return token }
+        var parts: [NSRange] = []
+        var start = 0
+        for i in 0...t.length {
+            let isSep = i < t.length && seps.contains(UnicodeScalar(t.character(at: i)).map { $0 } ?? " ")
+            if i == t.length || isSep {
+                if i > start { parts.append(NSRange(location: token.location + start, length: i - start)) }
+                start = i + 1
+            }
+        }
+        let rel = min(max(offset, token.location), token.location + token.length - 1)
+        if let p = parts.first(where: { NSLocationInRange(rel, $0) }) { return p }
+        // On a separator: the part after it, else before.
+        return parts.first { $0.location > rel } ?? parts.last ?? token
     }
 
     // MARK: - Helpers

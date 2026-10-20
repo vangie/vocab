@@ -309,3 +309,19 @@ final class StudiedWordsTests: XCTestCase {
         XCTAssertNil(try WordStore(url: url).migrationV4)
     }
 }
+
+final class FilenameSegmentationTests: XCTestCase {
+    func w(_ t: String, _ i: Int) -> String? { WordUnderCursor.word(in: t, at: i)?.word }
+    func testFilenamesSplitAtDotsAndUnderscores() {
+        XCTAssertEqual(w("CONTRIBUTING.md", 3), "CONTRIBUTING")
+        XCTAssertEqual(w("CONTRIBUTING.md", 14), "md")
+        XCTAssertEqual(w(".env.example", 7), "example")
+        XCTAssertEqual(w(".env.example", 2), "env")
+        XCTAssertEqual(w("pyproject.toml", 2), "pyproject")
+        XCTAssertEqual(w("pyproject.toml", 11), "toml")
+        XCTAssertEqual(w(".gitignore", 4), "gitignore")
+        XCTAssertEqual(w("AGENTS.md", 1), "AGENTS")
+        XCTAssertEqual(w("snake_case_name", 7), "case")
+        XCTAssertEqual(w("The harbor is calm.", 6), "harbor")      // prose unchanged
+    }
+}
