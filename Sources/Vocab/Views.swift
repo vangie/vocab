@@ -366,7 +366,7 @@ struct SettingsView: View {
                         Text(settings.accessibilityTrusted ? "已授权，可以读取光标下的单词" : "未授权：三指查词需要读取光标下的文字")
                         Spacer()
                         if !settings.accessibilityTrusted {
-                            Button("去授权") { WordUnderCursor.requestTrust(); WordUnderCursor.openAccessibilitySettings() }
+                            Button("设置权限…") { AccessibilityOnboarding.shared.show() }
                         }
                     }
                 }

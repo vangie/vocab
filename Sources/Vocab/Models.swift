@@ -213,8 +213,10 @@ final class SettingsModel: ObservableObject {
 
     func setTakeover(_ on: Bool) {
         if on {
-            if !WordUnderCursor.isTrusted {
-                WordUnderCursor.requestTrust()
+            guard WordUnderCursor.isTrusted else {
+                // Guide the user instead of the system prompt; the takeover starts once granted.
+                AccessibilityOnboarding.shared.show { SettingsModel.shared.setTakeover(true) }
+                return
             }
             let n = ThreeFingerMonitor.shared.start()
             guard n > 0 else {

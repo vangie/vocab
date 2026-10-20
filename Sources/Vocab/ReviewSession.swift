@@ -209,7 +209,7 @@ final class ReviewSession: ObservableObject {
         revealed = true
     }
 
-    /// Recall: the user rates themselves (1 忘了 · 2 模糊 · 3 记得 · 4 简单).
+    /// Recall (mature cards only): the user must rate 1 忘了 · 2 模糊 · 3 记得.
     func selfRate(_ r: ReviewRating) {
         guard phase == .asking, question?.type == .recall, revealed else { return }
         apply(r, correct: r != .forgot)
@@ -231,14 +231,32 @@ final class ReviewSession: ObservableObject {
 
     static let autoAdvanceKey = "autoAdvanceOnCorrect"
     static var autoAdvance: Bool { UserDefaults.standard.object(forKey: autoAdvanceKey) as? Bool ?? true }
-    static let autoAdvanceDelay: TimeInterval = 0.8
+    static let autoAdvanceDelayKey = "autoAdvanceDelay"
+    static let autoAdvanceRange: ClosedRange<Double> = 1...5
+    static var autoAdvanceDelay: TimeInterval {
+        let v = UserDefaults.standard.object(forKey: autoAdvanceDelayKey) as? Double ?? 2
+        return min(max(v, autoAdvanceRange.lowerBound), autoAdvanceRange.upperBound)
+    }
+    /// Countdown progress 0…1 while an auto-advance is pending (nil otherwise).
+    @Published private(set) var autoProgress: Double?
+    /// Hovering the answer area pauses the countdown.
+    var autoPaused = false
+    private var autoElapsed: TimeInterval = 0
     private var autoTimer: Timer?
     private var autoMonitor: Any?
     /// A correct answer waits ~0.8 s, then moves on; a click or any key moves on at once.
     private func scheduleAutoAdvance() {
         cancelAutoAdvance()
-        autoTimer = Timer.scheduledTimer(withTimeInterval: Self.autoAdvanceDelay, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.next() }
+        let total = Self.autoAdvanceDelay, tick = 0.05
+        autoElapsed = 0; autoProgress = 0
+        autoTimer = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.autoPaused { return }
+                self.autoElapsed += tick
+                self.autoProgress = min(1, self.autoElapsed / total)
+                if self.autoElapsed >= total { self.next() }
+            }
         }
         autoMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] e in
             guard let self, self.phase == .answered else { return e }
@@ -252,7 +270,7 @@ final class ReviewSession: ObservableObject {
         }
     }
     private func cancelAutoAdvance() {
-        autoTimer?.invalidate(); autoTimer = nil
+        autoTimer?.invalidate(); autoTimer = nil; autoProgress = nil
         if let m = autoMonitor { NSEvent.removeMonitor(m); autoMonitor = nil }
     }
 

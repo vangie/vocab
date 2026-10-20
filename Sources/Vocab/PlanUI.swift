@@ -70,16 +70,39 @@ final class PlanModel: ObservableObject {
         }
     }
 
+    static let skipTopKey = "skipTop1000"
+    static var skipTop: Bool { UserDefaults.standard.object(forKey: skipTopKey) as? Bool ?? true }
+    private var topCache: Set<String>?
+    /// Before any vocabulary test, the 1000 most common words are left out of word-list drawing
+    /// (setting 跳过最常见的 1000 词); after a test its band results decide instead.
+    private func listExclusions() -> Set<String> {
+        guard Self.skipTop, results.isEmpty, let lists = WordLists.shared else { return [] }
+        if topCache == nil { topCache = lists.topWords(1000) }
+        return topCache!
+    }
+
+    private func exclusions(_ queues: [PlanMixer.Queue]) -> Set<String> {
+        var ex = (try? book.store?.planExclusions()) ?? []
+        let top = listExclusions()
+        guard !top.isEmpty else { return ex }
+        // Only list words are skipped; a common word the user saved in a wordbook still gets learned.
+        let bookWords = Set(queues.filter { $0.id.isBook }.flatMap(\.words).map { $0.lowercased() })
+        ex.formUnion(top.subtracting(bookWords))
+        return ex
+    }
+
     func drawNew(count: Int, liveItems: [WordItem]) -> [(word: String, source: PlanSourceID)] {
-        let exclude = (try? book.store?.planExclusions()) ?? []
-        return PlanMixer.mix(queues(liveItems: liveItems), count: count, exclude: exclude, wordbookFirst: plan.wordbookFirst)
+        let qs = queues(liveItems: liveItems)
+        let exclude = exclusions(qs)
+        return PlanMixer.mix(qs, count: count, exclude: exclude, wordbookFirst: plan.wordbookFirst)
     }
 
     /// New words left across the enabled sources (each counted once).
     func remainingNew() -> Int {
-        let exclude = (try? book.store?.planExclusions()) ?? []
+        let qs = queues(liveItems: book.items)
+        let exclude = exclusions(qs)
         var all = Set<String>()
-        for q in queues(liveItems: book.items) { for w in q.words { all.insert(w.lowercased()) } }
+        for q in qs { for w in q.words { all.insert(w.lowercased()) } }
         return all.subtracting(exclude).count
     }
 
@@ -127,6 +150,8 @@ struct PlanSettingsView: View {
     @AppStorage(ReviewSession.relearningKey) private var relearningSteps = "10m"
     @State private var showAdvanced = false
     @AppStorage(ReviewSession.autoAdvanceKey) private var autoAdvance = true
+    @AppStorage(PlanModel.skipTopKey) private var skipTop = true
+    @AppStorage(ReviewSession.autoAdvanceDelayKey) private var autoDelay = 2.0
 
     private func normalizeSteps(_ s: inout String, fallback: String) {
         if let st = FSRS.parseSteps(s) { s = FSRS.formatSteps(st) } else { s = fallback }
@@ -232,6 +257,11 @@ struct PlanSettingsView: View {
                         }
                     }
                     Toggle("生词本优先", isOn: $model.plan.wordbookFirst)
+                    Toggle("跳过最常见的 1000 词", isOn: $skipTop).disabled(!model.results.isEmpty)
+                        .onChange(of: skipTop) { _, _ in refresh() }
+                    Text(model.results.isEmpty ? "还没测词汇量时，词书里最常见的 1000 个词先不背；测完后按测试结果跳过认识的词。"
+                                               : "已按词汇量测试结果跳过认识的词。")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text("新词按比例轮流抽取；某个来源抽完后，它的份额分给其他来源。每个词只学一次，在任何地方学过或斩过的都会跳过。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -280,7 +310,15 @@ struct PlanSettingsView: View {
                 }
                 Section("答题") {
                     Toggle("答对后自动下一题", isOn: $autoAdvance)
-                    Text("答对约 0.8 秒后进入下一题，期间按任意键或点击可立即继续；答错会停下来等你看完。").font(.caption).foregroundStyle(.secondary)
+                    if autoAdvance {
+                        LabeledContent("等待时间") {
+                            HStack {
+                                Slider(value: $autoDelay, in: ReviewSession.autoAdvanceRange, step: 0.5).frame(width: 180)
+                                Text("\(autoDelay.formatted(.number.precision(.fractionLength(1)))) 秒").monospacedDigit().frame(width: 48, alignment: .trailing)
+                            }
+                        }
+                    }
+                    Text("答对后等一会儿自动进入下一题，「继续」下方的细条显示倒计时；指针停在答案上会暂停，按空格、回车或任意键立即继续。答错会停下来等你看完。").font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
                     DisclosureGroup("高级", isExpanded: $showAdvanced) {

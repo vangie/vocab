@@ -110,6 +110,8 @@ private struct QuestionScreen: View {
             if let q = session.question {
                 content(q).frame(maxWidth: 560).padding(.horizontal, 32)
                     .id(q.id)
+                    .contentShape(Rectangle())
+                    .onHover { session.autoPaused = $0 }
             }
             Spacer(minLength: 16)
             footer
@@ -171,11 +173,23 @@ private struct QuestionScreen: View {
                     HStack(spacing: 6) { Text("继续"); Text("↩").foregroundStyle(.secondary) }
                 }
                 .keyboardShortcut(.defaultAction).controlSize(.large).help("继续（↩ 或空格）")
+                .overlay(alignment: .bottom) {
+                    if let p = session.autoProgress {
+                        // Thin countdown bar under the button; pauses while the pointer is over the answer.
+                        GeometryReader { g in
+                            Capsule().fill(.quaternary).overlay(alignment: .leading) {
+                                Capsule().fill(Color.accentColor.opacity(0.7)).frame(width: g.size.width * p)
+                            }
+                        }
+                        .frame(height: 2).offset(y: 7)
+                        .accessibilityLabel("即将自动下一题")
+                    }
+                }
                 // Space also continues.
                 Button("") { session.next() }.keyboardShortcut(.space, modifiers: []).hidden().frame(width: 0)
             }
         }
-        .frame(height: 44).padding(.horizontal, 20).padding(.bottom, 16)
+        .frame(height: 50).padding(.horizontal, 20).padding(.bottom, 16)
     }
 }
 
@@ -292,7 +306,8 @@ private struct RecallCard: View {
                 Divider().frame(maxWidth: 240)
                 MeaningPrompt(q: q)
                 HStack(spacing: 10) {
-                    ForEach(ReviewRating.allCases, id: \.self) { r in
+                    // Must pick one (no skip): 忘了 · 模糊 · 记得.
+                    ForEach([ReviewRating.forgot, .fuzzy, .good], id: \.self) { r in
                         Button { session.selfRate(r) } label: {
                             VStack(spacing: 1) { Text(r.label); Text("\(r.rawValue)").font(.caption2).foregroundStyle(.secondary) }
                                 .frame(minWidth: 56)

@@ -92,6 +92,15 @@ public final class WordLists: @unchecked Sendable {
         return n
     }
 
+    /// Every word (any form) ranked 1…n: the most common words, skipped before a vocabulary test.
+    public func topWords(_ n: Int) -> Set<String> {
+        var out = Set<String>()
+        query("SELECT word FROM words WHERE (CASE WHEN frq > 0 THEN frq ELSE bnc END) BETWEEN 1 AND ?", [n]) {
+            out.insert(String(cString: sqlite3_column_text($0, 0)).lowercased())
+        }
+        return out
+    }
+
     /// Base forms (no inflections) whose rank lies in `lo...hi`.
     public func lemmas(rank lo: Int, _ hi: Int) -> [String] {
         var out: [String] = []

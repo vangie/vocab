@@ -27,7 +27,12 @@ public enum WordUnderCursor {
         }
     }
 
-    public static var isTrusted: Bool { AXIsProcessTrusted() }
+    /// Debug: `defaults write io.github.vangie.vocab debugForceUntrusted -bool YES` (or env
+    /// VOCAB_FORCE_UNTRUSTED=1) makes the app behave as if Accessibility were not granted.
+    public static var forceUntrusted: Bool {
+        UserDefaults.standard.bool(forKey: "debugForceUntrusted") || ProcessInfo.processInfo.environment["VOCAB_FORCE_UNTRUSTED"] == "1"
+    }
+    public static var isTrusted: Bool { !forceUntrusted && AXIsProcessTrusted() }
 
     @discardableResult
     public static func requestTrust() -> Bool {

@@ -49,15 +49,19 @@ public enum RatingMap {
     }
 }
 
-/// Picks the question type for a card: recognition for new words, recall and spelling for mature ones.
+/// Picks the question type for a card. New and learning cards only get objective types; the
+/// self-graded 看词想意思 is reserved for mature cards and kept rare (≤ `maxRecallShare`).
 public enum QuestionPicker {
+    public static let maxRecallShare = 0.15
     public static func weights(_ stage: CardStage) -> [QuestionType: Double] {
         switch stage {
-        case .new: [.wordToMeaning: 3, .meaningToWord: 2, .recall: 2, .syllables: 1]
-        case .learning: [.meaningToWord: 2, .wordToMeaning: 1, .recall: 2, .syllables: 1, .roots: 1.5, .spelling: 1.5]
-        case .mature: [.spelling: 3, .recall: 2, .meaningToWord: 1, .roots: 1, .syllables: 0.5]
+        case .new: [.wordToMeaning: 3, .meaningToWord: 2, .syllables: 1]
+        case .learning: [.meaningToWord: 2, .wordToMeaning: 1.5, .syllables: 1, .roots: 1.5, .spelling: 1.5]
+        case .mature: [.spelling: 3, .meaningToWord: 1.5, .roots: 1, .syllables: 0.5, .recall: 1]
         }
     }
+    /// Objective fallbacks when a card's stage weights have nothing available.
+    static let fallback: [QuestionType] = [.wordToMeaning, .meaningToWord, .spelling, .syllables, .roots]
 
     /// `available` lists the types this card can support (roots need a match, choices need distractors…).
     /// Avoids repeating the previous type so the session interleaves.
@@ -65,7 +69,15 @@ public enum QuestionPicker {
                                                        previous: QuestionType?, using rng: inout R) -> QuestionType {
         var w = weights(stage).filter { available.contains($0.key) }
         if w.count > 1, let p = previous { w[p] = nil }
-        if w.isEmpty { return available.contains(.recall) ? .recall : (available.first ?? .recall) }
+        // Keep recall rare relative to what this card can actually be asked.
+        if let r = w[.recall] {
+            let others = w.filter { $0.key != .recall }.values.reduce(0, +)
+            if others > 0 { w[.recall] = min(r, others * maxRecallShare / (1 - maxRecallShare)) }
+        }
+        if w.isEmpty {
+            // Only a card with no meaning or distractors at all ends up self-graded.
+            return fallback.first { available.contains($0) && $0 != previous } ?? fallback.first { available.contains($0) } ?? .recall
+        }
         let total = w.values.reduce(0, +)
         var x = Double.random(in: 0..<total, using: &rng)
         for (t, v) in w.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
