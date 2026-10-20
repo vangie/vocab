@@ -91,7 +91,7 @@ public final class WordStore: @unchecked Sendable {
     private var db: OpaquePointer?
     private let lock = NSRecursiveLock()
     public let url: URL?
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
 
     public static func defaultURL() -> URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -130,7 +130,23 @@ public final class WordStore: @unchecked Sendable {
         """)
         try migrateToFSRS()
         try migrateToV2(existed: existed)
+        try migrateToV3()
     }
+
+    /// Schema 3: test history and bulk-斩 tables (new tables only; existing data untouched, still backed up).
+    private func migrateToV3() throws {
+        var v = 0
+        try run("PRAGMA user_version", []) { v = Int(sqlite3_column_int64($0, 0)) }
+        guard v < 3 else { return }
+        if try count() > 0, migrationV2 == nil { migrationV3Backup = try backupFile(tag: "v2") }
+        try exec(Self.v3SQL)
+        try exec("PRAGMA user_version = 3")
+    }
+
+    public private(set) var migrationV3Backup: URL?
+
+    func runPublic(_ sql: String, _ binds: [Any?], row: ((OpaquePointer) -> Void)? = nil) throws { try run(sql, binds, row: row) }
+    var lastRowID: Int64 { sqlite3_last_insert_rowid(db) }
 
     /// Set when this open migrated an SM-2 wordbook to FSRS.
     public private(set) var migration: (backup: URL?, cards: Int)?
@@ -236,7 +252,7 @@ public final class WordStore: @unchecked Sendable {
             INSERT INTO contexts(word_id, sentence, added)
               SELECT id, context, added FROM words WHERE context IS NOT NULL AND TRIM(context) <> '';
             """)
-            try exec("PRAGMA user_version = \(Self.schemaVersion)")
+            try exec("PRAGMA user_version = 2")
             try exec("COMMIT")
             if existed && n > 0 { migrationV2 = (backup, n) }
         } catch { try? exec("ROLLBACK"); throw error }

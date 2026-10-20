@@ -43,6 +43,8 @@ public final class QuestionFactory: @unchecked Sendable {
     let thesaurus: DictionaryInfo?
     let book: [String]
     private var cache: [String: WordMaterials] = [:]
+    /// Short Chinese meaning when no system dictionary has one (ECDICT extract).
+    public var fallbackChinese: (@Sendable (String) -> String?)? = { WordLists.shared?.shortChinese($0) }
     private let lock = NSLock()
 
     public init(service: DictionaryService = .shared, dicts: [DictionaryInfo], thesaurus: DictionaryInfo?, book: [String]) {
@@ -62,6 +64,7 @@ public final class QuestionFactory: @unchecked Sendable {
             if g.english == nil { g.english = GlossExtractor.english(fromHTML: e.html) }
             if g.chinese != nil && g.english != nil { break }
         }
+        if g.chinese == nil, let z = fallbackChinese?(word.lowercased()) { g.chinese = z }
         return g
     }
 
