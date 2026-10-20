@@ -37,5 +37,8 @@ SOFTWARE.
 the top of **Jun Da's Modern Chinese Character Frequency List** (现代汉语单字频率列表, Middle Tennessee
 State University, https://lingua.mtsu.edu/chinese-computing/statistics/), with readings converted to
 tone-marked pinyin from the list's pinyin column (sourced by the author from CEDICT,
-https://www.mdbg.net/chinese/dictionary?page=cedict, CC BY-SA 4.0). Built by `scripts/build-hanzi.py`.
+https://www.mdbg.net/chinese/dictionary?page=cedict, CC BY-SA 4.0). Columns 3–4 add the Kangxi radical number from the **Unicode Unihan database** (`kRSUnicode`,
+Unicode License v3, https://www.unicode.org/license.txt) and a short English gloss (first CEDICT
+sense). Built by `scripts/build-hanzi.py`. Chinese glosses for the meaning check are read at run time
+from dictionaries installed on the Mac (现代汉语规范词典 / 新华字典) and are not bundled.
 The list is published by its author for free use in teaching and research; please credit Jun Da (2004).

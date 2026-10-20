@@ -189,6 +189,18 @@ case "profile":
         sem.wait(); print(" in \(ms(t)) ms"); fflush(stdout)
     }
 
+case "hanzi":
+    // vocab-smoke hanzi — sample spot-checks with Chinese glosses from the installed dictionaries.
+    let avail = svc.availableDictionaries()
+    let ds = ["com.apple.dictionary.zh_CN.SDCC", "com.vangie.cndict.xinhua"].compactMap { id in avail.first { $0.id == id } }
+    var rng = SystemRandomNumberGenerator()
+    let t0 = Date()
+    let run = HanziTestRun(list: HanziList.shared!, gloss: { c in
+        for d in ds { for e in svc.lookup(c.char, in: [d], maxPerDictionary: 1) { if let g = HanziGloss.firstSense(e.plainText, char: c.char) { return g } } }
+        return nil }, using: &rng)
+    print("built in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+    for it in run.items where it.check { print(it.char, it.checkKind, it.choices, "✓", it.correct.sorted()) }
+
 case "suggest":
     _ = NSApplication.shared
     for q in args.dropFirst(2) {

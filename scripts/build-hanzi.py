@@ -3,7 +3,10 @@
 Modern Chinese Character Frequency List (现代汉语单字频率列表, MTSU), in rank order, with
 their readings (tone-marked pinyin from the list's CEDICT column, '/'-separated).
 
-    python3 scripts/build-hanzi.py [jd-modern.txt]
+    python3 scripts/build-hanzi.py [jd-modern.txt] [Unihan_IRGSources.txt]
+
+Columns: char, readings, Kangxi radical number (Unicode Unihan kRSUnicode; 0 = unknown),
+short English gloss (first CEDICT sense, fallback for the meaning check).
 """
 import re, sys, unicodedata, urllib.request
 
@@ -25,6 +28,12 @@ def mark(syl):
 
 raw = open(sys.argv[1], "rb").read() if len(sys.argv) > 1 else urllib.request.urlopen(URL, timeout=60).read()
 text = raw.decode("gb18030", errors="replace")
+radical = {}
+if len(sys.argv) > 2:
+    for l in open(sys.argv[2], encoding="utf-8"):
+        if "\tkRSUnicode\t" in l:
+            cp, _, v = l.rstrip("\n").split("\t")
+            radical[chr(int(cp[2:], 16))] = int(v.split()[0].split(".")[0].rstrip("'"))
 out = []
 for line in text.splitlines():
     f = line.split("\t")
@@ -37,9 +46,11 @@ for line in text.splitlines():
     for r in f[4].split("/"):
         p = mark(r.strip())
         if p and p not in rs: rs.append(p)
-    out.append(f"{ch}\t{'/'.join(rs)}")
+    gloss = f[5].split("/")[0].strip() if len(f) > 5 else ""
+    gloss = re.sub(r"\s+", " ", gloss)[:40]
+    out.append(f"{ch}\t{'/'.join(rs)}\t{radical.get(ch, 0)}\t{gloss}")
     if len(out) == N: break
 with open("Resources/Data/hanzi-freq.tsv", "w", encoding="utf-8") as fh:
     fh.write("# Jun Da, Modern Chinese Character Frequency List (MTSU); readings from CEDICT. Rank order.\n")
     fh.write("\n".join(out) + "\n")
-print(len(out), "characters;", sum(1 for l in out if l.endswith("\t")), "without reading")
+print(len(out), "characters;", sum(1 for l in out if l.split("\t")[1] == ""), "without reading")

@@ -619,9 +619,15 @@ struct HanziTestSheet: View {
 
     private func start() {
         guard let list = HanziList.shared else { return }
-        var rng = SystemRandomNumberGenerator()
-        run = HanziTestRun(list: list, using: &rng)
-        result = nil
+        run = nil; result = nil
+        Task {
+            // Glosses come from the installed 现代汉语规范词典 / 新华字典 (a few ms per character).
+            let r = await Task.detached(priority: .userInitiated) { () -> HanziTestRun in
+                var rng = SystemRandomNumberGenerator()
+                return HanziTestRun(list: list, gloss: HanziGlosser.make(), using: &rng)
+            }.value
+            run = r
+        }
     }
 
     private func question(_ r: HanziTestRun, _ item: HanziTestItem) -> some View {
@@ -636,7 +642,20 @@ struct HanziTestSheet: View {
             ProgressView(value: Double(r.answered), total: Double(max(1, r.items.count))).padding(.horizontal, 16)
             Spacer()
             Text(item.char).font(.system(size: 72, weight: .regular, design: .serif))
-            if r.askingReading {
+            if r.askingCheck && item.checkKind == .meaning {
+                Text("它是什么意思？").foregroundStyle(.secondary).padding(.top, 8)
+                Spacer()
+                VStack(spacing: 6) {
+                    ForEach(Array(item.choices.enumerated()), id: \.offset) { i, c in
+                        Button { reading(c) } label: {
+                            HStack { Text("\(i + 1)").monospacedDigit().foregroundStyle(.secondary); Text(c).lineLimit(1); Spacer() }
+                                .frame(width: 320)
+                        }
+                        .controlSize(.large).keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [])
+                    }
+                }
+                Button("不确定") { reading("") }.buttonStyle(.borderless).padding(.top, 8).keyboardShortcut("0", modifiers: [])
+            } else if r.askingCheck {
                 Text("它读什么？").foregroundStyle(.secondary).padding(.top, 8)
                 Spacer()
                 HStack(spacing: 10) {
@@ -657,16 +676,16 @@ struct HanziTestSheet: View {
                 }
             }
             HStack {
-                Button("上一个") { run?.undo() }.disabled(r.answered == 0 && !r.askingReading).keyboardShortcut(.delete, modifiers: [])
+                Button("上一个") { run?.undo() }.disabled(r.answered == 0 && !r.askingCheck).keyboardShortcut(.delete, modifiers: [])
                 Spacer()
-                Text(r.askingReading ? "1–4 选读音 · 0 不确定 · ⌫ 上一个" : "← 不认识 · → 认识 · ⌫ 上一个").font(.caption).foregroundStyle(.tertiary)
+                Text(r.askingCheck ? "1–4 选择 · 0 不确定 · ⌫ 上一个" : "← 不认识 · → 认识 · ⌫ 上一个").font(.caption).foregroundStyle(.tertiary)
             }
             .padding(16)
         }
     }
 
     private func answer(_ known: Bool) { guard var r = run else { return }; r.answer(known); finish(&r) }
-    private func reading(_ c: String) { guard var r = run else { return }; r.answerReading(c); finish(&r) }
+    private func reading(_ c: String) { guard var r = run else { return }; r.answerCheck(c); finish(&r) }
 
     private func finish(_ r: inout HanziTestRun) {
         if r.finished {
@@ -687,7 +706,7 @@ struct HanziTestSheet: View {
                     Text("\(r.estimate)").font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit()
                     Text("可能在 \(r.low)–\(r.high) 之间（共测常用字 \(r.bandRanges.last?.hi ?? 0) 个）").foregroundStyle(.secondary)
                     if r.falseAlarm > 0.05 {
-                        Text("读音抽查有 \(Int((r.falseAlarm * 100).rounded()))% 没对上，结果已按此修正").font(.caption).foregroundStyle(.orange)
+                        Text("抽查（读音 / 字义）有 \(Int((r.falseAlarm * 100).rounded()))% 没对上，结果已按此修正").font(.caption).foregroundStyle(.orange)
                     }
                     VStack(spacing: 6) {
                         ForEach(r.bands, id: \.band) { b in
@@ -699,7 +718,7 @@ struct HanziTestSheet: View {
                         }
                     }
                     .padding(.horizontal, 30)
-                    Text("按字频分段抽字，「认识」的字中抽一部分问读音来校正高估。参考：常用字 2500 个覆盖日常文本约 98%。")
+                    Text("按字频分段抽字，「认识」的字中抽一部分问读音或字义来校正高估。参考：常用字 2500 个覆盖日常文本约 98%。")
                         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 30)
                 }
             }
@@ -710,6 +729,27 @@ struct HanziTestSheet: View {
                 Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
             }
             .padding(12)
+        }
+    }
+}
+
+/// Chinese gloss for the meaning check: 现代汉语规范词典 (system), else 新华字典 / 汉典 if installed,
+/// else the bundled English gloss.
+enum HanziGlosser {
+    static func make() -> HanziTestRun.Glosser {
+        let svc = DictionaryService.shared
+        let avail = svc.availableDictionaries()
+        let ids = ["com.apple.dictionary.zh_CN.SDCC", "com.vangie.cndict.xinhua", "com.vangie.cndict.zdic"]
+        let dicts = ids.compactMap { id in avail.first { $0.id == id } }
+        // One language per test, so a Chinese right answer never stands out among English distractors.
+        guard !dicts.isEmpty else { return { $0.gloss.isEmpty ? nil : $0.gloss } }
+        return { c in
+            for d in dicts {
+                for e in svc.lookup(c.char, in: [d], maxPerDictionary: 1) {
+                    if let g = HanziGloss.firstSense(e.plainText, char: c.char) { return g }
+                }
+            }
+            return nil
         }
     }
 }
