@@ -15,7 +15,12 @@ struct ReviewView: View {
             case .summary: FitHeight(levels: [.normal]) { _ in SummaryScreen(session: session) }
             case .loading: if session.question == nil { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) } else { QuestionScreen(session: session) }
             case .asking, .answered: QuestionScreen(session: session)
-            case .check: FitHeight(levels: [.normal]) { _ in CheckScreen(session: session) }
+            case .check:
+                // Same pinned top bar + progress as the quiz; 认识，斩 already retires, so no 斩 here.
+                VStack(spacing: 0) {
+                    SessionHeader(session: session, tag: "认识吗", showRetire: false)
+                    FitHeight(levels: [.normal]) { _ in CheckScreen(session: session) }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -150,28 +155,7 @@ private struct QuestionScreen: View {
         .environment(\.quizDensity, d)
     }
 
-    private var header: some View {
-        VStack(spacing: 8) {
-            HStack {
-                // Top-left, mirroring 斩 top-right; far from 继续 (bottom-right).
-                Button { session.end() } label: { Label("结束", systemImage: "xmark") }
-                    .help("结束本轮，查看小结（Esc）")
-                    .keyboardShortcut(.cancelAction)
-                if let q = session.question {
-                    Text(q.type.label).font(.callout.weight(.medium)).foregroundStyle(.secondary)
-                        .padding(.horizontal, 10).padding(.vertical, 3)
-                        .background(.quaternary.opacity(0.6), in: Capsule())
-                }
-                Spacer()
-                Text("\(session.queue.done.count) / \(session.queue.total)").monospacedDigit().foregroundStyle(.secondary)
-                Button { session.retire() } label: { Label { Text("斩") } icon: { CleaverIcon.swiftUI } }
-                    .help("已掌握：不再复习这个词（⌘K）")
-                    .keyboardShortcut("k", modifiers: .command)
-            }
-            ProgressView(value: session.queue.progress).progressViewStyle(.linear)
-        }
-        .padding(.horizontal, 20).padding(.top, 14)
-    }
+    private var header: some View { SessionHeader(session: session) }
 
     @ViewBuilder private func content(_ q: ReviewQuestion, _ density: QuizDensity) -> some View {
         VStack(spacing: density == .normal ? 18 : 10) {
@@ -762,5 +746,37 @@ struct ScrollIfShort<Content: View>: View {
             }
             .scrollBounceBehavior(.basedOnSize)
         }
+    }
+}
+
+
+/// Top bar shared by every session screen: 结束 · type tag · done/total · 斩, then the progress bar.
+private struct SessionHeader: View {
+    @ObservedObject var session: ReviewSession
+    var tag: String? = nil
+    var showRetire = true
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                // Top-left, mirroring 斩 top-right; far from 继续 (bottom-right).
+                Button { session.end() } label: { Label("结束", systemImage: "xmark") }
+                    .help("结束本轮，查看小结（Esc）")
+                    .keyboardShortcut(.cancelAction)
+                if let t = tag ?? session.question?.type.label {
+                    Text(t).font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                        .padding(.horizontal, 10).padding(.vertical, 3)
+                        .background(.quaternary.opacity(0.6), in: Capsule())
+                }
+                Spacer()
+                Text("\(session.queue.done.count) / \(session.queue.total)").monospacedDigit().foregroundStyle(.secondary)
+                if showRetire {
+                    Button { session.retire() } label: { Label { Text("斩") } icon: { CleaverIcon.swiftUI } }
+                        .help("已掌握：不再复习这个词（⌘K）")
+                        .keyboardShortcut("k", modifiers: .command)
+                }
+            }
+            ProgressView(value: session.queue.progress).progressViewStyle(.linear)
+        }
+        .padding(.horizontal, 20).padding(.top, 14)
     }
 }
