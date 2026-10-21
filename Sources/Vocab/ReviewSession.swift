@@ -354,6 +354,17 @@ final class ReviewSession: ObservableObject {
     @Published private(set) var autoProgress: Double?
     /// Hovering the answer area pauses the countdown.
     var autoPaused = false
+    /// The pointer is over a 查词典 link: a click there looks the word up instead of moving on.
+    var overLookupLink = false
+
+    /// Show a word in 词典 mode. The session stays as it is (ReviewSession is shared), so switching
+    /// back to 记词 resumes the same question; a pending auto-advance is cancelled.
+    func lookUp(_ word: String) {
+        cancelAutoAdvance()
+        overLookupLink = false
+        AppState.shared.mode = .lookup
+        LookupModel.shared.search(word)
+    }
     private var autoElapsed: TimeInterval = 0
     private var autoTimer: Timer?
     private var autoMonitor: Any?
@@ -373,6 +384,7 @@ final class ReviewSession: ObservableObject {
         }
         autoMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] e in
             guard let self, self.phase == .answered else { return e }
+            if e.type == .leftMouseDown, self.overLookupLink { self.cancelAutoAdvance(); return e }
             if e.type == .leftMouseDown {
                 // Only clicks in the review content, not the toolbar or other windows.
                 guard let w = e.window, w.isMainWindow, e.locationInWindow.y < w.contentLayoutRect.maxY else { return e }

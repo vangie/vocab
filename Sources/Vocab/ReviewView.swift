@@ -418,7 +418,7 @@ private struct AnswerBanner: View {
                   systemImage: session.lastCorrect ? "checkmark.circle.fill" : "arrow.uturn.backward.circle.fill")
                 .foregroundStyle(session.lastCorrect ? .green : .orange).font(.headline)
             HStack(spacing: 6) {
-                Text(q.word).fontWeight(.semibold)
+                LookupLink(session: session, word: q.word)
                 if q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.secondary) }
                 Text(q.gloss.short).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -832,5 +832,33 @@ private struct EaseBanner: View {
         if let next { m += "建议换成更难的「\(next.title)」；已斩和已掌握的词会自动跳过。" }
         else { m += "已经没有更难的词书了。" }
         return m
+    }
+}
+
+
+/// A headword that opens 词典 (pointing hand, underline on hover), plus a small 「查词典」 button.
+/// ⌘J does the same. Used in the answer feedback.
+private struct LookupLink: View {
+    @ObservedObject var session: ReviewSession
+    let word: String
+    @State private var hover = false
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(word).fontWeight(.semibold).underline(hover)
+                .foregroundStyle(hover ? Color.accentColor : Color.primary)
+                .onTapGesture { session.lookUp(word) }
+                .onHover { h in
+                    hover = h; session.overLookupLink = h
+                    if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                .help("在词典中查「\(word)」（⌘J）")
+            Button { session.lookUp(word) } label: { Label("查词典", systemImage: "book").labelStyle(.titleAndIcon) }
+                .buttonStyle(.borderless).controlSize(.small).font(.caption)
+                .focusable(false)
+                .onHover { session.overLookupLink = $0 }
+                .help("在词典中查「\(word)」（⌘J）")
+                .keyboardShortcut("j", modifiers: .command)
+        }
+        .onDisappear { if hover { NSCursor.pop() }; session.overLookupLink = false }
     }
 }
