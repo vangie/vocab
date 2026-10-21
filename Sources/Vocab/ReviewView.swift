@@ -464,7 +464,9 @@ private struct SpellingCard: View {
             let answered = session.phase == .answered
             ZStack(alignment: .top) {
                 VStack(spacing: 6) {
+                    // Top: what the user actually typed, aligned to the answer; bottom: the correct spelling.
                     Letters(marks: session.marks).frame(minHeight: 32)
+                        .opacity(session.gaveUp ? 0 : 1)
                     Text(q.word).font(.system(size: 26, weight: .semibold, design: .serif))
                         .opacity(answered && !session.lastCorrect ? 1 : 0)
                 }
@@ -476,11 +478,44 @@ private struct SpellingCard: View {
                         .multilineTextAlignment(.center).frame(maxWidth: 320)
                         .autocorrectionDisabled().focused($focused)
                         .onSubmit { session.submitSpelling() }
+                        .onKeyPress(.tab) { session.hint(); return .handled }
                         .onAppear { DispatchQueue.main.async { focused = true } }
                         .padding(.top, 4)
                 }
             }
+            // Help row: always laid out (hidden after answering) so nothing moves.
+            SpellingHelp(session: session, q: q, active: !answered)
+                .opacity(answered ? 0 : 1).allowsHitTesting(!answered).accessibilityHidden(answered)
         }
+    }
+}
+
+private struct SpellingHelp: View {
+    @ObservedObject var session: ReviewSession
+    let q: ReviewQuestion
+    let active: Bool
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(session.hintsUsed > 0 ? SpellingHint.mask(q.word, shown: session.hintsUsed) : " ")
+                .font(.system(size: 15, design: .monospaced)).foregroundStyle(.secondary).frame(height: 18)
+            HStack(spacing: 16) {
+                hintButton
+                giveUpButton
+            }
+            .buttonStyle(.borderless).controlSize(.small).foregroundStyle(.secondary)
+            Text("↩ 提交 · Tab 提示（提示后最高计 模糊） · ⌘↩ 看答案（计 忘了）")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+    @ViewBuilder private var hintButton: some View {
+        Button { session.hint() } label: { Label("提示", systemImage: "lightbulb") }
+            .help("显示下一个字母（Tab）；用了提示最高计 模糊")
+            .disabled(session.hintsUsed >= SpellingHint.maxHints(q.word))
+    }
+    @ViewBuilder private var giveUpButton: some View {
+        let b = Button { session.giveUpSpelling() } label: { Label("不会，看答案", systemImage: "eye") }
+            .help("显示正确拼写，计为 忘了，稍后再考（⌘↩）")
+        if active { b.keyboardShortcut(.return, modifiers: .command) } else { b }
     }
 }
 
@@ -489,15 +524,18 @@ private struct Letters: View {
     var body: some View {
         HStack(spacing: 1) {
             ForEach(Array(marks.enumerated()), id: \.offset) { _, m in
+                // Missing letters are a blank slot with an orange underline (the user didn't type them).
                 Text(String(m.char))
                     .font(.system(size: 26, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(color(m.kind))
-                    .strikethrough(m.kind == .extra)
-                    .underline(m.kind == .missing)
-                    .opacity(m.kind == .missing ? 0.75 : 1)
+                    .foregroundStyle(m.kind == .missing ? .clear : color(m.kind))
+                    .strikethrough(m.kind == .extra, color: .red)
+                    .overlay(alignment: .bottom) {
+                        if m.kind == .missing { Rectangle().fill(.orange).frame(height: 2.5).padding(.horizontal, 2).offset(y: -3) }
+                    }
+                    .help(m.kind == .wrong ? "写成了 \(m.char)，应为 \(m.expected.map(String.init) ?? "")" : "")
             }
         }
-        .help("绿色 = 正确 · 红色 = 写错 · 下划线 = 漏写 · 删除线 = 多写")
+        .help("你的输入：绿色 = 正确 · 红色 = 写错 · 橙色空位 = 漏写 · 删除线 = 多写")
     }
     private func color(_ k: LetterMark.Kind) -> Color {
         switch k { case .correct: .green; case .wrong: .red; case .missing: .orange; case .extra: .red }

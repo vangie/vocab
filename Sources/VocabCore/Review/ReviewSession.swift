@@ -47,6 +47,21 @@ public enum RatingMap {
         if seconds >= th.slow { return .fuzzy }
         return .good
     }
+
+    /// A spelling answered after using 提示 can at best count as 模糊.
+    public static func capped(_ r: ReviewRating, hinted: Bool) -> ReviewRating {
+        guard hinted, r == .good || r == .easy else { return r }
+        return .fuzzy
+    }
+}
+
+/// 提示 for 拼写: the first `shown` letters, the rest as blanks — "r e l _ _ _ _ _".
+public enum SpellingHint {
+    public static func mask(_ word: String, shown: Int) -> String {
+        word.enumerated().map { i, c in i < shown || !c.isLetter ? String(c) : "_" }.joined(separator: " ")
+    }
+    /// Letters a hint may reveal (never the whole word: the last letter stays for the user).
+    public static func maxHints(_ word: String) -> Int { max(0, word.count - 1) }
 }
 
 /// Picks the question type for a card. New and learning cards only get objective types; the
@@ -133,8 +148,13 @@ public struct ReviewQueue: Sendable, Codable, Equatable {
 /// Letter-level spelling feedback.
 public struct LetterMark: Hashable, Sendable {
     public enum Kind: Sendable { case correct, wrong, missing, extra }
+    /// What the user's line shows: the typed letter (correct / wrong / extra), or for `missing`
+    /// the left-out answer letter (drawn as a blank placeholder).
     public let char: Character
     public let kind: Kind
+    /// The answer letter this position aligns to (nil for `extra`).
+    public let expected: Character?
+    public init(char: Character, kind: Kind, expected: Character? = nil) { self.char = char; self.kind = kind; self.expected = expected }
 }
 
 public enum SpellingCheck {
@@ -142,10 +162,11 @@ public enum SpellingCheck {
         typed.trimmingCharacters(in: .whitespaces).lowercased() == answer.lowercased()
     }
 
-    /// Align typed against the answer (Levenshtein backtrace). Marks are in reading order:
-    /// correct/wrong carry the answer's letter, missing = left out, extra = typed but not in the answer.
+    /// Align the user's input against the answer (Levenshtein backtrace), in reading order:
+    /// correct / wrong carry the typed letter (wrong = substitution), missing = answer letter left out,
+    /// extra = typed letter not in the answer. Dropping `missing` reproduces exactly what was typed.
     public static func diff(typed: String, answer: String) -> [LetterMark] {
-        let a = Array(typed.lowercased()), b = Array(answer)
+        let raw = Array(typed), a = Array(typed.lowercased()), b = Array(answer)
         let bl = b.map { Character($0.lowercased()) }
         var d = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
         for i in 0...a.count { d[i][0] = i }
@@ -158,11 +179,11 @@ public enum SpellingCheck {
         var i = a.count, j = b.count; var out: [LetterMark] = []
         while i > 0 || j > 0 {
             if i > 0, j > 0, d[i][j] == d[i-1][j-1] + (a[i-1] == bl[j-1] ? 0 : 1) {
-                out.append(LetterMark(char: b[j-1], kind: a[i-1] == bl[j-1] ? .correct : .wrong)); i -= 1; j -= 1
+                out.append(LetterMark(char: raw[i-1], kind: a[i-1] == bl[j-1] ? .correct : .wrong, expected: b[j-1])); i -= 1; j -= 1
             } else if j > 0, d[i][j] == d[i][j-1] + 1 {
-                out.append(LetterMark(char: b[j-1], kind: .missing)); j -= 1
+                out.append(LetterMark(char: b[j-1], kind: .missing, expected: b[j-1])); j -= 1
             } else {
-                out.append(LetterMark(char: a[i-1], kind: .extra)); i -= 1
+                out.append(LetterMark(char: raw[i-1], kind: .extra)); i -= 1
             }
         }
         return out.reversed()

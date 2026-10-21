@@ -184,8 +184,54 @@ final class RatingAndSessionTests: XCTestCase {
         let d = SpellingCheck.diff(typed: "acomodate", answer: "accommodate")
         XCTAssertEqual(d.filter { $0.kind == .missing }.count, 2)
         XCTAssertEqual(String(d.filter { $0.kind != .extra }.map(\.char)), "accommodate")
+        XCTAssertEqual(String(d.filter { $0.kind != .missing }.map(\.char)), "acomodate")
         XCTAssertTrue(SpellingCheck.isCorrect(" Adapt ", "adapt"))
         XCTAssertEqual(ContextHint.blank("They adapted quickly to Adapt.", word: "adapt"), "They ＿＿＿ quickly to ＿＿＿.")
+    }
+}
+
+final class SpellingAlignTests: XCTestCase {
+    private func kinds(_ d: [LetterMark]) -> String {
+        d.map { m -> String in switch m.kind { case .correct: "="; case .wrong: "x"; case .missing: "-"; case .extra: "+" } }.joined()
+    }
+    private func typedLine(_ d: [LetterMark]) -> String { String(d.filter { $0.kind != .missing }.map(\.char)) }
+
+    func testSubstitutionShowsTypedLetter() {
+        let d = SpellingCheck.diff(typed: "relegion", answer: "religion")
+        XCTAssertEqual(kinds(d), "===x====")
+        XCTAssertEqual(d[3].char, "e"); XCTAssertEqual(d[3].expected, "i")
+        XCTAssertEqual(typedLine(d), "relegion")
+    }
+    func testInsertionIsExtra() {
+        let d = SpellingCheck.diff(typed: "religgion", answer: "religion")
+        XCTAssertEqual(d.filter { $0.kind == .extra }.map(\.char), ["g"])
+        XCTAssertEqual(d.filter { $0.kind == .correct }.count, 8)
+        XCTAssertEqual(typedLine(d), "religgion")
+    }
+    func testDeletionIsMissing() {
+        let d = SpellingCheck.diff(typed: "relgion", answer: "religion")
+        XCTAssertEqual(kinds(d), "===-====")
+        XCTAssertEqual(d[3].char, "i")
+        XCTAssertEqual(typedLine(d), "relgion")
+    }
+    func testTranspositionShowsBothTypedLetters() {
+        let d = SpellingCheck.diff(typed: "relgiion", answer: "religion")
+        XCTAssertEqual(typedLine(d), "relgiion")
+        XCTAssertEqual(String(d.filter { $0.kind != .extra }.compactMap(\.expected)), "religion")
+        XCTAssertEqual(d.filter { $0.kind == .correct }.count, 6)
+        let t = SpellingCheck.diff(typed: "teh", answer: "the")
+        XCTAssertEqual(kinds(t), "=xx"); XCTAssertEqual(typedLine(t), "teh")
+    }
+    func testKeepsTypedCase() {
+        XCTAssertEqual(typedLine(SpellingCheck.diff(typed: "Religon", answer: "religion")), "Religon")
+    }
+    func testHintCapAndMask() {
+        XCTAssertEqual(SpellingHint.mask("religion", shown: 3), "r e l _ _ _ _ _")
+        XCTAssertEqual(RatingMap.capped(.easy, hinted: true), .fuzzy)
+        XCTAssertEqual(RatingMap.capped(.good, hinted: true), .fuzzy)
+        XCTAssertEqual(RatingMap.capped(.forgot, hinted: true), .forgot)
+        XCTAssertEqual(RatingMap.capped(.easy, hinted: false), .easy)
+        XCTAssertEqual(SpellingHint.maxHints("go"), 1)
     }
 }
 

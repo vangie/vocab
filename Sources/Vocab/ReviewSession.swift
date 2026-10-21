@@ -25,6 +25,10 @@ final class ReviewSession: ObservableObject {
     @Published private(set) var queue = ReviewQueue(ids: [])
     @Published var revealed = false
     @Published var typed = ""
+    /// 拼写: letters revealed by 提示 for the current question (any hint caps the rating at 模糊).
+    @Published private(set) var hintsUsed = 0
+    /// 拼写: answered via 不会，看答案 (feedback shows only the correct word).
+    @Published private(set) var gaveUp = false
     @Published private(set) var chosen: Int?
     @Published private(set) var lastCorrect = false
     @Published private(set) var lastRating: ReviewRating?
@@ -269,7 +273,7 @@ final class ReviewSession: ObservableObject {
     private func loadCurrent() {
         flushFirstSight()
         saveSnapshot()
-        revealed = false; typed = ""; chosen = nil; marks = []; lastRating = nil; lastAnswer = nil
+        revealed = false; typed = ""; hintsUsed = 0; gaveUp = false; chosen = nil; marks = []; lastRating = nil; lastAnswer = nil
         guard let id = queue.current, let item = items[id], let factory else { end(); return }
         if quickCheck.contains(id) {
             quickCheck.remove(id)
@@ -384,6 +388,23 @@ final class ReviewSession: ObservableObject {
         finish(correct: SpellingCheck.isCorrect(typed, q.word))
     }
 
+    /// 提示: reveal one more letter; the field is filled with that prefix (the user's own typing is kept
+    /// when it already matches it).
+    func hint() {
+        guard phase == .asking, let q = question, q.type == .spelling, hintsUsed < SpellingHint.maxHints(q.word) else { return }
+        activity()
+        hintsUsed += 1
+        let prefix = String(q.word.prefix(hintsUsed))
+        if !typed.lowercased().hasPrefix(prefix.lowercased()) { typed = prefix }
+    }
+
+    /// 不会，看答案: show the spelling with the usual feedback; counts as 忘了 and goes to retry-later.
+    func giveUpSpelling() {
+        guard phase == .asking, let q = question, q.type == .spelling else { return }
+        marks = []; gaveUp = true
+        finish(correct: false)
+    }
+
     func flip() {
         guard phase == .asking, question?.type == .recall, !revealed else { return }
         revealed = true
@@ -401,7 +422,8 @@ final class ReviewSession: ObservableObject {
         guard let q = question else { return }
         activity()
         let secs = Date().timeIntervalSince(askedAt)
-        let r = RatingMap.rating(correct: correct, seconds: secs, type: q.type, length: q.word.count)
+        let r = RatingMap.capped(RatingMap.rating(correct: correct, seconds: secs, type: q.type, length: q.word.count),
+                                 hinted: q.type == .spelling && hintsUsed > 0)
         apply(r, correct: correct)
         lastCorrect = correct
         phase = .answered
