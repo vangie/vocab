@@ -57,7 +57,25 @@ public final class QuestionFactory: @unchecked Sendable {
         headword.filter { !Hyphenation.dots.contains($0) && !$0.isNumber }.trimmingCharacters(in: .whitespaces).lowercased()
     }
 
-    public func gloss(_ word: String) -> Gloss {
+    /// The word's gloss, tidied; a cross-reference ("labour 的美式拼法", "the past tense of lie") is
+    /// followed to the base word's real meaning, with the reference kept as a feedback-only note.
+    /// An unresolvable reference leaves the meaning empty, so no meaning-choice question is made.
+    public func gloss(_ word: String) -> Gloss { Self.resolve(word, raw: rawGloss) }
+
+    static func resolve(_ word: String, depth: Int = 0, raw: (String) -> Gloss) -> Gloss {
+        var g = raw(word)
+        g.chinese = GlossExtractor.tidy(g.chinese); g.english = GlossExtractor.tidy(g.english)
+        let zhRef = GlossExtractor.crossReference(g.chinese), enRef = GlossExtractor.crossReference(g.english)
+        guard let ref = zhRef ?? enRef else { return g }
+        let b = depth < 2 && ref.base.lowercased() != word.lowercased() ? resolve(ref.base, depth: depth + 1, raw: raw) : Gloss()
+        var out = g
+        out.note = zhRef != nil ? g.chinese : g.english
+        if zhRef != nil { out.chinese = b.chinese }
+        if enRef != nil { out.english = b.english }
+        return out
+    }
+
+    private func rawGloss(_ word: String) -> Gloss {
         let entries = service.lookup(word, in: dicts, maxPerDictionary: 2)
             .filter { Self.normalize($0.headword) == word.lowercased() }
         var g = Gloss()
@@ -66,7 +84,9 @@ public final class QuestionFactory: @unchecked Sendable {
             if g.english == nil { g.english = GlossExtractor.english(fromHTML: e.html) }
             if g.chinese != nil && g.english != nil { break }
         }
-        if g.chinese == nil, let z = fallbackChinese?(word.lowercased()) { g.chinese = z }
+        if g.chinese == nil || GlossExtractor.crossReference(g.chinese) != nil,
+           let z = fallbackChinese?(word.lowercased()), GlossExtractor.crossReference(z) == nil { g.chinese = z }
+        else if g.chinese == nil, let z = fallbackChinese?(word.lowercased()) { g.chinese = z }
         return g
     }
 
@@ -84,7 +104,7 @@ public final class QuestionFactory: @unchecked Sendable {
         var out: [(String, Gloss)] = []
         for c in Distractors.rank(target: word, candidates: cands, synonyms: syn, book: Set(book), limit: 14) {
             let g = gloss(c.word)
-            guard !g.isEmpty, !g.short.hasPrefix("/"), !g.short.contains("拼法"), !g.short.contains("过去式"), !g.short.contains("过去分词"), !g.short.contains("复数"), !g.short.contains("现在分词") else { continue }
+            guard !g.isEmpty, g.note == nil, !g.short.hasPrefix("/"), !g.short.contains("拼法"), !g.short.contains("过去式"), !g.short.contains("过去分词"), !g.short.contains("复数"), !g.short.contains("现在分词") else { continue }
             guard Distractors.keep(target: word, candidate: c.word, targetGloss: target, candidateGloss: g, synonyms: syn) else { continue }
             if out.contains(where: { $0.1.short == g.short || GlossExtractor.nearIdentical($0.1.chinese, g.chinese) }) { continue }
             out.append((c.word, g))

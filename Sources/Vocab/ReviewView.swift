@@ -155,7 +155,7 @@ private struct QuestionScreen: View {
         VStack(spacing: 0) {
             Spacer(minLength: d == .normal ? 16 : 6)
             if let q = session.question {
-                content(q, d).frame(maxWidth: d == .grid ? 640 : 560).padding(.horizontal, d == .normal ? 32 : 20)
+                content(q, d).frame(maxWidth: 640).padding(.horizontal, d == .normal ? 32 : 20)
                     .id(q.id)
                     .contentShape(Rectangle())
                     .onHover { session.autoPaused = $0 }
@@ -283,8 +283,9 @@ private struct Options: View {
     @Environment(\.quizDensity) private var d
 
     var body: some View {
-        if d == .grid {
-            Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+        // Two columns (1 2 / 3 4) by default; one column only when an option is too long for half the width.
+        ViewThatFits(in: .horizontal) {
+            Grid(horizontalSpacing: 8, verticalSpacing: d == .normal ? 8 : 5) {
                 ForEach(Array(stride(from: 0, to: q.options.count, by: 2)), id: \.self) { r in
                     GridRow {
                         option(r, q.options[r])
@@ -292,11 +293,18 @@ private struct Options: View {
                     }
                 }
             }
-        } else {
             VStack(spacing: d == .normal ? 8 : 5) {
                 ForEach(Array(q.options.enumerated()), id: \.offset) { i, opt in option(i, opt) }
             }
         }
+    }
+
+    /// English word options 20 pt semibold, meanings 17 pt (smaller when the window is short).
+    private var optionFont: Font {
+        if monospaced { return .system(.title3, design: .monospaced) }
+        let compact = d != .normal
+        return q.type == .meaningToWord ? .system(size: compact ? 17 : 20, weight: .semibold)
+                                        : .system(size: compact ? 15 : 17)
     }
 
     @ViewBuilder private func option(_ i: Int, _ opt: String) -> some View {
@@ -314,15 +322,21 @@ private struct Options: View {
         HStack(spacing: 12) {
             Text("\(i + 1)").font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 14)
             VStack(alignment: .leading, spacing: 2) {
-                Text(opt).font(monospaced ? .system(.title3, design: .monospaced) : .body)
+                Text(opt).font(optionFont)
                     .multilineTextAlignment(.leading).lineLimit(2)
                 if session.phase == .answered, q.type != .syllables {
-                    HStack(spacing: 6) {
-                        if !q.optionNotes[i].isEmpty {
-                            Text(q.optionNotes[i]).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    // Fixed-height slot whose width doesn't count toward the 2-column fit, so revealing
+                    // the answer never flips the layout.
+                    Color.clear.frame(height: 17).overlay(alignment: .leading) {
+                        HStack(spacing: 6) {
+                            if !q.optionNotes[i].isEmpty {
+                                Text(q.optionNotes[i]).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            if i < q.optionWords.count { PhoneticTag(session: session, word: q.optionWords[i], size: 13) }
                         }
-                        if i < q.optionWords.count { PhoneticTag(session: session, word: q.optionWords[i]) }
+                        .fixedSize()
                     }
+                    .clipped()
                 }
             }
             Spacer(minLength: 0)
@@ -447,7 +461,8 @@ private struct AnswerBanner: View {
                     }
                     PhoneticTag(session: session, word: q.word, audio: q.audio).fixedSize()
                 }
-                Text(q.gloss.short).foregroundStyle(.secondary).lineLimit(1)
+                // A followed cross-reference is explained here only (options never show it).
+                Text(q.gloss.short + (q.gloss.note.map { "（\($0)）" } ?? "")).foregroundStyle(.secondary).lineLimit(1)
             }
             .font(.callout)
             if let m = q.morpheme, q.type == .roots {
@@ -641,6 +656,9 @@ private struct Ring: View, Animatable {
     let color: Color
     let lineWidth: CGFloat
     var animatableData: Double { get { value } set { value = newValue } }
+    static func darker(_ c: Color) -> Color {
+        Color(nsColor: (NSColor(c).usingColorSpace(.sRGB) ?? NSColor(c)).blended(withFraction: 0.35, of: .black) ?? NSColor(c))
+    }
 
     var body: some View {
         let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
@@ -656,13 +674,17 @@ private struct Ring: View, Animatable {
                 if full {
                     Circle().stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
                 } else if v > 1 {
-                    // Past 100%: a solid full ring, then the extra lap in the same solid colour so its
-                    // start blends in; only the leading cap gets a shadow, making the overlap read as intentional.
+                    // Past 100% (Activity-style): the full ring, then the extra lap on top, darker where
+                    // it starts and full colour at its leading cap, which casts a shadow back onto the ring.
+                    let a = 2 * .pi * lap
                     Circle().stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
-                    Circle().trim(from: 0, to: max(lap, 0.0001)).stroke(color, style: style)
+                    Circle().trim(from: 0, to: max(lap, 0.0001))
+                        .stroke(AngularGradient(colors: [Self.darker(color), color], center: .center,
+                                                startAngle: .degrees(0), endAngle: .degrees(360 * max(lap, 0.01))),
+                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
                     Circle().fill(color).frame(width: lineWidth, height: lineWidth)
-                        .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 0)
-                        .offset(x: r * cos(2 * .pi * lap), y: r * sin(2 * .pi * lap))
+                        .shadow(color: .black.opacity(0.45), radius: 2.5, x: 3 * sin(a), y: -3 * cos(a))
+                        .offset(x: r * cos(a), y: r * sin(a))
                 } else if v > 0.002 {
                     Circle().trim(from: 0, to: max(lap, 0.0001))
                         .stroke(AngularGradient(colors: [start, color], center: .center,
@@ -897,13 +919,14 @@ private struct PhoneticTag: View {
     @ObservedObject var session: ReviewSession
     let word: String
     var audio: URL? = nil
+    var size: CGFloat? = nil
     @State private var p: Phonetic?
 
     var body: some View {
         HStack(spacing: 2) {
-            if let ipa = p?.ipa { Text("/\(ipa)/").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            if let ipa = p?.ipa { Text("/\(ipa)/").font(size.map { .system(size: $0) } ?? .caption).foregroundStyle(.secondary).lineLimit(1) }
             Button { session.pronounce(word, audio: audio ?? p?.audio) } label: {
-                Image(systemName: "speaker.wave.2").font(.caption)
+                Image(systemName: "speaker.wave.2").font(size.map { .system(size: $0 - 1) } ?? .caption)
             }
             .buttonStyle(.borderless).focusable(false)
             .help("朗读 \(word)")

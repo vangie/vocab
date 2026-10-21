@@ -4,7 +4,9 @@ import Foundation
 public struct Gloss: Hashable, Sendable {
     public var chinese: String?
     public var english: String?
-    public init(chinese: String? = nil, english: String? = nil) { self.chinese = chinese; self.english = english }
+    /// Feedback-only note for a followed cross-reference, e.g. "labour 的美式拼法" (never shown in options).
+    public var note: String?
+    public init(chinese: String? = nil, english: String? = nil, note: String? = nil) { self.chinese = chinese; self.english = english; self.note = note }
     public var isEmpty: Bool { (chinese ?? "").isEmpty && (english ?? "").isEmpty }
     /// What an option shows: Chinese when we have it (short, like 百词斩), else English.
     public var short: String { chinese ?? english ?? "" }
@@ -54,6 +56,31 @@ public enum GlossExtractor {
             s = s.replacingOccurrences(of: a, with: b)
         }
         return s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Strip separators left at either end ("/ labour 的美式拼法", "影响；").
+    public static func tidy(_ s: String?) -> String? {
+        guard let s else { return nil }
+        let t = s.trimmingCharacters(in: CharacterSet(charactersIn: " \t\n/;；,，、:：·|-–—").union(.whitespacesAndNewlines))
+        return t.isEmpty ? nil : t
+    }
+
+    /// A gloss that only points at another word: (base word, what kind), e.g.
+    /// "labour 的美式拼法", "lie的过去式", "= labour", "see labour", "variant of x", "the past tense of lie".
+    public static func crossReference(_ s: String?) -> (base: String, kind: String)? {
+        guard let t = tidy(s) else { return nil }
+        let w = "([A-Za-z][A-Za-z'’\\-]*)[¹²³⁴⁵⁶⁷⁸⁹⁰0-9]*"
+        let zh = "^\(w)\\s*的\\s*(美式拼法|英式拼法|美式英语拼法|英式英语拼法|另一种拼法|拼法变体|变体|异体|过去式和过去分词|过去式|过去分词|现在分词|复数形式|复数|比较级|最高级|第三人称单数形式|第三人称单数|缩写|简写|旧称)"
+        let en = "^(?:=|see|cf\\.?|(?:a |an )?variant(?: spelling)? of|another (?:spelling|form) of|(?:the )?(?:american|british|us|uk) (?:english )?(?:spelling|form) of|(?:the )?(?:past tense|past participle|present participle|plural|comparative|superlative|third person singular)(?: (?:and|or) (?:the )?(?:past participle|past tense))?(?: form)? of)\\s+\(w)"
+        let ns = t as NSString
+        if let re = try? NSRegularExpression(pattern: zh), let m = re.firstMatch(in: t, range: NSRange(location: 0, length: ns.length)) {
+            return (ns.substring(with: m.range(at: 1)), ns.substring(with: m.range(at: 2)))
+        }
+        if let re = try? NSRegularExpression(pattern: en, options: .caseInsensitive),
+           let m = re.firstMatch(in: t, range: NSRange(location: 0, length: ns.length)), m.range.length >= ns.length - 2 {
+            return (ns.substring(with: m.range(at: 1)), "cross")
+        }
+        return nil
     }
 
     static func clip(_ s: String, _ n: Int) -> String { s.count > n ? String(s.prefix(n)) + "…" : s }
