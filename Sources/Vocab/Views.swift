@@ -217,7 +217,7 @@ struct LookupDetailView: View {
                         .help(book.contains(lookup.searchedTerm) ? "已在生词本" : "加入生词本 (⌘D)")
                     }
                     Button { AppState.shared.settingsTab = "dictionary"; AppState.shared.settingsRequest += 1 } label: {
-                        Image(systemName: "slider.horizontal.3")
+                        Image(systemName: Mode.lookup.symbol)
                     }
                     .buttonStyle(.borderless)
                     .focusable(false)

@@ -105,12 +105,13 @@ public enum LongmanStyle {
 
     /* WORD FAMILY: quiet box below the senses. */
     .lm5ppbody .topics_container { margin: 10px 0 2px !important; padding: 5px 10px !important; }
-    .lm5ppbody .topics_container .related_topics { font-size: 11px !important; }
+    .lm5ppbody .topics_container .related_topics { font-size: 0 !important; }
+    .lm5ppbody .topics_container .related_topics::before { content: "Related topics 相关话题: "; font-size: 11px; color: var(--v-secondary); }
 
     /* WORD FAMILY collapsed by default (LongmanStyle.script adds .v-collapsed; click the heading). */
     .lm5ppbody .wordfams .LDOCE5pp_sensefold { cursor: pointer; display: block; }
-    .lm5ppbody .wordfams .asset_intro::after { content: " ▾"; font-size: 10px; }
-    .lm5ppbody .wordfams.v-collapsed .asset_intro::after { content: " ▸"; }
+    .lm5ppbody .wordfams .asset_intro::after { content: " 词族 ▾"; font-size: 10px; text-transform: none; }
+    .lm5ppbody .wordfams.v-collapsed .asset_intro::after { content: " 词族 ▸"; }
     .lm5ppbody .wordfams.v-collapsed .LDOCE_word_family { display: none !important; }
     .lm5ppbody .wordfams.v-collapsed { padding: 5px 10px !important; }
     .lm5ppbody .wordfams, .lm5ppbody .BoxPanel {
