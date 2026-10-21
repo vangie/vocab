@@ -51,6 +51,8 @@ public struct VocabTestResult: Equatable, Sendable, Codable {
     public var crossCheck: Int? = nil
     /// Share of pseudo-items claimed known (raw), when a test had them.
     public var pseudoYes: Double? = nil
+    /// Per-item log (word, rank, answer, meaning check) for diagnosis; nil for old results.
+    public var items: [VocabTestItem]? = nil
     public var sizeText: String { Adaptive.sizeText(estimate, low, high) }
 }
 
@@ -294,6 +296,7 @@ public struct VocabTestRun: Sendable {
         return VocabTestResult(date: date, estimate: Int(est.rounded()), low: Int(lo.rounded()), high: Int(hi.rounded()),
                                falseAlarm: f, bands: scores, bandRanges: bands, knownBands: known, checkBands: check,
                                reliability: Adaptive.reliability(falseAlarm: raw, pseudoSeen: ps.count),
-                               crossCheck: Adaptive.stratified(bands, asked: asked), pseudoYes: raw)
+                               crossCheck: Adaptive.stratified(bands, asked: asked), pseudoYes: raw,
+                               items: items.filter { $0.known != nil })
     }
 }
