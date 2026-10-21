@@ -63,7 +63,16 @@ private struct StartScreen: View {
             if plan.plan.configured {
                 PlanDashboard(session: session, plan: plan.plan)
                 VStack(spacing: 10) {
-                    if p.reviews + p.new == 0 {
+                    if let snap = session.resumable {
+                        // A round interrupted by quitting/relaunching: pick it up where it was left.
+                        Button { session.resume() } label: {
+                            Text("继续上一轮（\(snap.queue.done.count)/\(snap.queue.total)）").font(.title3.weight(.semibold))
+                                .frame(minWidth: 200, minHeight: 40)
+                        }
+                        .keyboardShortcut(.defaultAction).controlSize(.large)
+                        .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                        Button("放弃这一轮") { session.discardResumable() }.buttonStyle(.link).font(.callout)
+                    } else if p.reviews + p.new == 0 {
                         Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3.weight(.medium))
                         Button { session.start(extraNew: ReviewSession.extraGroupSize) } label: {
                             Text("再学一组").frame(minWidth: 120)

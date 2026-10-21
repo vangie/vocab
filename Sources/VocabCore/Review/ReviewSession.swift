@@ -101,7 +101,7 @@ public enum SessionPlanner {
 }
 
 /// The in-session queue: a wrong answer comes back a few cards later.
-public struct ReviewQueue: Sendable {
+public struct ReviewQueue: Sendable, Codable, Equatable {
     public private(set) var pending: [Int64]
     public private(set) var done: Set<Int64> = []
     public private(set) var wrong: [Int64: Int] = [:]
@@ -182,7 +182,24 @@ public enum ContextHint {
 
 /// Per-session tallies. `record` one answer; `unrecord` takes it back (斩 right after answering
 /// replaces that answer, so it isn't counted twice).
-public struct SessionStats {
+public struct SessionStats: Codable {
+    enum CodingKeys: String, CodingKey { case answered, correct, wrong, retired, ratings, byType, started }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        answered = try c.decode(Int.self, forKey: .answered); correct = try c.decode(Int.self, forKey: .correct)
+        wrong = try c.decode(Int.self, forKey: .wrong); retired = try c.decode(Int.self, forKey: .retired)
+        started = try c.decode(Date.self, forKey: .started)
+        for (k, v) in try c.decode([String: Int].self, forKey: .ratings) { if let i = Int(k), let r = ReviewRating(rawValue: i) { ratings[r] = v } }
+        for (k, v) in try c.decode([String: [Int]].self, forKey: .byType) where v.count == 2 { if let t = QuestionType(rawValue: k) { byType[t] = (v[0], v[1]) } }
+    }
+    public func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(answered, forKey: .answered); try c.encode(correct, forKey: .correct)
+        try c.encode(wrong, forKey: .wrong); try c.encode(retired, forKey: .retired); try c.encode(started, forKey: .started)
+        try c.encode(Dictionary(uniqueKeysWithValues: ratings.map { (String($0.key.rawValue), $0.value) }), forKey: .ratings)
+        try c.encode(Dictionary(uniqueKeysWithValues: byType.map { ($0.key.rawValue, [$0.value.right, $0.value.total]) }), forKey: .byType)
+    }
+
     public var answered = 0, correct = 0, wrong = 0, retired = 0
     public var ratings: [ReviewRating: Int] = [:]
     public var byType: [QuestionType: (right: Int, total: Int)] = [:]
@@ -205,4 +222,41 @@ public struct SessionStats {
             byType[type] = t.total > 0 ? t : nil
         }
     }
+}
+
+
+/// An unfinished 记词 round, saved after every step so a relaunch can resume it.
+/// Ratings, 斩 and counters are written as they happen elsewhere; this only keeps the round itself.
+public struct SessionSnapshot: Codable {
+    /// A list word not yet written to the wordbook (negative session id).
+    public struct Virtual: Codable, Equatable {
+        public var id: Int64, word: String, definition: String, list: ExamList
+        public init(id: Int64, word: String, definition: String, list: ExamList) { self.id = id; self.word = word; self.definition = definition; self.list = list }
+    }
+    public var date: Date
+    public var queue: ReviewQueue
+    public var stats: SessionStats
+    public var virtuals: [Virtual]
+    public var realID: [Int64: Int64]
+    public var newSource: [Int64: ExamList]
+    public var quickCheck: Set<Int64>
+    public var answeredOnce: Set<Int64>
+    public var firstDone: Set<Int64>
+    public init(date: Date, queue: ReviewQueue, stats: SessionStats, virtuals: [Virtual], realID: [Int64: Int64],
+                newSource: [Int64: ExamList], quickCheck: Set<Int64>, answeredOnce: Set<Int64>, firstDone: Set<Int64>) {
+        self.date = date; self.queue = queue; self.stats = stats; self.virtuals = virtuals; self.realID = realID
+        self.newSource = newSource; self.quickCheck = quickCheck; self.answeredOnce = answeredOnce; self.firstDone = firstDone
+    }
+
+    /// Resumable: same calendar day and cards left.
+    public func resumable(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        !queue.finished && calendar.isDate(date, inSameDayAs: now)
+    }
+
+    public static let defaultsKey = "reviewSessionSnapshot"
+    public static func load(_ d: UserDefaults = .standard) -> SessionSnapshot? {
+        d.data(forKey: defaultsKey).flatMap { try? JSONDecoder().decode(SessionSnapshot.self, from: $0) }
+    }
+    public func save(_ d: UserDefaults = .standard) { d.set(try? JSONEncoder().encode(self), forKey: Self.defaultsKey) }
+    public static func clear(_ d: UserDefaults = .standard) { d.removeObject(forKey: defaultsKey) }
 }

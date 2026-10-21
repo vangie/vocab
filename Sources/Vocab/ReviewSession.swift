@@ -198,8 +198,60 @@ final class ReviewSession: ObservableObject {
         overall = PlanModel.shared.progress()
     }
 
+    // MARK: resume after relaunch
+
+    /// An unfinished round from earlier today (shown as 「继续上一轮」).
+    @Published private(set) var resumable: SessionSnapshot? = SessionSnapshot.load().flatMap { $0.resumable() ? $0 : nil }
+
+    private func saveSnapshot() {
+        guard phase != .idle, phase != .summary, !queue.finished else { return }
+        let virtuals = virtualSource.compactMap { id, l -> SessionSnapshot.Virtual? in
+            guard let it = items[id] else { return nil }
+            return .init(id: id, word: it.word, definition: it.definition, list: l)
+        }
+        SessionSnapshot(date: Date(), queue: queue, stats: stats, virtuals: virtuals, realID: realID, newSource: newSource,
+                        quickCheck: quickCheck, answeredOnce: answeredOnce, firstDone: firstDone).save()
+    }
+
+    /// Pick the saved round up where it was left (same queue, counts and retry-later cards).
+    func resume() {
+        guard let snap = resumable else { return }
+        Self.applySchedulerSettings()
+        book.reload()
+        let now = Date()
+        var its: [Int64: WordItem] = [:]
+        virtualSource = [:]
+        for v in snap.virtuals { virtualSource[v.id] = v.list }
+        for id in Set(snap.queue.pending) {
+            let real = id > 0 ? id : snap.realID[id]
+            if let real, var it = book.items.first(where: { $0.id == real }) { it.id = id; its[id] = it; continue }
+            if let v = snap.virtuals.first(where: { $0.id == id }) {
+                var it = WordItem(id: id, word: v.word, definition: v.definition, dictionary: "", context: nil, added: now,
+                                  review: ReviewState(state: .new, step: nil, stability: nil, difficulty: nil, intervalDays: 0,
+                                                      repetitions: 0, lapses: 0, due: now, lastReviewed: nil))
+                it.sourceApp = v.list.sourceApp
+                its[id] = it
+            }
+        }
+        items = its
+        realID = snap.realID; newSource = snap.newSource; quickCheck = snap.quickCheck
+        answeredOnce = snap.answeredOnce; firstDone = snap.firstDone; firstPending = []
+        queue = snap.queue; stats = snap.stats
+        previousType = nil; lastActivity = Date(); easeHitThisRound = nil
+        // Cards deleted from the wordbook meanwhile can't be asked: skip them.
+        while let c = queue.current, items[c] == nil { queue.retire() }
+        resumable = nil
+        let dicts = DictionarySelection.enabled()
+        let thesaurus = DictionaryService.shared.availableDictionaries().first { $0.id == "com.apple.dictionary.OTE" }
+        factory = QuestionFactory(dicts: dicts, thesaurus: thesaurus, book: book.items.map(\.word))
+        if queue.finished { end() } else { loadCurrent() }
+    }
+
+    func discardResumable() { SessionSnapshot.clear(); resumable = nil }
+
     func start(extraNew: Int = 0) {
         Self.applySchedulerSettings()
+        discardResumable()
         let p = plan(extraNew: extraNew)
         items = Dictionary(uniqueKeysWithValues: p.map { ($0.id, $0) })
         queue = ReviewQueue(ids: p.map(\.id))
@@ -211,11 +263,12 @@ final class ReviewSession: ObservableObject {
         loadCurrent()
     }
 
-    func end() { flushFirstSight(); activity(); lastActivity = nil; cancelAutoAdvance(); phase = .summary; question = nil; book.reload() }
+    func end() { flushFirstSight(); SessionSnapshot.clear(); resumable = nil; activity(); lastActivity = nil; cancelAutoAdvance(); phase = .summary; question = nil; book.reload() }
     func reset() { phase = .idle; question = nil; refreshPreview() }
 
     private func loadCurrent() {
         flushFirstSight()
+        saveSnapshot()
         revealed = false; typed = ""; chosen = nil; marks = []; lastRating = nil; lastAnswer = nil
         guard let id = queue.current, let item = items[id], let factory else { end(); return }
         if quickCheck.contains(id) {
@@ -416,6 +469,7 @@ final class ReviewSession: ObservableObject {
         stats.record(r, correct: correct, type: q.type)
         lastAnswer = (r, correct, q.type)
         queue.answer(correct: correct)
+        saveSnapshot()
     }
 
     func next() {
