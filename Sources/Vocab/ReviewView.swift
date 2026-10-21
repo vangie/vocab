@@ -12,10 +12,10 @@ struct ReviewView: View {
         Group {
             switch session.phase {
             case .idle: StartScreen(session: session)
-            case .summary: ScrollIfShort { SummaryScreen(session: session) }
+            case .summary: FitHeight(levels: [.normal]) { _ in SummaryScreen(session: session) }
             case .loading: if session.question == nil { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) } else { QuestionScreen(session: session) }
             case .asking, .answered: QuestionScreen(session: session)
-            case .check: ScrollIfShort { CheckScreen(session: session) }
+            case .check: FitHeight(levels: [.normal]) { _ in CheckScreen(session: session) }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -46,7 +46,7 @@ private struct StartScreen: View {
             // Corner tools: a row of its own (not an overlay), so it never covers the rings.
             HStack { Spacer(); TestLinks() }
                 .padding(.horizontal, 14).padding(.top, 10)
-            ScrollIfShort { content }
+            FitHeight(levels: [.normal, .compact]) { d in content.environment(\.quizDensity, d) }
         }
     }
 
@@ -130,20 +130,24 @@ private struct QuestionScreen: View {
         VStack(spacing: 0) {
             // Header and the 继续 footer stay pinned; only the question scrolls when the window is short.
             header
-            ScrollIfShort {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 16)
-                    if let q = session.question {
-                        content(q).frame(maxWidth: 560).padding(.horizontal, 32)
-                            .id(q.id)
-                            .contentShape(Rectangle())
-                            .onHover { session.autoPaused = $0 }
-                    }
-                    Spacer(minLength: 16)
-                }
-            }
+            // Fit the window: normal → compact → compact with 2×2 options; scroll only as a last resort.
+            FitHeight(levels: [.normal, .compact, .grid]) { d in middle(d) }
             footer
         }
+    }
+
+    private func middle(_ d: QuizDensity) -> some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: d == .normal ? 16 : 6)
+            if let q = session.question {
+                content(q, d).frame(maxWidth: d == .grid ? 640 : 560).padding(.horizontal, d == .normal ? 32 : 20)
+                    .id(q.id)
+                    .contentShape(Rectangle())
+                    .onHover { session.autoPaused = $0 }
+            }
+            Spacer(minLength: d == .normal ? 16 : 6)
+        }
+        .environment(\.quizDensity, d)
     }
 
     private var header: some View {
@@ -169,8 +173,8 @@ private struct QuestionScreen: View {
         .padding(.horizontal, 20).padding(.top, 14)
     }
 
-    @ViewBuilder private func content(_ q: ReviewQuestion) -> some View {
-        VStack(spacing: 18) {
+    @ViewBuilder private func content(_ q: ReviewQuestion, _ density: QuizDensity) -> some View {
+        VStack(spacing: density == .normal ? 18 : 10) {
             switch q.type {
             case .recall: RecallCard(session: session, q: q)
             case .wordToMeaning:
@@ -189,7 +193,7 @@ private struct QuestionScreen: View {
                 Options(session: session, q: q)
             }
             if let h = q.hint, q.type != .wordToMeaning {
-                Text(h).italic().foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
+                Text(h).italic().foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(density == .normal ? 3 : 2)
                     .font(.callout).padding(.top, 4)
             }
             if session.phase == .answered { AnswerBanner(session: session, q: q) }
@@ -226,9 +230,10 @@ private struct QuestionScreen: View {
 
 private struct WordTitle: View {
     let q: ReviewQuestion; let session: ReviewSession
+    @Environment(\.quizDensity) private var d
     var body: some View {
         HStack(spacing: 10) {
-            Text(q.word).font(.system(size: 40, weight: .semibold, design: .serif)).textSelection(.enabled)
+            Text(q.word).font(.system(size: d.headword, weight: .semibold, design: .serif)).textSelection(.enabled)
             SpeakButton(session: session)
         }
     }
@@ -245,11 +250,13 @@ private struct SpeakButton: View {
 
 private struct MeaningPrompt: View {
     let q: ReviewQuestion
+    @Environment(\.quizDensity) private var d
     var body: some View {
         VStack(spacing: 8) {
             if let c = q.gloss.chinese { Text(c).font(.title2.weight(.semibold)).multilineTextAlignment(.center) }
             if let e = q.gloss.english {
                 Text(ContextHint.blank(e, word: q.word)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .lineLimit(d == .normal ? nil : 3)
             }
         }
     }
@@ -257,6 +264,7 @@ private struct MeaningPrompt: View {
 
 private struct RootPrompt: View {
     let q: ReviewQuestion; let session: ReviewSession
+    @Environment(\.quizDensity) private var d
     var body: some View {
         VStack(spacing: 8) {
             if let m = q.morpheme {
@@ -266,7 +274,7 @@ private struct RootPrompt: View {
                     Text(String(w[m.range])).foregroundStyle(Color.accentColor).underline()
                     Text(String(w[m.range.upperBound...]))
                 }
-                .font(.system(size: 40, weight: .semibold, design: .serif))
+                .font(.system(size: d.headword, weight: .semibold, design: .serif))
                 Text("\(m.morpheme.kind == .root ? "词根" : m.morpheme.kind == .prefix ? "前缀" : "后缀") \(m.morpheme.display) 的意思是？")
                     .foregroundStyle(.secondary)
             }
@@ -278,10 +286,26 @@ private struct Options: View {
     @ObservedObject var session: ReviewSession
     let q: ReviewQuestion
     var monospaced = false
+    @Environment(\.quizDensity) private var d
 
     var body: some View {
-        VStack(spacing: 8) {
-            ForEach(Array(q.options.enumerated()), id: \.offset) { i, opt in
+        if d == .grid {
+            Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+                ForEach(Array(stride(from: 0, to: q.options.count, by: 2)), id: \.self) { r in
+                    GridRow {
+                        option(r, q.options[r])
+                        if r + 1 < q.options.count { option(r + 1, q.options[r + 1]) } else { Color.clear }
+                    }
+                }
+            }
+        } else {
+            VStack(spacing: d == .normal ? 8 : 5) {
+                ForEach(Array(q.options.enumerated()), id: \.offset) { i, opt in option(i, opt) }
+            }
+        }
+    }
+
+    @ViewBuilder private func option(_ i: Int, _ opt: String) -> some View {
                 Button { session.choose(i) } label: {
                     HStack(spacing: 12) {
                         Text("\(i + 1)").font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 14)
@@ -298,8 +322,8 @@ private struct Options: View {
                             else if i == session.chosen { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }
                         }
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, d == .normal ? 14 : 10).padding(.vertical, d == .normal ? 10 : 5)
+                    .frame(maxWidth: .infinity, maxHeight: d == .grid ? .infinity : nil, alignment: .leading)
                     .background(background(i), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.separator.opacity(0.6)))
                     .contentShape(Rectangle())
@@ -307,8 +331,6 @@ private struct Options: View {
                 .buttonStyle(.plain)
                 .disabled(session.phase != .asking)
                 .modifier(NumberKey(n: i + 1, active: session.phase == .asking))
-            }
-        }
     }
 
     private func background(_ i: Int) -> some ShapeStyle {
@@ -467,6 +489,7 @@ private struct SummaryScreen: View {
 /// Start screen summary when a plan exists, Activity-summary style: big rings, stat column,
 /// and a row with the target pace and the streak.
 private struct PlanDashboard: View {
+    @Environment(\.quizDensity) private var dens
     @ObservedObject var session: ReviewSession
     let plan: StudyPlan
 
@@ -484,15 +507,15 @@ private struct PlanDashboard: View {
         let rings = ActivityRings(values: [frac(t.newDone, t.newQuota), frac(t.reviewsDone, t.reviewTarget),
                                            t.studySeconds / Double(goal * 60)],
                                   colors: [Self.newColor, Self.reviewColor, Self.timeColor])
-            .frame(width: 210, height: 210)
+            .frame(width: dens == .normal ? 210 : 150, height: dens == .normal ? 210 : 150)
             .accessibilityHidden(true)
-        let stats = VStack(alignment: .leading, spacing: 20) {
+        let stats = VStack(alignment: .leading, spacing: dens == .normal ? 20 : 10) {
             StatRow(label: "今日新词", value: t.newDone, total: t.newQuota, color: Self.newColor)
             StatRow(label: "今日复习", value: t.reviewsDone, total: t.reviewTarget, color: Self.reviewColor)
             StatRow(label: "今日学习", value: minutes, total: goal, color: Self.timeColor, unit: "分钟")
         }
         .fixedSize()
-        VStack(spacing: 32) {
+        VStack(spacing: dens == .normal ? 32 : 14) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 44) { rings; stats }
                 VStack(spacing: 24) { rings; stats }
@@ -705,6 +728,28 @@ enum LatinBookIcon {
     }
 }
 
+
+enum QuizDensity: Int { case normal, compact, grid
+    var headword: CGFloat { self == .normal ? 40 : 30 }
+}
+private struct QuizDensityKey: EnvironmentKey { static let defaultValue = QuizDensity.normal }
+extension EnvironmentValues {
+    var quizDensity: QuizDensity { get { self[QuizDensityKey.self] } set { self[QuizDensityKey.self] = newValue } }
+}
+
+/// Shows the first density level whose layout fits the available height (spacers at their minimum),
+/// filling the space; scrolls the densest level only if none fits.
+struct FitHeight<Content: View>: View {
+    let levels: [QuizDensity]
+    @ViewBuilder var content: (QuizDensity) -> Content
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            ForEach(levels, id: \.self) { d in content(d) }
+            ScrollIfShort { content(levels.last ?? .normal) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
 /// Centres its content in the available height, and scrolls instead of overflowing (which would
 /// push views up under the toolbar and clip the bottom) when the window is too short.
