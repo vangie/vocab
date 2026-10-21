@@ -48,6 +48,7 @@ private struct StartScreen: View {
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                 .padding([.horizontal, .top], 16)
             }
+            if let l = session.tooEasyList { EaseBanner(session: session, list: l).padding([.horizontal, .top], 16) }
             // Corner tools: a row of its own (not an overlay), so it never covers the rings.
             HStack { Spacer(); TestLinks() }
                 .padding(.horizontal, 14).padding(.top, 10)
@@ -439,6 +440,9 @@ private struct SummaryScreen: View {
             Spacer()
             Image(systemName: "flag.checkered").font(.system(size: 40, weight: .light)).foregroundStyle(.secondary)
             Text(session.queue.finished ? "本轮完成" : "本轮小结").font(.title2.weight(.semibold))
+            if let l = session.easeHitThisRound, session.tooEasyList == l {
+                EaseBanner(session: session, list: l).frame(maxWidth: 560).padding(.horizontal, 24)
+            }
             HStack(spacing: 28) {
                 Stat(value: session.queue.done.count, label: "完成")
                 Stat(value: s.correct, label: "答对")
@@ -778,5 +782,55 @@ private struct SessionHeader: View {
             ProgressView(value: session.queue.progress).progressViewStyle(.linear)
         }
         .padding(.horizontal, 20).padding(.top, 14)
+    }
+}
+
+
+/// 「这本词书太简单了」: most new words were 斩'd at first sight; suggest a harder list.
+private struct EaseBanner: View {
+    @ObservedObject var session: ReviewSession
+    @ObservedObject private var plan = PlanModel.shared
+    let list: ExamList
+    @State private var test = false
+
+    var body: some View {
+        let estimate = plan.results.first?.estimate
+        let active = Set(plan.plan.sources.filter(\.enabled).compactMap { s -> ExamList? in if case .list(let l) = s.id { return l }; return nil })
+        let next = ListEase.recommend(after: list, estimate: estimate, exclude: active)
+        let pct = Int((session.ease.share(list) * 100).rounded())
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "arrow.up.forward.circle.fill").foregroundStyle(Color.accentColor).font(.title3)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("「\(list.title)」对你来说可能太简单了").font(.headline)
+                Text(message(pct: pct, estimate: estimate, next: next))
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    if let next {
+                        Button("换到\(next.title)") { session.switchList(from: list, to: next) }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    Button("继续当前词库") { session.dismissEase(list) }
+                    if estimate == nil {
+                        Button("先做词汇量测试") { test = true }.buttonStyle(.link)
+                    }
+                }
+                .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+            Button { session.dismissEase(list) } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).help("不再提示这本词书")
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        .sheet(isPresented: $test) { VocabTestSheet() }
+    }
+
+    private func message(pct: Int, estimate: Int?, next: ExamList?) -> String {
+        var m = "最近 \(session.ease.samples(list)) 个新词里，\(pct)% 在第一次见到时就斩了。"
+        if let e = estimate { m += "你的词汇量测试约 \(Adaptive.roundSize(e).formatted()) 词，" }
+        if let next { m += "建议换成更难的「\(next.title)」；已斩和已掌握的词会自动跳过。" }
+        else { m += "已经没有更难的词书了。" }
+        return m
     }
 }

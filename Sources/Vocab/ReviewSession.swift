@@ -88,6 +88,46 @@ final class ReviewSession: ObservableObject {
     private var quickCheck: Set<Int64> = []
     private var realID: [Int64: Int64] = [:]
 
+    // MARK: 词书太简单？ First-sight outcomes of new list words (see ListEase).
+    /// New words drawn from an exam list this session.
+    private var newSource: [Int64: ExamList] = [:]
+    /// Answered at first sight, not yet final (斩 right after answering still counts as 斩).
+    private var firstPending: Set<Int64> = []
+    private var firstDone: Set<Int64> = []
+    @Published private(set) var ease = ListEase.load()
+    /// Set when a list crossed the threshold during this round (shown in the summary).
+    @Published private(set) var easeHitThisRound: ExamList?
+
+    private func noteFirstSight(_ id: Int64, retired: Bool) {
+        guard let l = newSource[id], !firstDone.contains(id) else { return }
+        firstDone.insert(id); firstPending.remove(id)
+        let before = ease.tooEasy(l)
+        ease.record(l, retiredAtFirstSight: retired); ease.save()
+        if !before && ease.tooEasy(l) { easeHitThisRound = l }
+    }
+    private func flushFirstSight() { for id in firstPending { noteFirstSight(id, retired: false) } }
+
+    /// The active exam list that is too easy (most recently crossed first), if any.
+    var tooEasyList: ExamList? {
+        let active = PlanModel.shared.plan.sources.filter(\.enabled).compactMap { if case .list(let l) = $0.id { return l }; return nil }
+        if let h = easeHitThisRound, active.contains(h), ease.tooEasy(h) { return h }
+        return active.first { ease.tooEasy($0) }
+    }
+    func dismissEase(_ l: ExamList) { ease.dismiss(l); ease.save(); if easeHitThisRound == l { easeHitThisRound = nil } }
+    /// Replace list `from` by `to` in the plan (same share). Learned/斩'd words are excluded globally by word.
+    func switchList(from: ExamList, to: ExamList) {
+        var p = PlanModel.shared.plan
+        let ratio = p.sources.first { $0.id == .list(from) }?.ratio ?? 1
+        for i in p.sources.indices {
+            if p.sources[i].id == .list(from) { p.sources[i].enabled = false }
+            if p.sources[i].id == .list(to) { p.sources[i].enabled = true; p.sources[i].ratio = ratio }
+        }
+        if !p.sources.contains(where: { $0.id == .list(to) }) { p.sources.append(PlanSource(id: .list(to), enabled: true, ratio: ratio)) }
+        PlanModel.shared.plan = p
+        easeHitThisRound = nil
+        refreshPreview()
+    }
+
     /// Size of a 「再学一组」 extra group: the daily new-word quota, or 10 if none.
     static var extraGroupSize: Int { let n = PlanModel.shared.plan.dailyNew; return n > 0 ? n : 10 }
 
@@ -106,14 +146,17 @@ final class ReviewSession: ObservableObject {
         let due = live.filter { !SessionPlanner.isNew($0) && $0.review.due <= now }.sorted { $0.review.due < $1.review.due }
         let reviews = extraNew > 0 ? due : Array(due.prefix(PlanMath.reviewsToday(plan: p, due: due.count)))
         let room = extraNew > 0 ? extraNew : PlanMath.newToday(plan: p, due: due.count, introducedToday: Self.introducedToday)
-        virtualSource = [:]; quickCheck = []; realID = [:]
+        virtualSource = [:]; quickCheck = []; realID = [:]; newSource = [:]
         guard room > 0 else { return reviews }
         let picks = PlanModel.shared.drawNew(count: room, liveItems: live)
         var fresh: [WordItem] = []
         var next: Int64 = -1
         let checkWords = PlanModel.shared.quickCheckWords
         for (w, src) in picks {
-            if let it = book.items.first(where: { $0.word.caseInsensitiveCompare(w) == .orderedSame }) { fresh.append(it); continue }
+            if let it = book.items.first(where: { $0.word.caseInsensitiveCompare(w) == .orderedSame }) {
+                if case .list(let l) = src { newSource[it.id] = l }
+                fresh.append(it); continue
+            }
             guard case .list(let l) = src else { continue }
             var it = WordItem(id: next, word: w, definition: WordLists.shared?.shortChinese(w) ?? "", dictionary: "",
                               context: nil, added: now,
@@ -121,6 +164,7 @@ final class ReviewSession: ObservableObject {
                                                   repetitions: 0, lapses: 0, due: now, lastReviewed: nil))
             it.sourceApp = l.sourceApp
             virtualSource[next] = l
+            newSource[next] = l
             if checkWords.contains(w.lowercased()) { quickCheck.insert(next) }
             fresh.append(it); next -= 1
         }
@@ -160,16 +204,18 @@ final class ReviewSession: ObservableObject {
         items = Dictionary(uniqueKeysWithValues: p.map { ($0.id, $0) })
         queue = ReviewQueue(ids: p.map(\.id))
         stats = Stats(); answeredOnce = []; previousType = nil; lastActivity = Date()
+        firstPending = []; firstDone = []; easeHitThisRound = nil
         let dicts = DictionarySelection.enabled()
         let thesaurus = DictionaryService.shared.availableDictionaries().first { $0.id == "com.apple.dictionary.OTE" }
         factory = QuestionFactory(dicts: dicts, thesaurus: thesaurus, book: book.items.map(\.word))
         loadCurrent()
     }
 
-    func end() { activity(); lastActivity = nil; cancelAutoAdvance(); phase = .summary; question = nil; book.reload() }
+    func end() { flushFirstSight(); activity(); lastActivity = nil; cancelAutoAdvance(); phase = .summary; question = nil; book.reload() }
     func reset() { phase = .idle; question = nil; refreshPreview() }
 
     private func loadCurrent() {
+        flushFirstSight()
         revealed = false; typed = ""; chosen = nil; marks = []; lastRating = nil; lastAnswer = nil
         guard let id = queue.current, let item = items[id], let factory else { end(); return }
         if quickCheck.contains(id) {
@@ -245,6 +291,7 @@ final class ReviewSession: ObservableObject {
         guard phase == .check, let id = queue.current else { return }
         activity()
         checkWord = nil
+        noteFirstSight(id, retired: known)
         if known {
             if let rid = materialize(id) { _ = try? book.store?.retire(id: rid) }
             queue.retire(); stats.retired += 1
@@ -347,6 +394,7 @@ final class ReviewSession: ObservableObject {
         if !answeredOnce.contains(item.id) {
             if SessionPlanner.isNew(item) { Self.noteIntroduced() } else { Self.noteReviewed() }
         }
+        if newSource[item.id] != nil, !firstDone.contains(item.id) { firstPending.insert(item.id) }
         answeredOnce.insert(item.id)
         if let rid = materialize(item.id), var updated = try? book.store?.review(id: rid, rating: r) {
             updated.id = item.id   // keep the session's key
@@ -372,6 +420,7 @@ final class ReviewSession: ObservableObject {
         activity()
         // Retiring overwrites the review state just written by the answer (Scheduler.retire).
         if let rid = materialize(q.itemID) { _ = try? book.store?.retire(id: rid) }
+        noteFirstSight(q.itemID, retired: true)   // no-op unless this is the word's first sight
         if phase == .asking { queue.retire() }
         else {
             queue.dropCurrentRequeue(q.itemID)   // also removes a wrong answer's relearning requeue
