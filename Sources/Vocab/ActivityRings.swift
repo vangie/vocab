@@ -67,33 +67,40 @@ struct Ring: View, Animatable {
             if abs(t - 1) < 0.0005 { ctx.stroke(full, with: .color(c), style: butt); return }  // exactly full
             if t <= 0.002 { return }
 
-            let headTurn: Double, tailTurn: Double, tailColor: Color, headColor: Color
             if t < 1 {
                 ctx.stroke(arc(0, t), with: .conicGradient(Gradient(stops: [
                     .init(color: Self.shade(c, -0.25), location: 0), .init(color: c, location: t),
                 ]), center: ctr, angle: angle(0)), style: butt)
                 ctx.fill(disc(0), with: .color(Self.shade(c, -0.25)))   // start cap
-                headTurn = t; tailTurn = 0; tailColor = Self.shade(c, -0.25); headColor = c
-            } else {
-                ctx.stroke(full, with: .color(c), style: butt)
-                let start = t - 0.25
-                headTurn = t; tailTurn = start; tailColor = c; headColor = Self.shade(c, 0.12)
-                ctx.stroke(arc(start, t), with: .conicGradient(Gradient(stops: [
-                    .init(color: c, location: 0), .init(color: headColor, location: 0.25),
-                ]), center: ctr, angle: angle(start)), style: butt)
-            }
-            _ = tailTurn; _ = tailColor
-            // Head: shadow cast backwards along the tangent, then the cap.
-            let a = 2 * Double.pi * headTurn
-            let back = CGSize(width: -cos(a) * w * 0.18, height: -sin(a) * w * 0.18)
-            if t > 0.05 {
-                ctx.drawLayer { l in
-                    l.addFilter(.shadow(color: .black.opacity(t > 1 ? 0.5 : 0.3), radius: w * 0.14, x: back.width, y: back.height))
-                    l.fill(disc(headTurn), with: .color(headColor))
+                // Head: shadow cast backwards onto the arc, then the cap.
+                let a = 2 * Double.pi * t
+                if t > 0.05 {
+                    ctx.drawLayer { l in
+                        l.addFilter(.shadow(color: .black.opacity(0.3), radius: w * 0.14, x: -cos(a) * w * 0.18, y: -sin(a) * w * 0.18))
+                        l.fill(disc(t), with: .color(c))
+                    }
+                } else {
+                    ctx.fill(disc(t), with: .color(c))
                 }
-            } else {
-                ctx.fill(disc(headTurn), with: .color(headColor))
+                return
             }
+
+            // Past 100%: the band keeps going over itself. One conic gradient (darker → full colour)
+            // ending at the head paints both the base lap and the overlay, so the overlay is
+            // indistinguishable from the ring under it; only the head's shadow shows the crossing.
+            let grad = GraphicsContext.Shading.conicGradient(
+                Gradient(colors: [Self.shade(c, -0.22), c]), center: ctr, angle: angle(t))
+            ctx.stroke(full, with: grad, style: butt)
+            // Shadow cast by the head onto the lap AHEAD of it (clockwise), clipped to the band.
+            let a = 2 * Double.pi * t
+            let fwd = CGSize(width: cos(a) * w * 0.3, height: sin(a) * w * 0.3)
+            ctx.drawLayer { l in
+                l.clip(to: full.strokedPath(butt))
+                l.addFilter(.blur(radius: w * 0.25))
+                l.fill(disc(t).offsetBy(dx: fwd.width, dy: fwd.height), with: .color(.black.opacity(0.45)))
+            }
+            ctx.stroke(arc(t - 0.3, t), with: grad, style: butt)
+            ctx.fill(disc(t), with: .color(c))   // head cap: exactly the band's colour at the head
         }
     }
 }

@@ -6,7 +6,7 @@ let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/tmp/rin
 let red = Color(red: 0.98, green: 0.07, blue: 0.31), green = Color(red: 0.25, green: 0.82, blue: 0.30), blue = Color(red: 0.0, green: 0.78, blue: 0.98)
 
 @MainActor func render(_ dark: Bool) {
-    let vals: [Double] = [0.3, 0.9, 1.0, 1.1, 1.4, 2.2]
+    let vals: [Double] = [0.3, 0.9, 1.0, 1.07, 1.4, 2.07]
     let v = HStack(spacing: 24) {
         ForEach(vals, id: \.self) { p in
             VStack(spacing: 6) {
