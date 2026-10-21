@@ -163,6 +163,7 @@ private struct QuestionScreen: View {
             Spacer(minLength: d == .normal ? 16 : 6)
         }
         .environment(\.quizDensity, d)
+        .transaction { $0.animation = nil }   // reveal: no implicit layout animation
     }
 
     private var header: some View { SessionHeader(session: session) }
@@ -190,7 +191,14 @@ private struct QuestionScreen: View {
                 Text(h).italic().foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(density == .normal ? 3 : 2)
                     .font(.callout).padding(.top, 4)
             }
-            if session.phase == .answered { AnswerBanner(session: session, q: q) }
+            if q.type != .recall {
+                // Always laid out (hidden before the reveal) so nothing moves when the answer appears.
+                let shown = session.phase == .answered
+                AnswerBanner(session: session, q: q, active: shown)
+                    .opacity(shown ? 1 : 0).allowsHitTesting(shown).accessibilityHidden(!shown)
+            } else if session.phase == .answered {
+                AnswerBanner(session: session, q: q, active: true)
+            }
         }
     }
 
@@ -282,21 +290,54 @@ private struct Options: View {
     var monospaced = false
     @Environment(\.quizDensity) private var d
 
+    @State private var width: CGFloat = 0
+
     var body: some View {
-        // Two columns (1 2 / 3 4) by default; one column only when an option is too long for half the width.
-        ViewThatFits(in: .horizontal) {
-            Grid(horizontalSpacing: 8, verticalSpacing: d == .normal ? 8 : 5) {
-                ForEach(Array(stride(from: 0, to: q.options.count, by: 2)), id: \.self) { r in
-                    GridRow {
-                        option(r, q.options[r])
-                        if r + 1 < q.options.count { option(r + 1, q.options[r + 1]) } else { Color.clear }
+        // Two columns (1 2 / 3 4) unless an option needs more than 2 lines at half width. Decided from the
+        // option texts and the width only, so it is the same before and after the reveal.
+        let grid = useGrid
+        Group {
+            if grid {
+                Grid(horizontalSpacing: 8, verticalSpacing: d == .normal ? 8 : 5) {
+                    ForEach(Array(stride(from: 0, to: q.options.count, by: 2)), id: \.self) { r in
+                        GridRow {
+                            option(r, q.options[r], grid: true)
+                            if r + 1 < q.options.count { option(r + 1, q.options[r + 1], grid: true) } else { Color.clear }
+                        }
                     }
                 }
-            }
-            VStack(spacing: d == .normal ? 8 : 5) {
-                ForEach(Array(q.options.enumerated()), id: \.offset) { i, opt in option(i, opt) }
+            } else {
+                VStack(spacing: d == .normal ? 8 : 5) {
+                    ForEach(Array(q.options.enumerated()), id: \.offset) { i, opt in option(i, opt, grid: false) }
+                }
             }
         }
+        .frame(maxWidth: .infinity)
+        .background(GeometryReader { g in
+            Color.clear.onAppear { width = g.size.width }.onChange(of: g.size.width) { _, w in width = w }
+        })
+    }
+
+    private var useGrid: Bool {
+        guard q.options.count >= 2 else { return false }
+        let w = width > 0 ? width : 600
+        let text = (w - 8) / 2 - (d == .normal ? 90 : 80)
+        guard text > 40 else { return false }
+        let font = nsOptionFont
+        let two = ceil(font.ascender - font.descender + font.leading) * 2 + 2
+        return q.options.allSatisfy { o in
+            let h = (o as NSString).boundingRect(with: NSSize(width: text, height: .greatestFiniteMagnitude),
+                                                 options: [.usesLineFragmentOrigin, .usesFontLeading],
+                                                 attributes: [.font: font]).height
+            return h <= two
+        }
+    }
+
+    private var nsOptionFont: NSFont {
+        if monospaced { return .monospacedSystemFont(ofSize: 15, weight: .regular) }
+        let compact = d != .normal
+        return q.type == .meaningToWord ? .systemFont(ofSize: compact ? 17 : 20, weight: .semibold)
+                                        : .systemFont(ofSize: compact ? 15 : 17)
     }
 
     /// English word options 20 pt semibold, meanings 17 pt (smaller when the window is short).
@@ -307,25 +348,27 @@ private struct Options: View {
                                         : .system(size: compact ? 15 : 17)
     }
 
-    @ViewBuilder private func option(_ i: Int, _ opt: String) -> some View {
+    @ViewBuilder private func option(_ i: Int, _ opt: String, grid: Bool) -> some View {
         if session.phase == .asking {
-            Button { session.choose(i) } label: { row(i, opt) }
+            Button { session.choose(i) } label: { row(i, opt, grid: grid) }
                 .buttonStyle(.plain)
                 .modifier(NumberKey(n: i + 1, active: true))
         } else {
             // Answered: a plain row, so the speaker button inside it is clickable.
-            row(i, opt)
+            row(i, opt, grid: grid)
         }
     }
 
-    private func row(_ i: Int, _ opt: String) -> some View {
+    private func row(_ i: Int, _ opt: String, grid: Bool) -> some View {
         HStack(spacing: 12) {
             Text("\(i + 1)").font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 14)
             VStack(alignment: .leading, spacing: 2) {
+                // Never truncated: up to 2 lines in the grid (checked in useGrid), unlimited in one column.
                 Text(opt).font(optionFont)
-                    .multilineTextAlignment(.leading).lineLimit(2)
-                if session.phase == .answered, q.type != .syllables {
-                    // Fixed-height slot whose width doesn't count toward the 2-column fit, so revealing
+                    .multilineTextAlignment(.leading).lineLimit(grid ? 2 : nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                if q.type != .syllables {
+                    // Fixed-height slot, reserved before the reveal too (hidden), so nothing moves; and whose width doesn't count toward the 2-column fit, so revealing
                     // the answer never flips the layout.
                     Color.clear.frame(height: 17).overlay(alignment: .leading) {
                         HStack(spacing: 6) {
@@ -335,6 +378,8 @@ private struct Options: View {
                             if i < q.optionWords.count { PhoneticTag(session: session, word: q.optionWords[i], size: 13) }
                         }
                         .fixedSize()
+                        .opacity(session.phase == .answered ? 1 : 0)
+                        .allowsHitTesting(session.phase == .answered)
                     }
                     .clipped()
                 }
@@ -346,7 +391,7 @@ private struct Options: View {
             }
         }
         .padding(.horizontal, d == .normal ? 14 : 10).padding(.vertical, d == .normal ? 10 : 5)
-        .frame(maxWidth: .infinity, maxHeight: d == .grid ? .infinity : nil, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: grid ? .infinity : nil, alignment: .leading)   // equal heights per row
         .background(background(i), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.separator.opacity(0.6)))
         .contentShape(Rectangle())
@@ -374,26 +419,33 @@ private struct RecallCard: View {
         VStack(spacing: 16) {
             WordTitle(q: q, session: session)
             if q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.tertiary) }
-            if session.revealed {
-                Divider().frame(maxWidth: 240)
-                MeaningPrompt(q: q)
-                HStack(spacing: 10) {
-                    // Must pick one (no skip): 忘了 · 模糊 · 记得.
-                    ForEach([ReviewRating.forgot, .fuzzy, .good], id: \.self) { r in
-                        Button { session.selfRate(r) } label: {
-                            VStack(spacing: 1) { Text(r.label); Text("\(r.rawValue)").font(.caption2).foregroundStyle(.secondary) }
-                                .frame(minWidth: 56)
+            // Front and back share one slot (the taller one sets the height), so flipping doesn't move the card.
+            ZStack(alignment: .top) {
+                VStack(spacing: 16) {
+                    Divider().frame(maxWidth: 240)
+                    MeaningPrompt(q: q)
+                    HStack(spacing: 10) {
+                        // Must pick one (no skip): 忘了 · 模糊 · 记得.
+                        ForEach([ReviewRating.forgot, .fuzzy, .good], id: \.self) { r in
+                            Button { session.selfRate(r) } label: {
+                                VStack(spacing: 1) { Text(r.label); Text("\(r.rawValue)").font(.caption2).foregroundStyle(.secondary) }
+                                    .frame(minWidth: 56)
+                            }
+                            .controlSize(.large)
+                            .modifier(RateKey(n: r.rawValue, active: session.revealed))
                         }
-                        .controlSize(.large)
-                        .keyboardShortcut(KeyEquivalent(Character("\(r.rawValue)")), modifiers: [])
+                    }
+                    .padding(.top, 6)
+                }
+                .opacity(session.revealed ? 1 : 0).allowsHitTesting(session.revealed)
+                if !session.revealed {
+                    VStack(spacing: 16) {
+                        Text("想一想它的意思").foregroundStyle(.secondary)
+                        Button("显示释义") { session.flip() }
+                            .keyboardShortcut(.space, modifiers: []).controlSize(.large)
+                        Text("空格").font(.caption).foregroundStyle(.tertiary)
                     }
                 }
-                .padding(.top, 6)
-            } else {
-                Text("想一想它的意思").foregroundStyle(.secondary)
-                Button("显示释义") { session.flip() }
-                    .keyboardShortcut(.space, modifiers: []).controlSize(.large)
-                Text("空格").font(.caption).foregroundStyle(.tertiary)
             }
         }
     }
@@ -408,16 +460,25 @@ private struct SpellingCard: View {
             Button { session.speak() } label: { Image(systemName: "speaker.wave.2.fill").font(.system(size: 28)) }
                 .buttonStyle(.borderless).help("再听一遍（⌘R）").keyboardShortcut("r", modifiers: .command)
             MeaningPrompt(q: q)
-            if session.phase == .answered {
-                Letters(marks: session.marks).padding(.top, 4)
-                if !session.lastCorrect { Text(q.word).font(.system(size: 26, weight: .semibold, design: .serif)) }
-            } else {
-                TextField("拼写这个单词，↩ 提交", text: $session.typed)
-                    .textFieldStyle(.roundedBorder).font(.system(size: 22, design: .serif))
-                    .multilineTextAlignment(.center).frame(maxWidth: 320)
-                    .autocorrectionDisabled().focused($focused)
-                    .onSubmit { session.submitSpelling() }
-                    .onAppear { DispatchQueue.main.async { focused = true } }
+            // Both states share one fixed slot so the card doesn't move on submit.
+            let answered = session.phase == .answered
+            ZStack(alignment: .top) {
+                VStack(spacing: 6) {
+                    Letters(marks: session.marks).frame(minHeight: 32)
+                    Text(q.word).font(.system(size: 26, weight: .semibold, design: .serif))
+                        .opacity(answered && !session.lastCorrect ? 1 : 0)
+                }
+                .padding(.top, 4)
+                .opacity(answered ? 1 : 0)
+                if !answered {
+                    TextField("拼写这个单词，↩ 提交", text: $session.typed)
+                        .textFieldStyle(.roundedBorder).font(.system(size: 22, design: .serif))
+                        .multilineTextAlignment(.center).frame(maxWidth: 320)
+                        .autocorrectionDisabled().focused($focused)
+                        .onSubmit { session.submitSpelling() }
+                        .onAppear { DispatchQueue.main.async { focused = true } }
+                        .padding(.top, 4)
+                }
             }
         }
     }
@@ -446,13 +507,14 @@ private struct Letters: View {
 private struct AnswerBanner: View {
     @ObservedObject var session: ReviewSession
     let q: ReviewQuestion
+    var active = true
     var body: some View {
         VStack(spacing: 6) {
             Label(session.lastCorrect ? "答对了" : "答错了，稍后再来一次",
                   systemImage: session.lastCorrect ? "checkmark.circle.fill" : "arrow.uturn.backward.circle.fill")
                 .foregroundStyle(session.lastCorrect ? .green : .orange).font(.headline)
             HStack(spacing: 6) {
-                LookupLink(session: session, word: q.word)
+                LookupLink(session: session, word: q.word, active: active)
                 // Syllables + IPA when they fit on the line, else just the IPA.
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) {
@@ -468,7 +530,9 @@ private struct AnswerBanner: View {
             if let m = q.morpheme, q.type == .roots {
                 Text("\(m.morpheme.display)：\(m.morpheme.meaning)（\(m.morpheme.gloss)）").font(.callout).foregroundStyle(.secondary)
             }
-            if let r = session.lastRating { Text("评分：\(r.label)").font(.caption).foregroundStyle(.tertiary) }
+            // Always takes its line, so the block has one height before and after.
+            Text("评分：\(session.lastRating?.label ?? "—")").font(.caption).foregroundStyle(.tertiary)
+                .opacity(session.lastRating == nil ? 0 : 1)
         }
         .padding(.top, 6)
     }
@@ -890,6 +954,7 @@ private struct EaseBanner: View {
 private struct LookupLink: View {
     @ObservedObject var session: ReviewSession
     let word: String
+    var active = true
     @State private var hover = false
     var body: some View {
         HStack(spacing: 4) {
@@ -906,7 +971,7 @@ private struct LookupLink: View {
                 .focusable(false)
                 .onHover { session.overLookupLink = $0 }
                 .help("在词典中查「\(word)」（⌘J）")
-                .keyboardShortcut("j", modifiers: .command)
+                .modifier(LookupKey(active: active))
         }
         .onDisappear { if hover { NSCursor.pop() }; session.overLookupLink = false }
     }
@@ -936,5 +1001,20 @@ private struct PhoneticTag: View {
             let w = word, dicts = ReviewSession.phoneticDicts
             p = await Task.detached(priority: .utility) { Phonetics.lookup(w, in: dicts) }.value
         }
+    }
+}
+
+
+private struct LookupKey: ViewModifier {
+    let active: Bool
+    func body(content: Content) -> some View {
+        if active { content.keyboardShortcut("j", modifiers: .command) } else { content }
+    }
+}
+
+private struct RateKey: ViewModifier {
+    let n: Int; let active: Bool
+    func body(content: Content) -> some View {
+        if active { content.keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: []) } else { content }
     }
 }
