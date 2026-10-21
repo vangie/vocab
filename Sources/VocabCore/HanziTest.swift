@@ -106,6 +106,8 @@ public struct HanziTestItem: Equatable, Sendable {
     public var known: Bool? = nil
     /// Spot-check outcome (nil = not asked). A failed check discounts the 认识 claim.
     public var checkCorrect: Bool? = nil
+    /// The check was answered 不确定.
+    public var checkUnsure: Bool? = nil
 }
 
 public enum HanziTestScoring {
@@ -257,17 +259,22 @@ public struct HanziTestRun: Sendable {
         return HanziTestScoring.verified(correct: c.filter { $0.checkCorrect == true }.count, of: c.count)
     }
 
-    static func label(_ it: HanziTestItem, verified v: Double) -> Double {
-        guard it.known == true else { return 0 }
-        if let c = it.checkCorrect { return c ? 1 : 0 }
-        return v
+    static func label(_ it: HanziTestItem) -> Double {
+        Adaptive.label(known: it.known, checkCorrect: it.checkCorrect, unsure: it.checkUnsure)
+    }
+
+    /// Size-curve ceiling from the spot-checks (see `Adaptive.ceiling`).
+    public var ceiling: Double {
+        let c = items.filter { $0.checkCorrect != nil }
+        return Adaptive.ceiling(passed: c.filter { $0.checkCorrect == true }.count,
+                                failed: c.filter { $0.checkCorrect == false && $0.checkUnsure != true }.count,
+                                unsure: c.filter { $0.checkUnsure == true }.count)
     }
 
     private func currentFit() -> Adaptive.Fit? {
         let r = answeredItems
         guard !r.isEmpty else { return nil }
-        let v = verified
-        return Adaptive.fit(r.map { (log(Double($0.rank)), Self.label($0, verified: v)) }, x0: log(Double(Self.startRank)))
+        return Adaptive.fit(r.map { (log(Double($0.rank)), Self.label($0)) }, x0: log(Double(Self.startRank)))
     }
 
     private mutating func appendNext() {
@@ -354,6 +361,7 @@ public struct HanziTestRun: Sendable {
     public mutating func answerCheck(_ choice: String) {
         guard askingCheck, let i = items.indices.last else { return }
         items[i].checkCorrect = items[i].correct.contains(choice)
+        items[i].checkUnsure = choice.isEmpty
         askingCheck = false
         advance()
     }
@@ -374,19 +382,19 @@ public struct HanziTestRun: Sendable {
         guard let i = items.indices.last else { appendNext(); return }
         if items[i].known == true && !items[i].isPseudo { knownClaims -= 1 }
         if items[i].check { checks -= 1 }
-        items[i].known = nil; items[i].checkCorrect = nil; items[i].check = false; items[i].choices = []
+        items[i].known = nil; items[i].checkCorrect = nil; items[i].checkUnsure = nil; items[i].check = false; items[i].choices = []
     }
 
     @discardableResult public mutating func startRound2<R: RandomNumberGenerator>(using rng: inout R) -> Bool { false }
 
     public func result(date: Date = Date()) -> VocabTestResult {
         let ranks = Array(1...max(1, list.count))
-        let v = verified
+        let v = ceiling
         let ps = items.filter { $0.isPseudo && $0.known != nil }
         let yes = ps.filter { $0.known == true }.count
         let f = Adaptive.shrunkFalseAlarm(yes: yes, of: ps.count)
         let raw = ps.isEmpty ? 0 : Double(yes) / Double(ps.count)
-        let correct: (Double) -> Double = { p in f >= 1 ? 0 : max(0, (p - f) / (1 - f)) }
+        let correct: (Double) -> Double = { p in f >= 1 ? 0 : v * max(0, (p - f) / (1 - f)) }
         guard let fit = currentFit() else {
             return VocabTestResult(date: date, estimate: 0, low: 0, high: 0, falseAlarm: 1 - v, bands: [], bandRanges: bands, knownBands: [], checkBands: [])
         }
@@ -399,7 +407,7 @@ public struct HanziTestRun: Sendable {
         let scores = Adaptive.bands(bands, ranksByBand: byBand, asked: asked) { correct(Adaptive.sigma(log(Double($0)), mu: fit.mu, s: fit.slope)) }
         return VocabTestResult(date: date, estimate: Int(est.rounded()), low: Int(lo.rounded()), high: Int(hi.rounded()),
                                falseAlarm: 1 - v, bands: scores, bandRanges: bands, knownBands: [], checkBands: [],
-                               reliability: max(Adaptive.reliability(falseAlarm: raw, pseudoSeen: ps.count), v < 0.6 ? 2 : v < 0.8 ? 1 : 0),
+                               reliability: max(Adaptive.reliability(falseAlarm: raw, pseudoSeen: ps.count), v < 0.8 ? 2 : v < 0.95 ? 1 : 0),
                                crossCheck: Adaptive.stratified(bands, asked: asked), pseudoYes: raw)
     }
 }

@@ -65,6 +65,35 @@ public enum Adaptive {
         return f.se < seTarget
     }
 
+    // MARK: spot-checks
+    //
+    // The adaptive fit uses the 认识 / 不认识 answers themselves. Failed spot-checks no longer discount
+    // every 认识 (a rank-independent discount looked like "50% known here" to the Rasch fit and stalled
+    // the test at its start rank); they down-weight only their own item, and the overall pass rate
+    // becomes a ceiling on the size curve.
+
+    /// Label for the fit: 不认识 0; 认识 1; 认识 with a failed check 0.5, with 不确定 0.7.
+    public static func label(known: Bool?, checkCorrect: Bool?, unsure: Bool?) -> Double {
+        guard known == true else { return 0 }
+        switch checkCorrect {
+        case false?: return unsure == true ? 0.7 : 0.5
+        default: return 1
+        }
+    }
+
+    /// Pseudo-passes added to the observed spot-checks before the guess correction.
+    public static let ceilingPrior = 6.0
+    /// The ceiling never drops below this (a few misses on 4-choice glosses are normal).
+    public static let ceilingFloor = 0.7
+
+    /// Share of the size curve kept: guess-corrected check pass rate (不确定 counts half a miss),
+    /// shrunk toward 1 by `ceilingPrior` passes and floored at `ceilingFloor`.
+    public static func ceiling(passed: Int, failed: Int, unsure: Int) -> Double {
+        let n = Double(passed + failed) + 0.5 * Double(unsure)
+        let acc = (Double(passed) + ceilingPrior) / (n + ceilingPrior)
+        return min(1, max(ceilingFloor, (acc - 0.25) / 0.75))
+    }
+
     /// Mild pseudo-item correction: the false-alarm rate is shrunk toward 0 (as if 2 extra rejected
     /// pseudo-items had been seen) before the correction for guessing P' = (P − f)/(1 − f).
     public static func shrunkFalseAlarm(yes: Int, of n: Int) -> Double { n == 0 ? 0 : Double(yes) / Double(n + 2) }

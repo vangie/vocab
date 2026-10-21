@@ -217,8 +217,10 @@ final class PlanTests: XCTestCase {
         let (liar, _) = simulate(threshold: 4000, claimPseudo: 0.6, seed: 11)
         XCTAssertGreaterThan(liar.result().falseAlarm, 0.2)
         XCTAssertLessThan(Double(liar.result().estimate), honest * 0.75)
-        let bluffer = Double(simulate(threshold: 4000, meaningOK: 0.25, seed: 11).0.result().estimate)
-        XCTAssertLessThan(bluffer, honest * 0.6)
+        // Guessing every meaning check: discounted (ceiling floor 0.7 + half-weight items) and flagged.
+        let b = simulate(threshold: 4000, meaningOK: 0.25, seed: 11).0.result()
+        XCTAssertLessThan(Double(b.estimate), honest * 0.72)
+        XCTAssertEqual(b.reliability, 2)
         let all = simulate(threshold: 1e9, claimPseudo: 1, seed: 3).0.result()
         XCTAssertEqual(all.pseudoYes, 1); XCTAssertEqual(all.reliability, 2)
     }

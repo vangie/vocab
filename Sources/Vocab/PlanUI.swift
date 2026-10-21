@@ -785,16 +785,20 @@ enum HanziGlosser {
     }
 }
 
-/// English meaning check: Chinese gloss + 3 confusable words' glosses (the quiz's distractor logic).
+/// English meaning check: Chinese gloss + 3 easy, unrelated glosses (common words, no shared
+/// characters). The confusable-word distractors stay in the study quizzes.
 enum VocabMeaningMaker {
     static func make() -> VocabTestRun.MeaningMaker {
         let dicts = DictionarySelection.enabled().filter { !$0.isNetwork }
         let factory = QuestionFactory(dicts: dicts, thesaurus: nil, book: [])
+        let pool = (WordLists.shared?.lemmasRanked(rank: 300, 4000) ?? []).map(\.word).filter { $0.count >= 3 }
         return { word in
             let g = factory.gloss(word)
             guard !g.isEmpty else { return nil }
-            let ds = factory.distractors(for: word, gloss: g).map(\.gloss.short)
-            guard ds.count == 3 else { return nil }
+            var rng = SystemRandomNumberGenerator()
+            guard let ds = EasyDistractors.pick(word: word, right: g.short, pool: pool,
+                                                gloss: { let x = factory.gloss($0); return x.isEmpty ? nil : x.short }, using: &rng)
+            else { return nil }
             return (g.short, ([g.short] + ds).shuffled())
         }
     }

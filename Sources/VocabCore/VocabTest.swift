@@ -20,6 +20,8 @@ public struct VocabTestItem: Equatable, Sendable, Codable {
     public var choices: [String] = []
     public var correctChoice: String? = nil
     public var checkCorrect: Bool? = nil
+    /// The check was answered 不确定 (counts as failed, but less than a wrong pick).
+    public var checkUnsure: Bool? = nil
 }
 
 public struct BandScore: Equatable, Sendable, Codable {
@@ -192,7 +194,15 @@ public struct VocabTestRun: Sendable {
     private func currentFit() -> Adaptive.Fit? {
         let r = real
         guard !r.isEmpty else { return nil }
-        return Adaptive.fit(r.map { (log(Double($0.rank ?? 1)), Self.label($0, verified: verified)) }, x0: log(Double(Self.startRank)))
+        return Adaptive.fit(r.map { (log(Double($0.rank ?? 1)), Self.label($0)) }, x0: log(Double(Self.startRank)))
+    }
+
+    /// Size-curve ceiling from the meaning checks (see `Adaptive.ceiling`).
+    public var ceiling: Double {
+        let c = items.filter { $0.checkCorrect != nil }
+        return Adaptive.ceiling(passed: c.filter { $0.checkCorrect == true }.count,
+                                failed: c.filter { $0.checkCorrect == false && $0.checkUnsure != true }.count,
+                                unsure: c.filter { $0.checkUnsure == true }.count)
     }
 
     /// Share of meaning checks passed, guess-corrected (1 when none asked yet).
@@ -201,11 +211,8 @@ public struct VocabTestRun: Sendable {
         return HanziTestScoring.verified(correct: c.filter { $0.checkCorrect == true }.count, of: c.count)
     }
 
-    /// Soft label: 不认识 0; checked 认识 1 or 0; unchecked 认识 = verified share.
-    static func label(_ it: VocabTestItem, verified v: Double) -> Double {
-        guard it.known == true else { return 0 }
-        if let c = it.checkCorrect { return c ? 1 : 0 }
-        return v
+    static func label(_ it: VocabTestItem) -> Double {
+        Adaptive.label(known: it.known, checkCorrect: it.checkCorrect, unsure: it.checkUnsure)
     }
 
     private mutating func appendNext() {
@@ -245,6 +252,7 @@ public struct VocabTestRun: Sendable {
     public mutating func answerCheck(_ choice: String) {
         guard askingCheck, let i = items.indices.last else { return }
         items[i].checkCorrect = choice == items[i].correctChoice
+        items[i].checkUnsure = choice.isEmpty
         askingCheck = false
         advance()
     }
@@ -266,7 +274,7 @@ public struct VocabTestRun: Sendable {
         }
         guard let i = items.indices.last else { appendNext(); return }
         if items[i].known == true, items[i].band != nil { knownClaims -= 1 }
-        items[i].known = nil; items[i].checkCorrect = nil; items[i].check = false; items[i].choices = []
+        items[i].known = nil; items[i].checkCorrect = nil; items[i].checkUnsure = nil; items[i].check = false; items[i].choices = []
         stopped = false
     }
 
@@ -279,7 +287,8 @@ public struct VocabTestRun: Sendable {
         let yes = ps.filter { $0.known == true }.count
         let f = Adaptive.shrunkFalseAlarm(yes: yes, of: ps.count)
         let raw = ps.isEmpty ? 0 : Double(yes) / Double(ps.count)
-        let correct: (Double) -> Double = { p in f >= 1 ? 0 : max(0, (p - f) / (1 - f)) }
+        let cap = ceiling
+        let correct: (Double) -> Double = { p in f >= 1 ? 0 : cap * max(0, (p - f) / (1 - f)) }
         guard let fit = currentFit() else {
             return VocabTestResult(date: date, estimate: 0, low: 0, high: 0, falseAlarm: f, bands: [], bandRanges: bands, knownBands: [], checkBands: [])
         }
@@ -295,8 +304,35 @@ public struct VocabTestRun: Sendable {
         let check = scores.filter { VocabTestScoring.checkRange.contains($0.corrected) }.map(\.band)
         return VocabTestResult(date: date, estimate: Int(est.rounded()), low: Int(lo.rounded()), high: Int(hi.rounded()),
                                falseAlarm: f, bands: scores, bandRanges: bands, knownBands: known, checkBands: check,
-                               reliability: Adaptive.reliability(falseAlarm: raw, pseudoSeen: ps.count),
+                               reliability: max(Adaptive.reliability(falseAlarm: raw, pseudoSeen: ps.count), cap < 0.8 ? 2 : cap < 0.95 ? 1 : 0),
                                crossCheck: Adaptive.stratified(bands, asked: asked), pseudoYes: raw,
                                items: items.filter { $0.known != nil })
+    }
+}
+
+/// Easy distractors for the 词汇量 meaning check: glosses of common, unrelated words. The check only
+/// confirms that a 认识 is real; telling confusables apart (affect / effect) belongs to study quizzes.
+public enum EasyDistractors {
+    /// Han characters of a gloss, ignoring punctuation and grammar fillers.
+    static func han(_ s: String) -> Set<Character> {
+        Set(s.filter { ("\u{4E00}"..."\u{9FFF}").contains(String($0)) && !"的地得了是有一种使把被对与和或".contains($0) })
+    }
+
+    /// Three glosses from `pool` (candidate words, e.g. common lemmas) that share no spelling start and
+    /// no meaning-bearing character with the right gloss or each other. nil if not enough are found.
+    public static func pick<R: RandomNumberGenerator>(word: String, right: String, pool: [String], avoid: Set<String> = [],
+                                                      gloss: (String) -> String?, using rng: inout R) -> [String]? {
+        let w = word.lowercased()
+        var seen = han(right), out: [String] = []
+        for cand in pool.shuffled(using: &rng).prefix(60) {
+            let c = cand.lowercased()
+            guard c != w, !avoid.contains(c), c.prefix(3) != w.prefix(3), !c.contains(w), !w.contains(c) else { continue }
+            guard let g = gloss(cand), !g.isEmpty, g != right else { continue }
+            let h = han(g)
+            guard !h.isEmpty, h.isDisjoint(with: seen) else { continue }
+            out.append(g); seen.formUnion(h)
+            if out.count == 3 { return out }
+        }
+        return nil
     }
 }
