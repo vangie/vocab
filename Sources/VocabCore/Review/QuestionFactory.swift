@@ -15,6 +15,8 @@ public struct ReviewQuestion: Identifiable, Sendable {
     public var morpheme: MorphemeMatch?
     public var hint: String?
     public var audio: URL?
+    /// The English word behind each option (choice questions with words), for IPA/pronunciation.
+    public var optionWords: [String] = []
 }
 
 /// Everything a word needs for any question type, computed once per session.
@@ -140,8 +142,10 @@ public final class QuestionFactory: @unchecked Sendable {
             let useEnglish = Set(shorts).count < shorts.count && all.allSatisfy { $0.english != nil }
             func text(_ g: Gloss) -> String { useEnglish ? GlossExtractor.clip(g.english!, 80) : g.short }
             shuffle([(text(m.gloss), item.word)] + m.distractors.map { (text($0.gloss), $0.word) })
+            q.optionWords = q.optionNotes
         case .meaningToWord:
             shuffle([(item.word, m.gloss.short)] + m.distractors.map { ($0.word, $0.gloss.short) })
+            q.optionWords = q.options
         case .syllables:
             let opts = Hyphenation.options(correct: m.syllables) ?? [m.syllables]
             shuffle(opts.enumerated().map { ($0.element.joined(separator: " · "), $0.offset == 0 ? "正确" : "") })

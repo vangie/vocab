@@ -329,6 +329,22 @@ final class ReviewSession: ObservableObject {
         if q.type != .meaningToWord { speak(q) }   // that one would give the answer away
     }
 
+    /// Dictionaries for IPA: the enabled ones plus Oxford E–C (which has American IPA).
+    static var phoneticDicts: [DictionaryInfo] {
+        var d = DictionarySelection.enabled()
+        if !d.contains(where: { $0.id == Self.ocdID }), let ocd = Self.ocd { d.append(ocd) }
+        return d
+    }
+    private static let ocdID = "com.apple.dictionary.zh_CN-en.OCD"
+    private static let ocd = DictionaryService.shared.availableDictionaries().first { $0.id == ocdID }
+
+    /// Play a word: the dictionary's recording (American first) or the en-US voice.
+    func pronounce(_ word: String, audio: URL?) {
+        if let a = audio, AudioPlayer.shared.play(file: a) { return }
+        let u = AVSpeechUtterance(string: word); u.voice = AVSpeechSynthesisVoice(language: "en-US")
+        speech.stopSpeaking(at: .immediate); speech.speak(u)
+    }
+
     func speak(_ q: ReviewQuestion? = nil) {
         guard let q = q ?? question else { return }
         if let a = q.audio, AudioPlayer.shared.play(file: a) { return }

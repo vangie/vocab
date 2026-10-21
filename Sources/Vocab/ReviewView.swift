@@ -300,31 +300,42 @@ private struct Options: View {
     }
 
     @ViewBuilder private func option(_ i: Int, _ opt: String) -> some View {
-                Button { session.choose(i) } label: {
-                    HStack(spacing: 12) {
-                        Text("\(i + 1)").font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 14)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(opt).font(monospaced ? .system(.title3, design: .monospaced) : .body)
-                                .multilineTextAlignment(.leading).lineLimit(2)
-                            if session.phase == .answered, !q.optionNotes[i].isEmpty, q.type != .syllables {
-                                Text(q.optionNotes[i]).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        if session.phase == .answered {
-                            if i == q.correctIndex { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                            else if i == session.chosen { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }
-                        }
-                    }
-                    .padding(.horizontal, d == .normal ? 14 : 10).padding(.vertical, d == .normal ? 10 : 5)
-                    .frame(maxWidth: .infinity, maxHeight: d == .grid ? .infinity : nil, alignment: .leading)
-                    .background(background(i), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.separator.opacity(0.6)))
-                    .contentShape(Rectangle())
-                }
+        if session.phase == .asking {
+            Button { session.choose(i) } label: { row(i, opt) }
                 .buttonStyle(.plain)
-                .disabled(session.phase != .asking)
-                .modifier(NumberKey(n: i + 1, active: session.phase == .asking))
+                .modifier(NumberKey(n: i + 1, active: true))
+        } else {
+            // Answered: a plain row, so the speaker button inside it is clickable.
+            row(i, opt)
+        }
+    }
+
+    private func row(_ i: Int, _ opt: String) -> some View {
+        HStack(spacing: 12) {
+            Text("\(i + 1)").font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 14)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(opt).font(monospaced ? .system(.title3, design: .monospaced) : .body)
+                    .multilineTextAlignment(.leading).lineLimit(2)
+                if session.phase == .answered, q.type != .syllables {
+                    HStack(spacing: 6) {
+                        if !q.optionNotes[i].isEmpty {
+                            Text(q.optionNotes[i]).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        if i < q.optionWords.count { PhoneticTag(session: session, word: q.optionWords[i]) }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            if session.phase == .answered {
+                if i == q.correctIndex { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                else if i == session.chosen { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }
+            }
+        }
+        .padding(.horizontal, d == .normal ? 14 : 10).padding(.vertical, d == .normal ? 10 : 5)
+        .frame(maxWidth: .infinity, maxHeight: d == .grid ? .infinity : nil, alignment: .leading)
+        .background(background(i), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.separator.opacity(0.6)))
+        .contentShape(Rectangle())
     }
 
     private func background(_ i: Int) -> some ShapeStyle {
@@ -428,7 +439,14 @@ private struct AnswerBanner: View {
                 .foregroundStyle(session.lastCorrect ? .green : .orange).font(.headline)
             HStack(spacing: 6) {
                 LookupLink(session: session, word: q.word)
-                if q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.secondary) }
+                // Syllables + IPA when they fit on the line, else just the IPA.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        if q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.secondary).fixedSize() }
+                        PhoneticTag(session: session, word: q.word, audio: q.audio).fixedSize()
+                    }
+                    PhoneticTag(session: session, word: q.word, audio: q.audio).fixedSize()
+                }
                 Text(q.gloss.short).foregroundStyle(.secondary).lineLimit(1)
             }
             .font(.callout)
@@ -869,5 +887,31 @@ private struct LookupLink: View {
                 .keyboardShortcut("j", modifiers: .command)
         }
         .onDisappear { if hover { NSCursor.pop() }; session.overLookupLink = false }
+    }
+}
+
+
+/// 「/əˈtjuːn/ 🔊」: IPA fetched in the background (cached), plus a speaker button that plays the
+/// dictionary recording (American first) or the en-US voice. Clicks never advance or pick an option.
+private struct PhoneticTag: View {
+    @ObservedObject var session: ReviewSession
+    let word: String
+    var audio: URL? = nil
+    @State private var p: Phonetic?
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if let ipa = p?.ipa { Text("/\(ipa)/").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            Button { session.pronounce(word, audio: audio ?? p?.audio) } label: {
+                Image(systemName: "speaker.wave.2").font(.caption)
+            }
+            .buttonStyle(.borderless).focusable(false)
+            .help("朗读 \(word)")
+            .onHover { session.overLookupLink = $0 }
+        }
+        .task(id: word) {
+            let w = word, dicts = ReviewSession.phoneticDicts
+            p = await Task.detached(priority: .utility) { Phonetics.lookup(w, in: dicts) }.value
+        }
     }
 }

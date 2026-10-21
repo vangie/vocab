@@ -28,6 +28,11 @@ func fail(_ s: String) -> Never { FileHandle.standardError.write(Data((s + "\n")
 guard args.count >= 2 else { fail("usage: vocab-smoke dicts|lookup|play|render|click|multitouch …") }
 
 switch args[1] {
+case "ipa":
+    // vocab-smoke ipa <word>…   IPA + audio file the quiz would use
+    let ds = svc.activeDictionaries() + svc.availableDictionaries().filter { $0.id == "com.apple.dictionary.zh_CN-en.OCD" }
+    for w in args.dropFirst(2) { let p = Phonetics.lookup(w, in: ds); print(w, p.ipa ?? "-", p.audio?.lastPathComponent ?? "-") }
+
 case "plain":
     for e in svc.lookup(args[2], in: dicts(args.count > 3 ? args[3] : nil)) { print("=== [\(e.dictionary.id)] \(e.headword)\n\(e.plainText.prefix(600))") }
 
