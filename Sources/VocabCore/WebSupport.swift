@@ -209,7 +209,8 @@ public final class EntryWebViewFactory: NSObject, WKScriptMessageHandler, WKNavi
         var groups: [String: (String, [String])] = [:]
         for e in entries {
             let doc = EntryHTML.prepare(panel ? e.panelHTML : e.html, resourceDirectory: e.resourceDirectory,
-                                        extraCSS: LongmanStyle.applies(to: e.dictionary.id) ? LongmanStyle.css : "")
+                                        extraCSS: LongmanStyle.applies(to: e.dictionary.id) ? LongmanStyle.css : "",
+                                        extraScript: LongmanStyle.applies(to: e.dictionary.id) ? LongmanStyle.script : "")
             // Our own (network) entries are served as XHTML only when they really are well-formed XML,
             // so a stray tag can never turn into WebKit's red XML-error page.
             let mime = e.dictionary.isNetwork && !EntryHTML.isWellFormedXML(doc) ? "text/html" : "application/xhtml+xml"

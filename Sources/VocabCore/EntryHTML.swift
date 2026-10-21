@@ -62,7 +62,7 @@ public enum EntryHTML {
     public static func isWellFormedXML(_ s: String) -> Bool { XMLParser(data: Data(s.utf8)).parse() }
 
     /// Prepare a full entry document: point <base> at our scheme, inject CSS.
-    public static func prepare(_ html: String, resourceDirectory: URL?, extraCSS: String = "") -> String {
+    public static func prepare(_ html: String, resourceDirectory: URL?, extraCSS: String = "", extraScript: String = "") -> String {
         var s = html
         // DictionaryServices output declares only xmlns:d; without the XHTML default
         // namespace WebKit's XML parser treats <style>, <a onmousedown> etc. as unknown elements.
@@ -79,7 +79,8 @@ public enum EntryHTML {
         }
         let style = "<style type=\"text/css\">/*<![CDATA[*/\n\(injectedCSS)\n\(extraCSS)\n/*]]>*/</style>"
         if let r = s.range(of: "</head>", options: .backwards) {
-            s.replaceSubrange(r, with: style + "</head>")
+            let script = extraScript.isEmpty ? "" : "<script type=\"text/javascript\">//<![CDATA[\n\(extraScript)\n//]]></script>"
+            s.replaceSubrange(r, with: style + script + "</head>")
         }
         return s
     }

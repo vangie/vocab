@@ -100,7 +100,7 @@ case "render", "click":
     let isRender = args[1] == "render"
     let out = isRender ? args[3] : ""
     let dark = args.contains("dark")
-    let only = args.dropFirst(isRender ? 4 : 3).first(where: { $0 != "dark" && $0 != "jsform" && $0 != "wiki" })
+    let only = args.dropFirst(isRender ? 4 : 3).first(where: { $0 != "dark" && $0 != "jsform" && $0 != "wiki" && $0 != "expand" })
     var entries = svc.lookup(word, in: dicts(only).filter { !$0.isNetwork })
     if args.contains("wiki"), let wd = svc.availableDictionaries().first(where: { $0.isNetwork }) {
         // Same path as the app: our own fetch, then the entry (or the quiet failure note).
@@ -135,6 +135,10 @@ case "render", "click":
     if isRender {
         let sem = DispatchSemaphore(value: 0); _ = sem
         var done = false
+        if args.contains("expand") {
+            wv.evaluateJavaScript("Array.from(document.querySelectorAll('iframe')).forEach(function(f){var d=f.contentDocument; if(d) d.querySelectorAll('.wordfams, .lm5ppBox').forEach(function(b){b.classList.remove('v-collapsed')})}); 0") { _, _ in }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        }
         wv.evaluateJavaScript((dark ? "document.body.style.background='#1e1e1e';" : "document.body.style.background='#fff';") + "document.body.scrollHeight") { h, _ in
             let height = min(4000, max(400, (h as? Double) ?? 900))
             win.setContentSize(NSSize(width: 760, height: height))

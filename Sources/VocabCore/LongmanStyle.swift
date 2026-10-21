@@ -10,6 +10,32 @@ public enum LongmanStyle {
         return id.contains("ldoce") || id.contains("longman")
     }
 
+    /// Collapses WORD FAMILY; a click on its heading toggles it. Without scripts it simply stays open.
+    public static let script = """
+    document.addEventListener('DOMContentLoaded', function () {
+      // Per entry (homograph): its own usage boxes (COLLOCATIONS …), then its Related topics, at the
+      // end of that entry. WORD FAMILY is shared by the whole page: once, at the very bottom.
+      var entries = document.querySelectorAll('.lm5ppbody .ldoceEntry');
+      for (var e = 0; e < entries.length; e++) {
+        var en = entries[e];
+        var bx = en.querySelectorAll(':scope > .lm5ppBox');
+        for (var k = 0; k < bx.length; k++) en.appendChild(bx[k]);
+        var t = en.querySelector(':scope > .topics_container');
+        if (t) en.appendChild(t);
+      }
+      var fam = document.querySelector('.lm5ppbody .wordfams');
+      if (fam && fam.parentNode) fam.parentNode.appendChild(fam);
+      var boxes = document.querySelectorAll('.lm5ppbody .wordfams, .lm5ppbody .lm5ppBox');
+      for (var i = 0; i < boxes.length; i++) {
+        (function (box) {
+          box.classList.add('v-collapsed');
+          var h = box.querySelector('.lm5ppBoxHead') || box.querySelector('.LDOCE5pp_sensefold') || box;
+          h.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); box.classList.toggle('v-collapsed'); });
+        })(boxes[i]);
+      }
+    });
+    """
+
     public static let css = """
     .lm5ppbody {
       --v-label: rgba(0,0,0,0.85); --v-secondary: rgba(0,0,0,0.55); --v-tertiary: rgba(0,0,0,0.38);
@@ -46,7 +72,8 @@ public enum LongmanStyle {
 
     /* Senses. */
     .lm5ppbody .Sense { margin: 8px 0 4px 1.6em !important; text-indent: 0 !important; }
-    .lm5ppbody .sensenum, .lm5ppbody .refsensenum {
+    .lm5ppbody .refsensenum { color: inherit !important; font-weight: 400 !important; }
+    .lm5ppbody .sensenum {
       color: var(--v-label) !important; font-weight: 700 !important; font-size: 14px !important;
       margin-left: -1.6em; display: inline-block; width: 1.6em;
     }
@@ -77,8 +104,15 @@ public enum LongmanStyle {
     .lm5ppbody .speaker.amefile::after { content: "AmE"; }
 
     /* WORD FAMILY: quiet box below the senses. */
-    .lm5ppbody .dictionary { display: flex; flex-direction: column; }
-    .lm5ppbody .wordfams { order: 99; }
+    .lm5ppbody .topics_container { margin: 10px 0 2px !important; padding: 5px 10px !important; }
+    .lm5ppbody .topics_container .related_topics { font-size: 11px !important; }
+
+    /* WORD FAMILY collapsed by default (LongmanStyle.script adds .v-collapsed; click the heading). */
+    .lm5ppbody .wordfams .LDOCE5pp_sensefold { cursor: pointer; display: block; }
+    .lm5ppbody .wordfams .asset_intro::after { content: " ▾"; font-size: 10px; }
+    .lm5ppbody .wordfams.v-collapsed .asset_intro::after { content: " ▸"; }
+    .lm5ppbody .wordfams.v-collapsed .LDOCE_word_family { display: none !important; }
+    .lm5ppbody .wordfams.v-collapsed { padding: 5px 10px !important; }
     .lm5ppbody .wordfams, .lm5ppbody .BoxPanel {
       background: var(--v-fill) !important; border: none !important; border-radius: 8px !important;
       box-shadow: none !important; padding: 8px 12px !important; margin: 12px 0 4px !important;
@@ -99,6 +133,34 @@ public enum LongmanStyle {
     .lm5ppbody .topics_container, .lm5ppbody .topics_container *, .lm5ppbody .topics_container *::before,
     .lm5ppbody .topics_container::before { color: var(--v-secondary) !important; font-size: 12px !important; }
     .lm5ppbody .wordfams .w { color: var(--v-label) !important; font-weight: 400 !important; }
+    .lm5ppbody .wordfams .w + .w { padding-left: 5.5em !important; }
+
+    /* Collocation / usage boxes: quiet fill, no coloured border; section headings as small grey labels. */
+    .lm5ppbody .lm5ppBox, .lm5ppbody .ColloBox { border: none !important; box-shadow: none !important; background: var(--v-fill) !important; border-radius: 8px !important; }
+    .lm5ppbody .BoxPanel { background: none !important; }
+    .lm5ppbody .SECHEADING { background: none !important; color: var(--v-secondary) !important; padding: 0 !important;
+      font-size: 11px !important; font-weight: 600 !important; text-transform: uppercase; letter-spacing: 0.04em; border-radius: 0 !important; }
+    .lm5ppbody .LDOCEVERSIONLOGO_new { display: none !important; }
+    .lm5ppbody .lm5ppBox { padding: 6px 12px !important; margin: 10px 0 !important; }
+    .lm5ppbody .lm5ppBoxHead { display: block; cursor: pointer; background: none !important; border: none !important;
+      color: var(--v-secondary) !important; font-size: 11px !important; font-weight: 600 !important;
+      letter-spacing: 0.04em; text-transform: uppercase; padding: 0 !important; margin: 0 !important; }
+    .lm5ppbody .lm5ppBoxHead::before { content: none !important; }
+    .lm5ppbody .lm5ppBoxHead::after { content: " ▾"; font-size: 10px; text-transform: none; }
+    .lm5ppbody .ColloBox .lm5ppBoxHead::after { content: " 搭配 ▾"; }
+    .lm5ppbody .ThesBox .lm5ppBoxHead::after { content: " 同义词 ▾"; }
+    .lm5ppbody .GramBox .lm5ppBoxHead::after { content: " 语法 ▾"; }
+    .lm5ppbody .UsageBox .lm5ppBoxHead::after, .lm5ppbody .F2NBox .lm5ppBoxHead::after { content: " 用法 ▾"; }
+    .lm5ppbody .lm5ppBox.v-collapsed .lm5ppBoxHead::after { content: " ▸"; }
+    .lm5ppbody .ColloBox.v-collapsed .lm5ppBoxHead::after { content: " 搭配 ▸"; }
+    .lm5ppbody .ThesBox.v-collapsed .lm5ppBoxHead::after { content: " 同义词 ▸"; }
+    .lm5ppbody .GramBox.v-collapsed .lm5ppBoxHead::after { content: " 语法 ▸"; }
+    .lm5ppbody .UsageBox.v-collapsed .lm5ppBoxHead::after, .lm5ppbody .F2NBox.v-collapsed .lm5ppBoxHead::after { content: " 用法 ▸"; }
+    .lm5ppbody .lm5ppBox.v-collapsed > :not(.lm5ppBoxHead) { display: none !important; }
+    .lm5ppbody .lm5ppBox .BoxPanel { display: block; margin-top: 4px; }
+    .lm5ppbody .lm5ppBox .COLLOC, .lm5ppbody .lm5ppBox .collo { color: var(--v-label) !important; font-weight: 600 !important; }
+    .lm5ppbody .lm5ppBox .EXAMPLE { color: var(--v-secondary) !important; }
+    .lm5ppbody .SECHEADING { border: none !important; outline: none !important; box-shadow: none !important; display: block; margin: 8px 0 2px !important; font-variant: small-caps; text-transform: none !important; font-size: 12px !important; }
     .lm5ppbody .wordfams .rootword { font-weight: 600 !important; }
     """
 }
