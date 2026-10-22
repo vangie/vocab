@@ -240,7 +240,7 @@ private struct RetireButton: View {
 private struct SpeakButton: View {
     let session: ReviewSession
     var body: some View {
-        Button { session.speak() } label: { Image(systemName: "speaker.wave.2") }
+        Button { session.speak() } label: { Image(systemName: "speaker.wave.2") }.help("播放读音").speakerHover()
             .buttonStyle(.borderless).help("朗读（⌘R）")
             .keyboardShortcut("r", modifiers: .command)
     }
@@ -483,7 +483,7 @@ private struct SpellingCard: View {
     var body: some View {
         let answered = session.phase == .answered
         VStack(spacing: 14) {
-            Button { session.speak() } label: { Image(systemName: "speaker.wave.2.fill").font(.system(size: 28)) }
+            Button { session.speak() } label: { Image(systemName: "speaker.wave.2.fill").font(.system(size: 28)) }.help("播放读音").speakerHover()
                 .buttonStyle(.borderless).help("再听一遍（⌘R）").keyboardShortcut("r", modifiers: .command)
             MeaningPrompt(q: q)
             // Input and comparison share one slot; help row and feedback share the next: no jump on submit.
@@ -1049,8 +1049,8 @@ private struct PhoneticTag: View {
                 Image(systemName: "speaker.wave.2").font(size.map { .system(size: $0 - 1) } ?? .caption)
             }
             .buttonStyle(.borderless).focusable(false)
-            .help("朗读 \(word)")
-            .onHover { session.overLookupLink = $0 }
+            .help("播放读音")
+            .speakerHover { session.overLookupLink = $0 }
         }
         .task(id: word) {
             let w = word, dicts = ReviewSession.phoneticDicts
@@ -1205,5 +1205,45 @@ enum SettingsRender {
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
         print("wrote \(path)")
         exit(0)
+    }
+}
+
+
+/// Pointing hand + accent highlight while hovering a speaker button.
+private struct SpeakerHover: ViewModifier {
+    var extra: ((Bool) -> Void)?
+    @State private var over = false
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(over ? Color.accentColor : Color.primary.opacity(0.75))
+            .onHover { h in
+                over = h
+                if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                extra?(h)
+            }
+    }
+}
+
+extension View {
+    func speakerHover(_ extra: ((Bool) -> Void)? = nil) -> some View { modifier(SpeakerHover(extra: extra)) }
+}
+
+/// `--render-panel out.png word [dark]`: offscreen render of the lookup popup (read-only).
+enum PanelRender {
+    @MainActor static func run(_ a: [String]) -> Never {
+        guard a.count >= 2 else { print("usage: --render-panel out.png word [dark]"); exit(2) }
+        UserDefaults.standard.addSuite(named: "io.github.vangie.vocab")
+        let r = Suggester.lookupWithFallback(a[1], in: DictionarySelection.enabled())
+        let host = NSHostingView(rootView: PanelView(word: r.word, context: nil, entries: r.entries, close: {})
+            .frame(width: 560, height: 520).background(Color(nsColor: .windowBackgroundColor)))
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520), styleMask: [.borderless], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: a.contains("dark") ? .darkAqua : .aqua)
+        win.contentView = host
+        win.orderFrontRegardless(); win.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+        RunLoop.main.run(until: Date().addingTimeInterval(4))
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { exit(1) }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: (a[0] as NSString).expandingTildeInPath))
+        print("wrote \(a[0])"); exit(0)
     }
 }

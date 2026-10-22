@@ -316,14 +316,21 @@ struct PanelView: View {
             .frame(height: 24)
             Spacer()
             Button {
-                if let e = entries.first {
+                if added {
+                    WordbookModel.shared.remove(word: word); added = false
+                } else if let e = entries.first {
                     WordbookModel.shared.add(entry: e, word: word, context: context, surface: surface, source: source)
                     added = true
                 }
             } label: {
-                Label(added ? "已加入" : "加入生词本", systemImage: added ? "star.fill" : "star")
+                Label {
+                    Text(added ? "已在生词本" : "加入生词本")
+                } icon: {
+                    Image(systemName: added ? "star.fill" : "star").foregroundStyle(added ? Color.yellow : Color.accentColor)
+                }
             }
-            .disabled(entries.isEmpty || added)
+            .disabled(entries.isEmpty)
+            .help(added ? "点击移出生词本" : "加入生词本")
             Button { openInMain() } label: { Image(systemName: "arrow.up.forward.app") }
                 .help("在「生词」中打开")
         }

@@ -88,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let i = CommandLine.arguments.firstIndex(of: "--render-settings") {
             SettingsRender.run(Array(CommandLine.arguments[(i + 1)...]))
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--render-panel") {
+            PanelRender.run(Array(CommandLine.arguments[(i + 1)...]))
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--render-quiz") {
             QuizRender.run(Array(CommandLine.arguments[(i + 1)...]))
         }

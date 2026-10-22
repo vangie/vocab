@@ -25,6 +25,7 @@ public enum DictionaryLanguageGroup: String, CaseIterable, Sendable {
 
     /// Known dictionaries whose names mislead (Chinese name, English-only content…).
     static let overrides: [String: Set<DictionaryLanguageGroup>] = [
+        "重编国语辞典": [.traditional], "重編國語辭典": [.traditional],
         "Macmillan2": [.english], "麦克米伦英语词典第二版": [.english],
         "LDOCE5": [.english, .simplified], "朗文当代高级英语辞典": [.english, .simplified],
         "Longman5_Extras": [.english],

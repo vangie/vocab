@@ -108,6 +108,11 @@ final class WordbookModel: ObservableObject {
 
     func contains(_ word: String) -> Bool { ((try? store?.find(word: word)) ?? nil) != nil }
 
+    func remove(word: String) {
+        guard let w = (try? store?.find(word: word)) ?? nil else { return }
+        delete([w.id])
+    }
+
     func delete(_ ids: Set<Int64>) {
         try? store?.transaction { for id in ids { try store?.delete(id: id) } }
         reload()

@@ -57,6 +57,32 @@ public enum EntryHTML {
       html.apple_appearance-incompliant body { filter: invert(0.88) hue-rotate(180deg); }
       html.apple_appearance-incompliant img { filter: invert(1) hue-rotate(180deg); }
     }
+    .v-spk { cursor: pointer !important; transition: opacity .12s, color .12s; }
+    .v-spk:hover { opacity: 1 !important; color: -apple-system-control-accent !important; filter: drop-shadow(0 0 1px -apple-system-control-accent); }
+    img.v-spk:hover { opacity: .7 !important; }
+    """
+
+    /// Marks every audio trigger (Longman BrE/AmE, OALD, example speakers…) with
+    /// `v-spk` (pointer + hover highlight) and a Chinese tooltip.
+    public static let speakerScript = """
+    (function(){
+    function kind(el){
+      var s=((el.getAttribute('class')||'')+' '+(el.getAttribute('href')||'')+' '+(el.getAttribute('onmousedown')||'')+' '+(el.getAttribute('onclick')||'')+' '+(el.getAttribute('src')||'')+' '+(el.getAttribute('title')||'')).toLowerCase();
+      for(var a=el.parentNode;a&&a.getAttribute;a=a.parentNode){var c=(a.getAttribute('class')||'').toLowerCase();if(/exa|example|(^|\\s)(x|x-g|eg|sentence)(\\s|$)/.test(c))return '播放例句';}
+      if(/exa|example|sentence/.test(s))return '播放例句';
+      if(/brefile|\\bbre\\b|_gb|\\bgb\\b|uk_|_uk|british|pron-uk|\\buk\\b/.test(s))return '播放英音';
+      if(/amefile|\\bame\\b|_us|\\bus\\b|us_|american|pron-us/.test(s))return '播放美音';
+      return '播放读音';
+    }
+    function mark(){
+      var q='a.speaker,[class*="speaker"],[class*="sound"],[class*="audio"],a[href*=".mp3"],a[href*="Audio("],[onmousedown*="Audio"],[onclick*="Audio"],[onclick*=".mp3"],img[onmousedown],audio';
+      var els=document.querySelectorAll(q);
+      for(var i=0;i<els.length;i++){var e=els[i];if(e.querySelector&&e.querySelector('a.speaker,[onmousedown*="Audio"],a[href*=".mp3"]'))continue;
+        var c=e.getAttribute('class')||'';if((' '+c+' ').indexOf(' v-spk ')<0)e.setAttribute('class',(c+' v-spk').trim());
+        e.setAttribute('title',kind(e));}
+    }
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mark);else mark();
+    })();
     """
 
     public static func isWellFormedXML(_ s: String) -> Bool { XMLParser(data: Data(s.utf8)).parse() }
@@ -79,7 +105,7 @@ public enum EntryHTML {
         }
         let style = "<style type=\"text/css\">/*<![CDATA[*/\n\(injectedCSS)\n\(extraCSS)\n/*]]>*/</style>"
         if let r = s.range(of: "</head>", options: .backwards) {
-            let script = extraScript.isEmpty ? "" : "<script type=\"text/javascript\">//<![CDATA[\n\(extraScript)\n//]]></script>"
+            let script = "<script type=\"text/javascript\">//<![CDATA[\n\(speakerScript)\n\(extraScript)\n//]]></script>"
             s.replaceSubrange(r, with: style + script + "</head>")
         }
         return s

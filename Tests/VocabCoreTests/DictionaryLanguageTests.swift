@@ -40,3 +40,13 @@ final class DictionaryLanguageTests: XCTestCase {
     }
     func testDefault() { XCTAssertEqual(G.defaultSelection, [.simplified, .english]) }
 }
+
+final class DictionaryLanguageOverrideTests2: XCTestCase {
+    func testMOEIsTraditional() {
+        XCTAssertEqual(DictionaryLanguageGroup.groups(languages: [], name: "重编国语辞典", id: "x"), [.traditional])
+    }
+    func testSpeakerScriptInjected() {
+        let s = EntryHTML.prepare("<html><head></head><body/></html>", resourceDirectory: nil)
+        XCTAssertTrue(s.contains("v-spk")); XCTAssertTrue(s.contains("播放美音"))
+    }
+}

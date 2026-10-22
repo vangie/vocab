@@ -210,11 +210,17 @@ struct LookupDetailView: View {
                 selected: $lookup.selectedDictionary,
                 trailing: {
                     if !lookup.entries.isEmpty {
-                        Button { lookup.addCurrentToWordbook() } label: {
-                            Image(systemName: book.contains(lookup.searchedTerm) ? "star.fill" : "star")
+                        let inBook = book.contains(lookup.searchedTerm)
+                        Button { if inBook { book.remove(word: lookup.searchedTerm) } else { lookup.addCurrentToWordbook() } } label: {
+                            Label {
+                                Text(inBook ? "已在生词本" : "加入生词本")
+                            } icon: {
+                                Image(systemName: inBook ? "star.fill" : "star").foregroundStyle(inBook ? Color.yellow : Color.accentColor)
+                            }
+                            .labelStyle(.titleAndIcon)
                         }
                         .buttonStyle(.borderless)
-                        .help(book.contains(lookup.searchedTerm) ? "已在生词本" : "加入生词本 (⌘D)")
+                        .help(inBook ? "点击移出生词本" : "加入生词本 (⌘D)")
                     }
                     Button { AppState.shared.settingsTab = "dictionary"; AppState.shared.settingsRequest += 1 } label: {
                         Image(systemName: Mode.lookup.symbol)
