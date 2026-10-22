@@ -195,11 +195,17 @@ private struct QuestionScreen: View {
                 Text(h).italic().foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(density == .normal ? 3 : 2)
                     .font(.callout).padding(.top, 4)
             }
-            if q.type != .recall {
+            if q.type == .spelling {
+                // Feedback is part of SpellingCard (same slot as the help row).
+            } else if q.type != .recall {
                 // Always laid out (hidden before the reveal) so nothing moves when the answer appears.
                 let shown = session.phase == .answered
-                AnswerBanner(session: session, q: q, active: shown)
-                    .opacity(shown ? 1 : 0).allowsHitTesting(shown).accessibilityHidden(!shown)
+                ZStack(alignment: .bottom) {
+                    AnswerBanner(session: session, q: q, active: shown)
+                        .opacity(shown ? 1 : 0).allowsHitTesting(shown).accessibilityHidden(!shown)
+                    // Before answering, 斩 waits where 继续 will appear.
+                    if !shown { RetireButton(session: session) }
+                }
             } else if session.phase == .answered {
                 AnswerBanner(session: session, q: q, active: true)
             }
@@ -209,14 +215,25 @@ private struct QuestionScreen: View {
 }
 
 private struct WordTitle: View {
-    let q: ReviewQuestion; let session: ReviewSession
+    let q: ReviewQuestion; @ObservedObject var session: ReviewSession
+    var speaker = true
     @Environment(\.quizDensity) private var d
     var body: some View {
         HStack(spacing: 10) {
             Text(q.word).font(.system(size: d.headword, weight: .bold))
-                .wordLink(session.phase == .answered ? q.word : nil, session: session, restUnderline: false)
-            SpeakButton(session: session)
+                .wordLink(session.phase == .answered || session.revealed ? q.word : nil, session: session, restUnderline: false)
+            if speaker { SpeakButton(session: session) }
         }
+    }
+}
+
+/// 「已认识，斩」: secondary button beside the main action (⌘K is on the header's hidden button).
+private struct RetireButton: View {
+    let session: ReviewSession
+    var body: some View {
+        Button { session.retire() } label: { BigLabel(text: "已认识，斩", hint: "⌘K") }
+            .controlSize(.large)
+            .help("已掌握：不再复习这个词（⌘K）")
     }
 }
 
@@ -424,8 +441,9 @@ private struct RecallCard: View {
     let q: ReviewQuestion
     var body: some View {
         VStack(spacing: 16) {
-            WordTitle(q: q, session: session)
-            if q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.tertiary) }
+            WordTitle(q: q, session: session, speaker: false)
+            // IPA + speaker (exact-word audio), not the syllable split.
+            PhoneticTag(session: session, word: q.word, audio: q.audio, size: 17).frame(minHeight: 24)
             // Front and back share one slot (the taller one sets the height), so flipping doesn't move the card.
             ZStack(alignment: .top) {
                 VStack(spacing: 16) {
@@ -435,8 +453,8 @@ private struct RecallCard: View {
                         // Must pick one (no skip): 忘了 · 模糊 · 记得.
                         ForEach([ReviewRating.forgot, .fuzzy, .good], id: \.self) { r in
                             Button { session.selfRate(r) } label: {
-                                VStack(spacing: 1) { Text(r.label); Text("\(r.rawValue)").font(.caption2).foregroundStyle(.secondary) }
-                                    .frame(minWidth: 56)
+                                VStack(spacing: 1) { Text(r.label).font(.system(size: 17, weight: .semibold)); Text("\(r.rawValue)").font(.caption2).foregroundStyle(.secondary) }
+                                    .frame(minWidth: 96, minHeight: 36)
                             }
                             .controlSize(.large)
                             .modifier(RateKey(n: r.rawValue, active: session.revealed))
@@ -446,12 +464,12 @@ private struct RecallCard: View {
                 }
                 .opacity(session.revealed ? 1 : 0).allowsHitTesting(session.revealed)
                 if !session.revealed {
-                    VStack(spacing: 16) {
-                        Text("想一想它的意思").foregroundStyle(.secondary)
+                    HStack(spacing: 16) {
                         Button { session.flip() } label: { BigLabel(text: "显示释义", hint: "空格") }
-                            .keyboardShortcut(.space, modifiers: []).controlSize(.large)
-                        Text("空格").font(.caption).foregroundStyle(.tertiary)
+                            .keyboardShortcut(.space, modifiers: []).controlSize(.large).buttonStyle(.borderedProminent)
+                        RetireButton(session: session)
                     }
+                    .padding(.top, 8)
                 }
             }
         }
@@ -463,22 +481,14 @@ private struct SpellingCard: View {
     let q: ReviewQuestion
     @FocusState private var focused: Bool
     var body: some View {
+        let answered = session.phase == .answered
         VStack(spacing: 14) {
             Button { session.speak() } label: { Image(systemName: "speaker.wave.2.fill").font(.system(size: 28)) }
                 .buttonStyle(.borderless).help("再听一遍（⌘R）").keyboardShortcut("r", modifiers: .command)
             MeaningPrompt(q: q)
-            // Both states share one fixed slot so the card doesn't move on submit.
-            let answered = session.phase == .answered
+            // Input and comparison share one slot; help row and feedback share the next: no jump on submit.
             ZStack(alignment: .top) {
-                VStack(spacing: 6) {
-                    // Top: what the user actually typed, aligned to the answer; bottom: the correct spelling.
-                    Letters(marks: session.marks).frame(minHeight: 32)
-                        .opacity(session.gaveUp ? 0 : 1)
-                    Text(q.word).font(.system(size: 26, weight: .bold))
-                        .opacity(answered && !session.lastCorrect ? 1 : 0)
-                }
-                .padding(.top, 4)
-                .opacity(answered ? 1 : 0)
+                SpellingComparison(session: session, q: q).opacity(answered ? 1 : 0).allowsHitTesting(answered)
                 if !answered {
                     TextField("拼写这个单词，↩ 提交", text: $session.typed)
                         .textFieldStyle(.roundedBorder).font(.system(size: 22))
@@ -490,10 +500,57 @@ private struct SpellingCard: View {
                         .padding(.top, 4)
                 }
             }
-            // Help row: always laid out (hidden after answering) so nothing moves.
-            SpellingHelp(session: session, q: q, active: !answered)
-                .opacity(answered ? 0 : 1).allowsHitTesting(!answered).accessibilityHidden(answered)
+            ZStack(alignment: .top) {
+                SpellingHelp(session: session, q: q, active: !answered)
+                    .opacity(answered ? 0 : 1).allowsHitTesting(!answered).accessibilityHidden(answered)
+                AnswerBanner(session: session, q: q, active: answered)
+                    .opacity(answered ? 1 : 0).allowsHitTesting(answered).accessibilityHidden(!answered)
+            }
         }
+    }
+}
+
+/// Typed vs correct, letter-aligned in one monospace grid; the correct spelling carries IPA + speaker
+/// and is a 词典 link. Right answer: only the (green) typed row.
+private struct SpellingComparison: View {
+    @ObservedObject var session: ReviewSession
+    let q: ReviewQuestion
+    static let font = Font.system(size: 26, weight: .semibold, design: .monospaced)
+
+    var body: some View {
+        let typedShown = !session.gaveUp && !session.marks.isEmpty
+        let correctShown = !session.lastCorrect || !typedShown
+        VStack(spacing: 6) {
+            row(Letters(marks: session.marks), word: session.lastCorrect ? q.word : nil)
+                .opacity(typedShown ? 1 : 0)
+            row(correctRow, word: q.word)
+                .opacity(correctShown && session.phase == .answered ? 1 : 0)
+        }
+        .padding(.top, 4)
+    }
+
+    /// The answer letters under the typed ones (blank under extra letters).
+    private var correctRow: some View {
+        let cells: [Character] = (!session.gaveUp && !session.marks.isEmpty)
+            ? session.marks.map { m in m.kind == .extra ? " " : (m.expected ?? m.char) }
+            : Array(q.word)
+        return HStack(spacing: 1) {
+            ForEach(Array(cells.enumerated()), id: \.offset) { _, c in
+                Text(String(c)).font(Self.font).foregroundStyle(session.lastCorrect ? Color.green : Color.primary)
+            }
+        }
+    }
+
+    /// IPA + speaker hang off the row's right edge, so both rows' letters stay column-aligned.
+    @ViewBuilder private func row<V: View>(_ v: V, word: String?) -> some View {
+        if let word {
+            v.frame(minHeight: 32)
+                .wordLink(word, session: session, restUnderline: false)
+                .overlay(alignment: .trailing) {
+                    PhoneticTag(session: session, word: word, audio: q.audio, size: 15).fixedSize()
+                        .alignmentGuide(.trailing) { d in d[.leading] - 12 }
+                }
+        } else { v.frame(minHeight: 32) }
     }
 }
 
@@ -502,12 +559,14 @@ private struct SpellingHelp: View {
     let q: ReviewQuestion
     let active: Bool
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             Text(session.hintsUsed > 0 ? SpellingHint.mask(q.word, shown: session.hintsUsed) : " ")
                 .font(.system(size: 15, design: .monospaced)).foregroundStyle(.secondary).frame(height: 18)
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 hintButton
                 giveUpButton
+                Button { session.retire() } label: { Label("已认识，斩", systemImage: "checkmark.seal") }
+                    .help("已掌握：不再复习这个词（⌘K）")
             }
             .controlSize(.large).font(.system(size: 15))
             Text("↩ 提交 · Tab 提示（提示后最高计 模糊） · ⌘↩ 看答案（计 忘了）")
@@ -533,7 +592,7 @@ private struct Letters: View {
             ForEach(Array(marks.enumerated()), id: \.offset) { _, m in
                 // Missing letters are a blank slot with an orange underline (the user didn't type them).
                 Text(String(m.char))
-                    .font(.system(size: 26, weight: .semibold, design: .monospaced))
+                    .font(SpellingComparison.font)
                     .foregroundStyle(m.kind == .missing ? .clear : color(m.kind))
                     .strikethrough(m.kind == .extra, color: .red)
                     .overlay(alignment: .bottom) {
@@ -549,78 +608,51 @@ private struct Letters: View {
     }
 }
 
-/// Feedback under the options: 「答对了 · 记得 / 答错了 · 稍后再来」 + 查词典, a second line only when the
-/// cards don't already show the answer, then 继续. Laid out before the reveal too (hidden): no jump.
+/// Feedback under the question: one quiet line at most (cards / colours already show the result),
+/// a definition line only where nothing else shows it, then 继续 (+ 斩). Laid out before the reveal
+/// too (hidden): no jump. Words are 词典 links in place; ⌘J looks up the question's word.
 private struct AnswerBanner: View {
     @ObservedObject var session: ReviewSession
     let q: ReviewQuestion
     var active = true
     @Environment(\.quizDensity) private var d
 
-    /// Choice questions whose correct card already shows word, meaning and IPA.
-    private var cardsShowAnswer: Bool { q.type == .wordToMeaning || q.type == .meaningToWord }
+    /// Types whose screen doesn't otherwise show the meaning after answering.
+    private var needsGloss: Bool { q.type == .syllables || q.type == .roots }
 
     var body: some View {
         VStack(spacing: d == .normal ? 10 : 6) {
-            HStack(spacing: 10) {
-                if hasCards {
-                    // The card colours already say right/wrong; only a quiet note on what happens next.
-                    if let note = subtleNote { Text(note).font(.system(size: 13)).foregroundStyle(.secondary) }
-                } else {
-                    Label(resultText, systemImage: session.lastCorrect ? "checkmark.circle.fill" : "arrow.uturn.backward.circle.fill")
-                        .foregroundStyle(session.lastCorrect ? Color(nsColor: .systemGreen) : Color(nsColor: .systemOrange))
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                if hasCards {
-                    // Words are links in the cards and headword; ⌘J still looks up the question's word.
-                    Button("") { session.lookUp(q.word) }.hidden().frame(width: 0, height: 0)
-                        .modifier(LookupKey(active: active))
-                } else {
-                    LookupLink(session: session, word: q.word, active: active, showWord: false)
-                }
-            }
-            .frame(minHeight: 20)   // same line height with or without the result text: no jump
-            if !cardsShowAnswer {
+            Text(note ?? " ").font(.system(size: 13)).foregroundStyle(.secondary)
+                .frame(minHeight: 18)
+                .background { Button("") { session.lookUp(q.word) }.hidden().modifier(LookupKey(active: active)) }
+            if needsGloss {
                 HStack(spacing: 6) {
-                    Text(q.word).fontWeight(.semibold)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 6) {
-                            if q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.secondary).fixedSize() }
-                            PhoneticTag(session: session, word: q.word, audio: q.audio, size: 14).fixedSize()
-                        }
-                        PhoneticTag(session: session, word: q.word, audio: q.audio, size: 14).fixedSize()
-                    }
+                    if q.type == .syllables, q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.secondary).fixedSize() }
+                    PhoneticTag(session: session, word: q.word, audio: q.audio, size: 14).fixedSize()
                 }
                 .font(.system(size: 14))
                 Text(q.gloss.short + (q.gloss.note.map { "（\($0)）" } ?? ""))
                     .font(.system(size: 14)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if let n = q.gloss.note {
+            } else if let n = q.gloss.note, q.type != .spelling {
                 // A followed cross-reference is explained here only (options never show it).
                 Text(n).font(.system(size: 13)).foregroundStyle(.secondary)
             }
             if let m = q.morpheme, q.type == .roots {
                 Text("\(m.morpheme.display)：\(m.morpheme.meaning)（\(m.morpheme.gloss)）").font(.system(size: 14)).foregroundStyle(.secondary)
             }
-            continueButton
+            HStack(spacing: 16) {
+                continueButton
+                if q.type != .recall { RetireButton(session: session) }
+            }
         }
         .padding(.top, 2)
     }
 
-    /// Option-card questions: the cards show the result.
-    private var hasCards: Bool { !q.options.isEmpty && q.type != .spelling && q.type != .recall }
-    private var subtleNote: String? {
-        if !session.lastCorrect { return "稍后再来" }
+    private var note: String? {
+        if !session.lastCorrect { return q.type == .recall ? nil : "答错了，稍后再来" }
         if let r = session.lastRating, r != .good { return r.label }
         return nil
-    }
-
-    private var resultText: String {
-        if session.lastCorrect {
-            if let r = session.lastRating, r != .good { return "答对了 · \(r.label)" }
-            return "答对了"
-        }
-        return "答错了 · 稍后再来"
     }
 
     private var continueButton: some View {
@@ -907,17 +939,11 @@ private struct SessionHeader: View {
                 Button { session.end() } label: { Label("结束", systemImage: "xmark") }
                     .help("结束本轮，查看小结（Esc）")
                     .keyboardShortcut(.cancelAction)
-                if let t = tag ?? session.question?.type.label {
-                    Text(t).font(.callout.weight(.medium)).foregroundStyle(.secondary)
-                        .padding(.horizontal, 10).padding(.vertical, 3)
-                        .background(.quaternary.opacity(0.6), in: Capsule())
-                }
                 Spacer()
                 Text("\(session.queue.done.count) / \(session.queue.total)").monospacedDigit().foregroundStyle(.secondary)
                 if showRetire {
-                    Button { session.retire() } label: { Label { Text("斩") } icon: { CleaverIcon.swiftUI } }
-                        .help("已掌握：不再复习这个词（⌘K）")
-                        .keyboardShortcut("k", modifiers: .command)
+                    // ⌘K anywhere in a question; the visible 斩 button sits next to the main action.
+                    Button("") { session.retire() }.keyboardShortcut("k", modifiers: .command).hidden().frame(width: 0, height: 0)
                 }
             }
             SessionProgress(done: session.queue.progress, total: session.queue.total, countdown: session.autoProgress)
@@ -1055,7 +1081,8 @@ enum QuizRender {
         guard a.count >= 4 else { print("usage: --render-quiz out.png word type WxH [dark] [right|wrong]"); exit(2) }
         let out = URL(fileURLWithPath: (a[0] as NSString).expandingTildeInPath)
         let word = a[1]
-        let type: QuestionType = ["meaning": .meaningToWord, "syllables": .syllables, "roots": .roots][a[2]] ?? .wordToMeaning
+        let type: QuestionType = ["meaning": .meaningToWord, "syllables": .syllables, "roots": .roots,
+                                  "spelling": .spelling, "recall": .recall][a[2]] ?? .wordToMeaning
         let wh = a[3].split(separator: "x").compactMap { Double($0) }
         let size = NSSize(width: wh.first ?? 760, height: wh.last ?? 620)
         let thesaurus = DictionaryService.shared.availableDictionaries().first { $0.id == "com.apple.dictionary.OTE" }
@@ -1072,8 +1099,9 @@ enum QuizRender {
         }
         let check = a[2] == "check"
         if check { q = f.make(item, type: .recall, using: &rng) }
+        let typed = a.first { $0.hasPrefix("typed=") }.map { String($0.dropFirst(6)) }
         let chosen: Int? = check ? -1 : a.contains("wrong") ? 2 : a.contains("right") ? 1 : nil
-        let s = ReviewSession.preview(q, chosen: chosen)
+        let s = ReviewSession.preview(q, chosen: type == .spelling ? nil : chosen, typed: typed)
         let screen = Group {
             if check {
                 VStack(spacing: 0) {

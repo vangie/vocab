@@ -541,13 +541,18 @@ final class ReviewSession: ObservableObject {
 extension ReviewSession {
     /// Offscreen renders only (`--render-quiz`): a detached session showing one question.
     /// Never touches the wordbook, stats or the shared session.
-    static func preview(_ q: ReviewQuestion, chosen: Int?, total: Int = 20, done: Int = 7) -> ReviewSession {
+    static func preview(_ q: ReviewQuestion, chosen: Int?, typed: String? = nil, total: Int = 20, done: Int = 7) -> ReviewSession {
         let s = ReviewSession()
         var queue = ReviewQueue(ids: (1...Int64(total)).map { $0 })
         for _ in 0..<done { queue.answer(correct: true) }
         s.queue = queue
         s.question = q
         if q.type == .recall && chosen == -1 { s.checkWord = q.word; s.phase = .check; return s }
+        if q.type == .spelling, let t = typed {
+            s.typed = t; s.marks = SpellingCheck.diff(typed: t, answer: q.word)
+            s.lastCorrect = SpellingCheck.isCorrect(t, q.word); s.lastRating = s.lastCorrect ? .good : .forgot
+            s.phase = .answered; return s
+        }
         if let c = chosen {
             s.chosen = c; s.lastCorrect = c == q.correctIndex
             s.lastRating = s.lastCorrect ? .good : .forgot
