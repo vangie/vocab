@@ -114,7 +114,7 @@ private struct CheckScreen: View {
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
-            Text(session.checkWord ?? "").font(.system(size: 40, weight: .semibold, design: .serif))
+            Text(session.checkWord ?? "").font(.system(size: 36, weight: .bold))
             Text("认识这个词吗？").foregroundStyle(.secondary)
             HStack(spacing: 16) {
                 Button { session.answerCheck(known: false) } label: { Text("不认识，学一下").frame(width: 130) }
@@ -147,7 +147,6 @@ private struct QuestionScreen: View {
             header
             // Fit the window: normal → compact → compact with 2×2 options; scroll only as a last resort.
             FitHeight(levels: [.normal, .compact, .grid]) { d in middle(d) }
-            footer
         }
     }
 
@@ -202,32 +201,6 @@ private struct QuestionScreen: View {
         }
     }
 
-    @ViewBuilder private var footer: some View {
-        HStack {
-            Spacer()
-            if session.phase == .answered {
-                Button { session.next() } label: {
-                    HStack(spacing: 6) { Text("继续"); Text("↩").foregroundStyle(.secondary) }
-                }
-                .keyboardShortcut(.defaultAction).controlSize(.large).help("继续（↩ 或空格）")
-                .overlay(alignment: .bottom) {
-                    if let p = session.autoProgress {
-                        // Thin countdown bar under the button; pauses while the pointer is over the answer.
-                        GeometryReader { g in
-                            Capsule().fill(.quaternary).overlay(alignment: .leading) {
-                                Capsule().fill(Color.accentColor.opacity(0.7)).frame(width: g.size.width * p)
-                            }
-                        }
-                        .frame(height: 2).offset(y: 7)
-                        .accessibilityLabel("即将自动下一题")
-                    }
-                }
-                // Space also continues.
-                Button("") { session.next() }.keyboardShortcut(.space, modifiers: []).hidden().frame(width: 0)
-            }
-        }
-        .frame(height: 50).padding(.horizontal, 20).padding(.bottom, 16)
-    }
 }
 
 private struct WordTitle: View {
@@ -235,7 +208,7 @@ private struct WordTitle: View {
     @Environment(\.quizDensity) private var d
     var body: some View {
         HStack(spacing: 10) {
-            Text(q.word).font(.system(size: d.headword, weight: .semibold, design: .serif)).textSelection(.enabled)
+            Text(q.word).font(.system(size: d.headword, weight: .bold)).textSelection(.enabled)
             SpeakButton(session: session)
         }
     }
@@ -276,7 +249,7 @@ private struct RootPrompt: View {
                     Text(String(w[m.range])).foregroundStyle(Color.accentColor).underline()
                     Text(String(w[m.range.upperBound...]))
                 }
-                .font(.system(size: d.headword, weight: .semibold, design: .serif))
+                .font(.system(size: d.headword, weight: .bold))
                 Text("\(m.morpheme.kind == .root ? "词根" : m.morpheme.kind == .prefix ? "前缀" : "后缀") \(m.morpheme.display) 的意思是？")
                     .foregroundStyle(.secondary)
             }
@@ -306,6 +279,8 @@ private struct Options: View {
                         }
                     }
                 }
+                // Rows take their content's height (cards fill only up to the taller card of the row).
+                .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(spacing: d == .normal ? 8 : 5) {
                     ForEach(Array(q.options.enumerated()), id: \.offset) { i, opt in option(i, opt, grid: false) }
@@ -360,16 +335,20 @@ private struct Options: View {
     }
 
     private func row(_ i: Int, _ opt: String, grid: Bool) -> some View {
-        HStack(spacing: 12) {
-            Text("\(i + 1)").font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 14)
+        let answered = session.phase == .answered
+        let mark = answered ? (i == q.correctIndex ? Mark.right : i == session.chosen ? Mark.wrong : nil) : nil
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            // Small, light number on the first line's baseline.
+            Text("\(i + 1)").font(.system(size: 12, weight: .medium).monospacedDigit()).foregroundStyle(.tertiary)
+                .frame(width: 12, alignment: .trailing)
             VStack(alignment: .leading, spacing: 2) {
                 // Never truncated: up to 2 lines in the grid (checked in useGrid), unlimited in one column.
                 Text(opt).font(optionFont)
                     .multilineTextAlignment(.leading).lineLimit(grid ? 2 : nil)
                     .fixedSize(horizontal: false, vertical: true)
                 if q.type != .syllables {
-                    // Fixed-height slot, reserved before the reveal too (hidden), so nothing moves; and whose width doesn't count toward the 2-column fit, so revealing
-                    // the answer never flips the layout.
+                    // Fixed-height slot, reserved before the reveal too (hidden), so nothing moves; its width
+                    // doesn't count toward the 2-column fit, so revealing never flips the layout.
                     Color.clear.frame(height: 17).overlay(alignment: .leading) {
                         HStack(spacing: 6) {
                             if !q.optionNotes[i].isEmpty {
@@ -378,30 +357,50 @@ private struct Options: View {
                             if i < q.optionWords.count { PhoneticTag(session: session, word: q.optionWords[i], size: 13) }
                         }
                         .fixedSize()
-                        .opacity(session.phase == .answered ? 1 : 0)
-                        .allowsHitTesting(session.phase == .answered)
+                        .opacity(answered ? 1 : 0)
+                        .allowsHitTesting(answered)
                     }
                     .clipped()
                 }
             }
             Spacer(minLength: 0)
-            if session.phase == .answered {
-                if i == q.correctIndex { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                else if i == session.chosen { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }
+        }
+        .padding(.leading, d == .normal ? 12 : 10).padding(.trailing, 26)   // room for the corner mark
+        .padding(.vertical, d == .normal ? 9 : 5)
+        .frame(maxWidth: .infinity, maxHeight: grid ? .infinity : nil, alignment: .topLeading)   // equal heights per row
+        .background(fill(mark), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(stroke(mark), lineWidth: mark == nil ? 1 : 1.5))
+        .overlay(alignment: .topTrailing) {
+            if let mark {
+                Image(systemName: mark == .right ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .font(.system(size: 15)).foregroundStyle(.white, mark == .right ? Self.green : Self.red)
+                    .padding(7)
+                    .accessibilityLabel(mark == .right ? "正确答案" : "你的选择")
             }
         }
-        .padding(.horizontal, d == .normal ? 14 : 10).padding(.vertical, d == .normal ? 10 : 5)
-        .frame(maxWidth: .infinity, maxHeight: grid ? .infinity : nil, alignment: .leading)   // equal heights per row
-        .background(background(i), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.separator.opacity(0.6)))
         .contentShape(Rectangle())
     }
 
-    private func background(_ i: Int) -> some ShapeStyle {
-        guard session.phase == .answered else { return AnyShapeStyle(.background.secondary) }
-        if i == q.correctIndex { return AnyShapeStyle(Color.green.opacity(0.14)) }
-        if i == session.chosen { return AnyShapeStyle(Color.red.opacity(0.14)) }
-        return AnyShapeStyle(.background.secondary)
+    private enum Mark { case right, wrong }
+    @Environment(\.colorScheme) private var scheme
+    static let green = Color(nsColor: .systemGreen), red = Color(nsColor: .systemRed)
+
+    /// Strong, distinct tints in both appearances (plus a coloured border and the corner mark).
+    private func fill(_ m: Mark?) -> AnyShapeStyle {
+        let dark = scheme == .dark
+        switch m {
+        case .right: return AnyShapeStyle(Self.green.opacity(dark ? 0.30 : 0.20))
+        case .wrong: return AnyShapeStyle(Self.red.opacity(dark ? 0.28 : 0.16))
+        case nil: return AnyShapeStyle(.background.secondary)
+        }
+    }
+    private func stroke(_ m: Mark?) -> AnyShapeStyle {
+        switch m {
+        case .right: return AnyShapeStyle(Self.green.opacity(0.85))
+        case .wrong: return AnyShapeStyle(Self.red.opacity(0.75))
+        case nil: return AnyShapeStyle(.separator.opacity(0.6))
+        }
     }
 }
 
@@ -467,14 +466,14 @@ private struct SpellingCard: View {
                     // Top: what the user actually typed, aligned to the answer; bottom: the correct spelling.
                     Letters(marks: session.marks).frame(minHeight: 32)
                         .opacity(session.gaveUp ? 0 : 1)
-                    Text(q.word).font(.system(size: 26, weight: .semibold, design: .serif))
+                    Text(q.word).font(.system(size: 26, weight: .bold))
                         .opacity(answered && !session.lastCorrect ? 1 : 0)
                 }
                 .padding(.top, 4)
                 .opacity(answered ? 1 : 0)
                 if !answered {
                     TextField("拼写这个单词，↩ 提交", text: $session.typed)
-                        .textFieldStyle(.roundedBorder).font(.system(size: 22, design: .serif))
+                        .textFieldStyle(.roundedBorder).font(.system(size: 22))
                         .multilineTextAlignment(.center).frame(maxWidth: 320)
                         .autocorrectionDisabled().focused($focused)
                         .onSubmit { session.submitSpelling() }
@@ -542,37 +541,71 @@ private struct Letters: View {
     }
 }
 
+/// Feedback under the options: 「答对了 · 记得 / 答错了 · 稍后再来」 + 查词典, a second line only when the
+/// cards don't already show the answer, then 继续. Laid out before the reveal too (hidden): no jump.
 private struct AnswerBanner: View {
     @ObservedObject var session: ReviewSession
     let q: ReviewQuestion
     var active = true
+    @Environment(\.quizDensity) private var d
+
+    /// Choice questions whose correct card already shows word, meaning and IPA.
+    private var cardsShowAnswer: Bool { q.type == .wordToMeaning || q.type == .meaningToWord }
+
     var body: some View {
-        VStack(spacing: 6) {
-            Label(session.lastCorrect ? "答对了" : "答错了，稍后再来一次",
-                  systemImage: session.lastCorrect ? "checkmark.circle.fill" : "arrow.uturn.backward.circle.fill")
-                .foregroundStyle(session.lastCorrect ? .green : .orange).font(.headline)
-            HStack(spacing: 6) {
-                LookupLink(session: session, word: q.word, active: active)
-                // Syllables + IPA when they fit on the line, else just the IPA.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) {
-                        if q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.secondary).fixedSize() }
-                        PhoneticTag(session: session, word: q.word, audio: q.audio).fixedSize()
+        VStack(spacing: d == .normal ? 10 : 6) {
+            HStack(spacing: 10) {
+                Label(resultText, systemImage: session.lastCorrect ? "checkmark.circle.fill" : "arrow.uturn.backward.circle.fill")
+                    .foregroundStyle(session.lastCorrect ? Color(nsColor: .systemGreen) : Color(nsColor: .systemOrange))
+                    .font(.system(size: 15, weight: .semibold))
+                LookupLink(session: session, word: q.word, active: active, showWord: false)
+            }
+            if !cardsShowAnswer {
+                HStack(spacing: 6) {
+                    Text(q.word).fontWeight(.semibold)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            if q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.secondary).fixedSize() }
+                            PhoneticTag(session: session, word: q.word, audio: q.audio, size: 14).fixedSize()
+                        }
+                        PhoneticTag(session: session, word: q.word, audio: q.audio, size: 14).fixedSize()
                     }
-                    PhoneticTag(session: session, word: q.word, audio: q.audio).fixedSize()
                 }
+                .font(.system(size: 14))
+                Text(q.gloss.short + (q.gloss.note.map { "（\($0)）" } ?? ""))
+                    .font(.system(size: 14)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let n = q.gloss.note {
                 // A followed cross-reference is explained here only (options never show it).
-                Text(q.gloss.short + (q.gloss.note.map { "（\($0)）" } ?? "")).foregroundStyle(.secondary).lineLimit(1)
+                Text(n).font(.system(size: 13)).foregroundStyle(.secondary)
             }
-            .font(.callout)
             if let m = q.morpheme, q.type == .roots {
-                Text("\(m.morpheme.display)：\(m.morpheme.meaning)（\(m.morpheme.gloss)）").font(.callout).foregroundStyle(.secondary)
+                Text("\(m.morpheme.display)：\(m.morpheme.meaning)（\(m.morpheme.gloss)）").font(.system(size: 14)).foregroundStyle(.secondary)
             }
-            // Always takes its line, so the block has one height before and after.
-            Text("评分：\(session.lastRating?.label ?? "—")").font(.caption).foregroundStyle(.tertiary)
-                .opacity(session.lastRating == nil ? 0 : 1)
+            continueButton
         }
-        .padding(.top, 6)
+        .padding(.top, 2)
+    }
+
+    private var resultText: String {
+        if session.lastCorrect {
+            if let r = session.lastRating, r != .good { return "答对了 · \(r.label)" }
+            return "答对了"
+        }
+        return "答错了 · 稍后再来"
+    }
+
+    private var continueButton: some View {
+        Button { session.next() } label: {
+            HStack(spacing: 6) { Text("继续"); Text("↩").foregroundStyle(.secondary) }.padding(.horizontal, 10)
+        }
+        .controlSize(.large)
+        .keyboardShortcut(active ? .defaultAction : nil)
+        .help("继续（↩ 或空格）")
+        .background {
+            // Space also continues.
+            if active { Button("") { session.next() }.keyboardShortcut(.space, modifiers: []).hidden() }
+        }
     }
 }
 
@@ -797,7 +830,7 @@ enum LatinBookIcon {
 
 
 enum QuizDensity: Int { case normal, compact, grid
-    var headword: CGFloat { self == .normal ? 40 : 30 }
+    var headword: CGFloat { self == .normal ? 34 : 28 }   // ~2× the 17 pt options
 }
 private struct QuizDensityKey: EnvironmentKey { static let defaultValue = QuizDensity.normal }
 extension EnvironmentValues {
@@ -858,7 +891,7 @@ private struct SessionHeader: View {
                         .keyboardShortcut("k", modifiers: .command)
                 }
             }
-            ProgressView(value: session.queue.progress).progressViewStyle(.linear)
+            SessionProgress(done: session.queue.progress, total: session.queue.total, countdown: session.autoProgress)
         }
         .padding(.horizontal, 20).padding(.top, 14)
     }
@@ -921,17 +954,18 @@ private struct LookupLink: View {
     @ObservedObject var session: ReviewSession
     let word: String
     var active = true
+    var showWord = true
     @State private var hover = false
     var body: some View {
         HStack(spacing: 4) {
-            Text(word).fontWeight(.semibold).underline(hover)
+            if showWord { Text(word).fontWeight(.semibold).underline(hover)
                 .foregroundStyle(hover ? Color.accentColor : Color.primary)
                 .onTapGesture { session.lookUp(word) }
                 .onHover { h in
                     hover = h; session.overLookupLink = h
                     if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
-                .help("在词典中查「\(word)」（⌘J）")
+                .help("在词典中查「\(word)」（⌘J）") }
             Button { session.lookUp(word) } label: { Label("查词典", systemImage: "book").labelStyle(.titleAndIcon) }
                 .buttonStyle(.borderless).controlSize(.small).font(.caption)
                 .focusable(false)
@@ -982,5 +1016,67 @@ private struct RateKey: ViewModifier {
     let n: Int; let active: Bool
     func body(content: Content) -> some View {
         if active { content.keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: []) } else { content }
+    }
+}
+
+/// `Vocab --render-quiz <out.png> <word> <type> <W>x<H> [dark] [right|wrong]`: one quiz screen, offscreen.
+/// Reads dictionaries only; the session is a detached preview (nothing is written).
+enum QuizRender {
+    @MainActor static func run(_ a: [String]) -> Never {
+        guard a.count >= 4 else { print("usage: --render-quiz out.png word type WxH [dark] [right|wrong]"); exit(2) }
+        let out = URL(fileURLWithPath: (a[0] as NSString).expandingTildeInPath)
+        let word = a[1]
+        let type: QuestionType = ["meaning": .meaningToWord, "syllables": .syllables, "roots": .roots][a[2]] ?? .wordToMeaning
+        let wh = a[3].split(separator: "x").compactMap { Double($0) }
+        let size = NSSize(width: wh.first ?? 760, height: wh.last ?? 620)
+        let thesaurus = DictionaryService.shared.availableDictionaries().first { $0.id == "com.apple.dictionary.OTE" }
+        let f = QuestionFactory(dicts: DictionarySelection.enabled(), thesaurus: thesaurus, book: [])
+        let item = WordItem(id: 1, word: word, definition: "", dictionary: "", context: nil, added: Date(),
+                            review: ReviewState(state: .new, due: Date()))
+        var rng = SystemRandomNumberGenerator()
+        var q = f.make(item, type: type, using: &rng)
+        // Deterministic layout: correct answer second.
+        if q.options.count > 1, q.correctIndex != 1 {
+            q.options.swapAt(q.correctIndex, 1); q.optionNotes.swapAt(q.correctIndex, 1)
+            if q.optionWords.count == q.options.count { q.optionWords.swapAt(q.correctIndex, 1) }
+            q.correctIndex = 1
+        }
+        let chosen: Int? = a.contains("wrong") ? 2 : a.contains("right") ? 1 : nil
+        let s = ReviewSession.preview(q, chosen: chosen)
+        let view = QuestionScreen(session: s).frame(width: size.width, height: size.height)
+            .background(Color(nsColor: .windowBackgroundColor))
+        let host = NSHostingView(rootView: view)
+        let win = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: a.contains("dark") ? .darkAqua : .aqua)
+        win.contentView = host
+        win.orderFrontRegardless(); win.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+        RunLoop.main.run(until: Date().addingTimeInterval(2.0))   // IPA tasks, layout
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { exit(1) }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: out)
+        print("wrote \(out.path)")
+        exit(0)
+    }
+}
+
+
+/// Session progress bar; the auto-advance countdown fills the next segment in a lighter tint
+/// (one bar instead of a second line under 继续).
+private struct SessionProgress: View {
+    let done: Double; let total: Int; let countdown: Double?
+    var body: some View {
+        GeometryReader { g in
+            let w = g.size.width, seg = total > 0 ? w / CGFloat(total) : 0
+            ZStack(alignment: .leading) {
+                Capsule().fill(.quaternary)
+                if let c = countdown {
+                    Capsule().fill(Color.accentColor.opacity(0.35)).frame(width: min(w, w * done + seg * c))
+                }
+                Capsule().fill(Color.accentColor).frame(width: w * done)
+            }
+        }
+        .frame(height: 5)
+        .accessibilityElement().accessibilityLabel("进度").accessibilityValue("\(Int(done * 100))%")
     }
 }

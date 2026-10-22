@@ -535,3 +535,21 @@ final class ReviewSession: ObservableObject {
         if queue.finished { end() } else { loadCurrent() }
     }
 }
+
+extension ReviewSession {
+    /// Offscreen renders only (`--render-quiz`): a detached session showing one question.
+    /// Never touches the wordbook, stats or the shared session.
+    static func preview(_ q: ReviewQuestion, chosen: Int?, total: Int = 20, done: Int = 7) -> ReviewSession {
+        let s = ReviewSession()
+        var queue = ReviewQueue(ids: (1...Int64(total)).map { $0 })
+        for _ in 0..<done { queue.answer(correct: true) }
+        s.queue = queue
+        s.question = q
+        if let c = chosen {
+            s.chosen = c; s.lastCorrect = c == q.correctIndex
+            s.lastRating = s.lastCorrect ? .good : .forgot
+            s.phase = .answered
+        } else { s.phase = .asking }
+        return s
+    }
+}
