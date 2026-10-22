@@ -84,6 +84,13 @@ case "lookup":
         print("   \(e.snippet.prefix(110))")
     }
 
+case "entries":   // entries <word> <dictID>: every entry with headword + audio refs
+    guard let d = svc.availableDictionaries().first(where: { $0.id == args[3] }) else { fail("no dict") }
+    for e in svc.lookup(args[2], in: [d], maxPerDictionary: 6) {
+        let t = e.html.range(of: #"d:title="[^"]*""#, options: .regularExpression).map { String(e.html[$0]) } ?? "-"
+        print("\(e.headword) \(t)  audio: \(EntryHTML.audioReferences(in: e.html).prefix(6).joined(separator: " "))")
+    }
+
 case "play":
     guard let e = svc.lookup(args[2], in: dicts()).first(where: { !EntryHTML.audioReferences(in: $0.html).isEmpty }),
           let dir = e.resourceDirectory, let a = EntryHTML.audioReferences(in: e.html).first else { fail("no audio") }

@@ -124,7 +124,8 @@ public final class QuestionFactory: @unchecked Sendable {
         if m.syllables.isEmpty { m.syllables = Hyphenation.system(word) }
         m.morphemes = RootTable.matches(word)
         m.distractors = distractors(for: word, gloss: m.gloss)
-        m.audio = Self.pronunciation(in: entries)
+        // Exact word only, never the lemma's recording; nil means the session speaks it with TTS.
+        m.audio = Phonetics.lookup(word, in: dicts, service: service).audio
         lock.lock(); cache[word] = m; lock.unlock()
         return m
     }
