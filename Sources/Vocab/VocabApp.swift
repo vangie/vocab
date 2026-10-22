@@ -85,6 +85,11 @@ struct SettingsOpener: ViewModifier {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        EntryWebViewFactory.onAction = { url in
+            // vocab-action:wikilang/<code> from the Wikipedia language switcher.
+            let s = url.absoluteString
+            if let r = s.range(of: "wikilang/") { LookupModel.shared.setWikiLanguage(String(s[r.upperBound...])) }
+        }
         DictionaryWatcher.shared.start()
         defer { MainToolbarController.launchFinished = true }
         SettingsModel.shared.applyOnLaunch()

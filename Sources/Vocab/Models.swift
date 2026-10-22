@@ -20,8 +20,14 @@ enum DictionarySelection {
 
     private static func compute() -> [DictionaryInfo] {
         let svc = DictionaryService.shared
-        let active = svc.activeDictionaries()
-        guard let ids = UserDefaults.standard.array(forKey: key) as? [String] else { return active }
+        let active = svc.activeDictionaries() + [BaikeClient.dictionary]   // 百度百科 on by default
+        let d = UserDefaults.standard
+        guard var ids = d.array(forKey: key) as? [String] else { return active }
+        // One-time: add 百度百科 (new source, enabled by default) to an existing saved selection.
+        if !d.bool(forKey: "baikeIntroduced") {
+            d.set(true, forKey: "baikeIntroduced")
+            if !ids.contains(BaikeClient.id) { ids.append(BaikeClient.id); d.set(ids, forKey: key) }
+        }
         let all = svc.availableDictionaries()
         var out = ids.compactMap { id in all.first { $0.id == id } }
         if out.isEmpty { out = active }
@@ -82,7 +88,7 @@ final class LookupModel: ObservableObject {
         if suggestionsQuery != q { suggestions = []; suggestionsQuery = nil }
         guard !q.isEmpty else {
             // Also stop an in-flight lookup, or it would repaint the old word under an empty field.
-            showTask?.cancel(); wikiTask?.cancel()
+            showTask?.cancel(); cancelNet()
             suggestions = []; selection = nil; entries = []; searchedTerm = ""; return
         }
         suggestTask = Task {
@@ -138,15 +144,33 @@ final class LookupModel: ObservableObject {
     /// Local (DCS) results per word, newest last; small LRU so back/forward and re-typing are instant.
     private var entryCache: [String: (word: String, entries: [DictionaryEntry])] = [:]
     private var entryCacheOrder: [String] = []
-    private var wikiCache: [String: DictionaryEntry?] = [:]
-    private var wikiTask: Task<Void, Never>?
+    /// Network sources (Wikipedia, 百度百科): results per "dictID|lang|term"; failures aren't cached.
+    private var netCache: [String: DictionaryEntry?] = [:]
+    private var netTasks: [Task<Void, Never>] = []
+    /// Local entries of the word on screen, and the network entries shown with them (by dictionary id).
+    private var localShown: [DictionaryEntry] = []
+    private var netShown: [String: DictionaryEntry] = [:]
+    /// Wikipedia language chosen with the in-page switcher; kept for this session.
+    private(set) var wikiLanguage: String?
+
+    private func netKey(_ d: DictionaryInfo, _ term: String) -> String {
+        d.isWikipedia ? "\(d.id)|\(wikiLanguage ?? "")|\(term)" : "\(d.id)||\(term)"
+    }
+
+    private func cancelNet() { netTasks.forEach { $0.cancel() }; netTasks = [] }
+
+    private func rebuildEntries() {
+        let order = DictionarySelection.enabled().filter(\.isNetwork).map(\.id)
+        entries = localShown + order.compactMap { netShown[$0] }
+        if let sel = selectedDictionary, !entries.contains(where: { $0.dictionary.id == sel }) { selectedDictionary = nil }
+    }
 
     /// Show the entries for a word without touching the search field.
-    /// Local dictionaries come first (milliseconds); Wikipedia is fetched separately and appended.
+    /// Local dictionaries come first (milliseconds); network sources are fetched separately and appended.
     func show(_ word: String, record: Bool = true) {
-        showTask?.cancel(); wikiTask?.cancel()
+        showTask?.cancel(); cancelNet()
         let dicts = DictionarySelection.enabled()
-        let wiki = dicts.first { $0.isNetwork }
+        let net = dicts.filter(\.isNetwork)
         showTask = Task {
             let t0 = Date()
             let r: (word: String, entries: [DictionaryEntry])
@@ -161,32 +185,63 @@ final class LookupModel: ObservableObject {
             if self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
             VocabLog.log("lookup \(word): local \(r.entries.count) entries in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
             let term = r.entries.isEmpty ? word : r.word
-            var shown = r.entries
-            if let wiki {
-                if let cached = self.wikiCache[term] { if let e = cached { shown.append(e) } }
-                else { shown.append(WikipediaClient.statusEntry("正在查询维基百科…", dictionary: wiki, term: term)) }
+            self.localShown = r.entries
+            self.netShown = [:]
+            var missing: [DictionaryInfo] = []
+            for d in net {
+                if let cached = self.netCache[self.netKey(d, term)] { if let e = cached { self.netShown[d.id] = e } }
+                else {
+                    self.netShown[d.id] = WikipediaClient.statusEntry(d.isWikipedia ? "正在查询维基百科…" : "正在查询百度百科…", dictionary: d, term: term)
+                    missing.append(d)
+                }
             }
-            self.entries = shown
             self.searchedTerm = term
-            if let sel = self.selectedDictionary, !shown.contains(where: { $0.dictionary.id == sel }) {
-                self.selectedDictionary = nil
-            }
+            self.rebuildEntries()
             if record { self.recordVisit(term) }
-            if let wiki, self.wikiCache[term] == nil { self.fetchWikipedia(term, wiki, local: r.entries) }
+            for d in missing { self.fetchNetwork(term, d) }
         }
     }
 
-    private func fetchWikipedia(_ term: String, _ wiki: DictionaryInfo, local: [DictionaryEntry]) {
-        wikiTask = Task {
+    private func fetchNetwork(_ term: String, _ d: DictionaryInfo) {
+        let key = netKey(d, term)
+        let lang = wikiLanguage
+        netTasks.append(Task {
             let t0 = Date()
-            let o = await WikipediaClient.fetch(term)
+            let e: DictionaryEntry?
+            let failed: Bool
+            if d.isWikipedia {
+                let o = await WikipediaClient.fetch(term, preferred: lang)
+                e = WikipediaClient.entry(o, dictionary: d, term: term)
+                if case .failed = o { failed = true } else { failed = false }
+            } else {
+                let o = await BaikeClient.fetch(term)
+                e = BaikeClient.entry(o, term: term)
+                if case .failed = o { failed = true } else { failed = false }
+            }
+            VocabLog.log("\(d.shortName) \(term): \(failed ? "failed" : e == nil ? "not found" : "found") in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
             if Task.isCancelled || self.searchedTerm != term { return }
-            let e = WikipediaClient.entry(o, dictionary: wiki, term: term)
-            VocabLog.log("wikipedia \(term): \(e == nil ? "not found" : (e!.plainText == "无法连接维基百科" ? "failed" : "found")) in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
-            if case .failed = o {} else { self.wikiCache[term] = .some(e) }
-            self.entries = local + (e.map { [$0] } ?? [])
-            if let sel = self.selectedDictionary, !self.entries.contains(where: { $0.dictionary.id == sel }) { self.selectedDictionary = nil }
-        }
+            if !failed { self.netCache[key] = .some(e) }
+            if d.isWikipedia && lang != self.wikiLanguage { return }   // the switcher moved on meanwhile
+            self.netShown[d.id] = e
+            self.rebuildEntries()
+        })
+    }
+
+    /// In-page Wikipedia language switcher.
+    func setWikiLanguage(_ code: String) {
+        guard WikipediaClient.languages().contains(code) else { return }
+        wikiLanguage = code
+        guard !searchedTerm.isEmpty, let d = DictionarySelection.enabled().first(where: \.isWikipedia) else { return }
+        let term = searchedTerm
+        if let cached = netCache[netKey(d, term)] { netShown[d.id] = cached; rebuildEntries(); return }
+        fetchNetwork(term, d)
+    }
+
+    /// Settings › 词典 changed the Wikipedia languages: drop cached articles.
+    func wikiLanguagesChanged() {
+        netCache = netCache.filter { !$0.key.contains("wikipedia") }
+        if let w = wikiLanguage, !WikipediaClient.languages().contains(w) { wikiLanguage = nil }
+        if !searchedTerm.isEmpty { show(searchedTerm, record: false) }
     }
 
     func search(_ term: String? = nil) {

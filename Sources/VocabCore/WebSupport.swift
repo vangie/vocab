@@ -159,6 +159,8 @@ public final class EntryWebViewFactory: NSObject, WKScriptMessageHandler, WKNavi
     public var onAudio: ((String, Bool) -> Void)?
     /// Scroll-spy: index of the dictionary section at the top of the view.
     public var onSection: ((Int) -> Void)?
+    /// `vocab-action:` links in entries (e.g. the Wikipedia language switcher), app-wide.
+    nonisolated(unsafe) public static var onAction: (@MainActor (URL) -> Void)?
     private let schemeHandler = VocabSchemeHandler()
 
     public override init() { super.init() }
@@ -195,6 +197,9 @@ public final class EntryWebViewFactory: NSObject, WKScriptMessageHandler, WKNavi
         case "x-dictionary", "dict":
             decisionHandler(.cancel)
             if let w = EntryHTML.lookupWord(fromLink: url) { onLookup?(w) }
+        case WikipediaClient.actionScheme:
+            decisionHandler(.cancel)
+            Self.onAction?(url)
         case "http", "https", "mailto":
             decisionHandler(.cancel)
             if action.navigationType == .linkActivated { NSWorkspace.shared.open(url) }

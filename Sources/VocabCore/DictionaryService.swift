@@ -100,7 +100,8 @@ public final class DictionaryService: @unchecked Sendable {
     public func availableDictionaries() -> [DictionaryInfo] {
         queue.sync {
             guard let set = fn("DCSCopyAvailableDictionaries", FSet.self)?()?.takeRetainedValue() as? Set<NSObject> else { return [] }
-            return set.map { info(for: $0) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            return (set.map { info(for: $0) } + [BaikeClient.dictionary])
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         }
     }
 

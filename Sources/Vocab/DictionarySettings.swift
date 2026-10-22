@@ -295,7 +295,16 @@ struct DictionaryDetailView: View {
 
     var body: some View {
         let p = DictionaryPrefs(bundleURL: dictionary.bundleURL)
-        if let p, p.prefsHTML != nil {
+        if dictionary.isWikipedia {
+            WikipediaLanguagesView(height: $height)
+        } else if dictionary.id == BaikeClient.id {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("百度百科").font(.headline)
+                Text("显示词条摘要、基本信息和目录；可在百度百科中查看全文。需要网络。").foregroundStyle(.secondary)
+            }
+            .font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading).padding(10)
+            .background(GeometryReader { g in Color.clear.onAppear { height = g.size.height } })
+        } else if let p, p.prefsHTML != nil {
             DictionaryPrefsWebView(prefs: p, height: $height)
         } else {
             ScrollView {
@@ -434,5 +443,39 @@ struct ShortNameField: View {
         guard (DictionaryNames.custom(dictionary.id) ?? "") != text.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
         DictionaryNames.set(text, for: dictionary.id)
         NotificationCenter.default.post(name: .vocabDictionaryPrefsChanged, object: nil)
+    }
+}
+
+
+/// Settings › 词典 › 维基百科: which languages to show (the first ticked is the default).
+struct WikipediaLanguagesView: View {
+    @Binding var height: CGFloat
+    @State private var ticked = WikipediaClient.languages()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("维基百科语言").font(.headline)
+            Text("勾选要显示的语言，结果页可在它们之间切换；排在最前的为默认语言，找不到时依次改用下一个。中文使用简体（zh-cn）。")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 5), alignment: .leading, spacing: 4) {
+                ForEach(WikipediaClient.supported, id: \.code) { l in
+                    Toggle(l.name, isOn: Binding(
+                        get: { ticked.contains(l.code) },
+                        set: { on in
+                            var t = ticked
+                            if on { t.append(l.code) } else if t.count > 1 { t.removeAll { $0 == l.code } }
+                            WikipediaClient.setLanguages(t); ticked = WikipediaClient.languages()
+                            LookupModel.shared.wikiLanguagesChanged()
+                        }))
+                    .toggleStyle(.checkbox)
+                }
+            }
+        }
+        .font(.system(size: 13))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(GeometryReader { g in
+            Color.clear.onAppear { height = g.size.height }.onChange(of: g.size.height) { _, h in height = h }
+        })
     }
 }

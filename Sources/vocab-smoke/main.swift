@@ -100,15 +100,24 @@ case "render", "click":
     let isRender = args[1] == "render"
     let out = isRender ? args[3] : ""
     let dark = args.contains("dark")
-    let only = args.dropFirst(isRender ? 4 : 3).first(where: { $0 != "dark" && $0 != "jsform" && $0 != "wiki" && $0 != "expand" })
+    let only = args.dropFirst(isRender ? 4 : 3).first(where: { $0 != "dark" && $0 != "jsform" && $0 != "wiki" && $0 != "baike" && !$0.hasPrefix("lang=") && $0 != "expand" })
     var entries = svc.lookup(word, in: dicts(only).filter { !$0.isNetwork })
-    if args.contains("wiki"), let wd = svc.availableDictionaries().first(where: { $0.isNetwork }) {
+    if args.contains("wiki"), let wd = svc.availableDictionaries().first(where: { $0.isWikipedia }) {
         // Same path as the app: our own fetch, then the entry (or the quiet failure note).
+        // Optional "lang=xx" picks the switcher language.
+        let lang = args.first { $0.hasPrefix("lang=") }.map { String($0.dropFirst(5)) }
         let sem = DispatchSemaphore(value: 0); var o = WikipediaClient.Outcome.failed
-        Task.detached { o = await WikipediaClient.fetch(word); sem.signal() }
+        Task.detached { o = await WikipediaClient.fetch(word, preferred: lang); sem.signal() }
         sem.wait()
         if let e = WikipediaClient.entry(o, dictionary: wd, term: word) { entries.append(e) }
-        print("wikipedia:", { if case .found(let t, _, _) = o { return "found \(t)" }; return "\(o)" }())
+        print("wikipedia:", { if case .found(let a) = o { return "found \(a.lang) \(a.title) avail \(a.available)" }; return "\(o)" }())
+    }
+    if args.contains("baike") {
+        let sem = DispatchSemaphore(value: 0); var o = BaikeClient.Outcome.failed
+        Task.detached { o = await BaikeClient.fetch(word); sem.signal() }
+        sem.wait()
+        if let e = BaikeClient.entry(o, term: word) { entries.append(e) }
+        print("baike:", { if case .found(let l) = o { return "found \(l.title) others=\(l.hasOthers)" }; return "\(o)" }())
     }
     if entries.isEmpty { fail("no results") }
     if args.contains("jsform") {
@@ -201,7 +210,7 @@ case "profile":
         t = Date(); let fb = Suggester.lookupWithFallback(q, in: en); print("lookupWithFallback total: \(ms(t)) ms"); fflush(stdout)
         t = Date(); MainActor.assumeIsolated { _ = EntryWebViewFactory.pageURL(for: fb.entries, showTitles: true, emptyMessage: "") }; print("page build (\(fb.entries.count) entries): \(ms(t)) ms")
         let sem = DispatchSemaphore(value: 0); t = Date()
-        Task.detached { let o = await WikipediaClient.fetch(q); if case .found(let ti, _, _) = o { print("wikipedia: found \(ti)", terminator: "") } else { print("wikipedia: \(o)", terminator: "") }; sem.signal() }
+        Task.detached { let o = await WikipediaClient.fetch(q); if case .found(let a) = o { print("wikipedia: found \(a.title)", terminator: "") } else { print("wikipedia: \(o)", terminator: "") }; sem.signal() }
         sem.wait(); print(" in \(ms(t)) ms"); fflush(stdout)
     }
 
