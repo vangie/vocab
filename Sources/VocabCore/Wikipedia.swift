@@ -11,6 +11,13 @@ public extension DictionaryInfo {
 /// Shared look for Vocab's own network entries (Wikipedia, 百度百科): system font and label colours,
 /// light and dark.
 public enum NetEntryStyle {
+    /// Quick-lookup popup variant: small picture, floated right so the text wraps around it.
+    public static func panel(_ html: String) -> String {
+        let css = "<style>.net .thumb { max-width: 72px; max-height: 72px; margin: 2px 0 6px 10px; border-radius: 5px; }</style>"
+        if let r = html.range(of: "</head>") { return html.replacingCharacters(in: r, with: css + "</head>") }
+        return css + html
+    }
+
     public static let css = """
     :root { color-scheme: light dark; --l: rgba(0,0,0,.85); --s: rgba(0,0,0,.55); --t: rgba(0,0,0,.38); --f: rgba(0,0,0,.045); --sep: rgba(0,0,0,.1); }
     @media (prefers-color-scheme: dark) { :root { --l: rgba(255,255,255,.86); --s: rgba(255,255,255,.55); --t: rgba(255,255,255,.36); --f: rgba(255,255,255,.06); --sep: rgba(255,255,255,.12); } }
@@ -237,7 +244,7 @@ public enum WikipediaClient {
         switch o {
         case let .found(a):
             return DictionaryEntry(id: "\(d.id)#\(a.lang)#\(a.title)", dictionary: d, headword: a.title, html: a.html,
-                                   panelHTML: a.html, plainText: a.text, resourceDirectory: nil)
+                                   panelHTML: NetEntryStyle.panel(a.html), plainText: a.text, resourceDirectory: nil)
         case .notFound: return nil
         case .failed: return statusEntry("无法连接维基百科", dictionary: d, term: term)
         }

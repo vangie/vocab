@@ -111,7 +111,7 @@ public enum BaikeClient {
         case let .found(l):
             let html = page(l, term: term)
             return DictionaryEntry(id: "\(d.id)#\(l.title)", dictionary: d, headword: l.title, html: html,
-                                   panelHTML: html, plainText: l.abstract, resourceDirectory: nil)
+                                   panelHTML: NetEntryStyle.panel(html), plainText: l.abstract, resourceDirectory: nil)
         case .notFound: return nil
         case .failed: return WikipediaClient.statusEntry("无法连接百度百科", dictionary: d, term: term)
         }
