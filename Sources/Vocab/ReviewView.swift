@@ -114,7 +114,9 @@ private struct CheckScreen: View {
     var body: some View {
         VStack(spacing: 18) {
             Text(session.checkWord ?? "").font(.system(size: 36, weight: .bold))
-            Text("认识这个词吗？").font(.system(size: 15)).foregroundStyle(.secondary)
+            // IPA + speaker (exact-word recording, else TTS); click only. Fixed height: no jump when the IPA loads.
+            PhoneticTag(session: session, word: session.checkWord ?? "", size: 17)
+                .frame(minHeight: 24)
             HStack(spacing: 20) {
                 Button { session.answerCheck(known: false) } label: { BigLabel(text: "不认识，学一下", hint: "←") }
                     .controlSize(.large).keyboardShortcut(.leftArrow, modifiers: [])
