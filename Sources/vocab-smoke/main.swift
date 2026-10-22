@@ -16,7 +16,7 @@ func dicts(_ only: String? = nil) -> [DictionaryInfo] {
     var list = svc.activeDictionaries()
     if let only, let d = svc.availableDictionaries().first(where: { $0.id == only }) { return [d] }
     let avail = svc.availableDictionaries()
-    for id in ["LDOCE5", "Macmillan2", "Longman5"] where !list.contains(where: { $0.id == id }) {
+    for id in ["LDOCE5", "Macmillan2"] where !list.contains(where: { $0.id == id }) {
         if let d = avail.first(where: { $0.id == id }) { list.append(d) }
     }
     if let only { list = list.filter { $0.id == only } }
