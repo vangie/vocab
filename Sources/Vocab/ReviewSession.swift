@@ -279,6 +279,7 @@ final class ReviewSession: ObservableObject {
             quickCheck.remove(id)
             checkWord = item.word
             phase = .check
+            NotificationCenter.default.post(name: .vocabQuizQuestionShown, object: nil)
             return
         }
         phase = .loading
@@ -330,6 +331,7 @@ final class ReviewSession: ObservableObject {
             loadCurrent(); return
         }
         question = q; previousType = q.type; askedAt = Date(); phase = .asking
+        NotificationCenter.default.post(name: .vocabQuizQuestionShown, object: nil)
         if q.type != .meaningToWord { speak(q) }   // that one would give the answer away
     }
 
@@ -552,5 +554,23 @@ extension ReviewSession {
             s.phase = .answered
         } else { s.phase = .asking }
         return s
+    }
+}
+
+
+extension Notification.Name {
+    /// A new 记词 question (or 认识吗 card) is on screen: the quiz takes the keyboard back.
+    static let vocabQuizQuestionShown = Notification.Name("VocabQuizQuestionShown")
+}
+
+/// Who gets the keyboard while a 记词 quiz is on screen.
+enum QuizFocus {
+    @MainActor static var quizActive: Bool {
+        let st = AppState.shared, ph = ReviewSession.shared.phase
+        return st.mode == .words && st.wordGroup == .today && [.asking, .answered, .check].contains(ph)
+    }
+    /// Take focus from the search field when a quiz is active and the user didn't click/⌘F into it.
+    static func shouldReclaim(quizActive: Bool, searchFocused: Bool, explicit: Bool) -> Bool {
+        quizActive && searchFocused && !explicit
     }
 }

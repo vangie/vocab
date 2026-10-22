@@ -47,6 +47,11 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     private var fontGroup: NSToolbarItemGroup?
     private var searchItem: NSSearchToolbarItem?
     private var bag: Set<AnyCancellable> = []
+    /// The user put the caret in the search field on purpose (click or ⌘F); until it ends editing,
+    /// typing goes to search even during a quiz.
+    private var searchExplicit = false { didSet { if searchExplicit { searchExplicitAt = Date() } } }
+    private var searchExplicitAt = Date.distantPast
+    private var focusMonitors: [Any] = []
 
     var lookup: LookupModel { LookupModel.shared }
     var state: AppState { AppState.shared }
@@ -64,6 +69,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         }
         guard window !== w || w.toolbar?.identifier != "vocab.main" else { return }
         window = w
+        installQuizFocus()
         let tb = NSToolbar(identifier: "vocab.main")
         tb.delegate = self
         tb.displayMode = .iconOnly
@@ -173,6 +179,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
 
     func focusSearch() {
         guard let f = searchItem?.searchField, let w = window else { return }
+        searchExplicit = true
         searchItem?.beginSearchInteraction()
         w.makeFirstResponder(f)
         f.currentEditor()?.selectAll(nil)
@@ -315,6 +322,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         guard let f = n.object as? NSSearchField else { return }
         // IME composition (pinyin marked text): wait for the committed text.
         if let tv = f.currentEditor() as? NSTextView, tv.hasMarkedText() { return }
+        // A quiz is on screen and the user didn't choose to search: don't let stray typing leave it.
+        if QuizFocus.quizActive && !searchExplicit { return }
         switch state.mode {
         case .words:
             state.wordFilter = f.stringValue
@@ -333,6 +342,48 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     }
 
     func searchFieldDidEndSearching(_ f: NSSearchField) { searchFieldAction(f) }
+
+    func controlTextDidEndEditing(_ n: Notification) {
+        if (n.object as? NSSearchField) === searchItem?.searchField { searchExplicit = false }
+    }
+
+    // MARK: quiz keeps the keyboard
+
+    private var searchFocused: Bool {
+        guard let f = searchItem?.searchField, let tv = window?.firstResponder as? NSTextView else { return false }
+        return tv.delegate === f || f.currentEditor() === tv
+    }
+
+    /// Take the caret out of the search field unless the user put it there; the quiz's shortcuts then work.
+    func reclaimFocusForQuiz() {
+        // A new question: an old click into search (not in the last moment) no longer counts.
+        if searchExplicit && Date().timeIntervalSince(searchExplicitAt) > 1.5 { searchExplicit = false }
+        guard QuizFocus.shouldReclaim(quizActive: QuizFocus.quizActive, searchFocused: searchFocused, explicit: searchExplicit),
+              let w = window else { return }
+        w.makeFirstResponder(nil)
+    }
+
+    private func installQuizFocus() {
+        guard focusMonitors.isEmpty else { return }
+        // A click into the search field is an explicit choice to search.
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { [weak self] e in
+            guard let self, let f = self.searchItem?.searchField, e.window === self.window, let v = f.superview else { return e }
+            let p = v.convert(e.locationInWindow, from: nil)
+            if f.frame.contains(p) { self.searchExplicit = true }
+            return e
+        }) { focusMonitors.append(m) }
+        // Keys typed while the field has focus by accident (e.g. left from before the quiz) go to the quiz.
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
+            guard let self, e.window === self.window else { return e }
+            if QuizFocus.shouldReclaim(quizActive: QuizFocus.quizActive, searchFocused: self.searchFocused, explicit: self.searchExplicit) {
+                self.window?.makeFirstResponder(nil)   // the event then reaches the quiz's key shortcuts
+            }
+            return e
+        }) { focusMonitors.append(m) }
+        NotificationCenter.default.addObserver(forName: .vocabQuizQuestionShown, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reclaimFocusForQuiz() }
+        }
+    }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
         guard state.mode == .lookup else { return false }
