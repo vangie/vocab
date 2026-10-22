@@ -40,6 +40,39 @@ public enum Distractors {
         return stem.count >= 4 && l.count > s.count && l.hasPrefix(stem) && l.count - s.count <= 5
     }
 
+    /// British/American spelling skeleton: realise/realize, analyse/analyze, colour/color,
+    /// centre/center, catalogue/catalog, travelled/traveled all map to the same key.
+    public static func spellingKey(_ w: String) -> String {
+        var s = w.lowercased()
+        for (a, b) in [("isation", "ization"), ("ogue", "og"), ("yse", "yze"), ("ysing", "yzing"), ("ise", "ize"),
+                       ("ising", "izing")] {
+            s = s.replacingOccurrences(of: a, with: b)
+        }
+        if s.count > 4 {
+            for (p, r) in [("([a-z]{2})our(s|ed|ing|ful|ite|able|er|ers)?$", "$1or$2"), ("([aeiou])ll(ed|ing|er|ers)$", "$1l$2")] {
+                s = s.replacingOccurrences(of: p, with: r, options: .regularExpression)
+            }
+        }
+        for (a, b) in [("tre", "ter"), ("bre", "ber"), ("tres", "ters"), ("bres", "bers"), ("tred", "tered")] where s.hasSuffix(a) {
+            s = String(s.dropLast(a.count)) + b; break
+        }
+        return s
+    }
+
+    /// Two spellings of one word (BrE/AmE), never two different answers.
+    public static func isSpellingVariant(_ a: String, _ b: String) -> Bool {
+        let x = a.lowercased(), y = b.lowercased()
+        return x == y || (spellingKey(x) == spellingKey(y) && Suggester.distance(x, y) <= 3)
+    }
+
+    /// The candidate's gloss points back at the target ("= realise", "variant of realise"): same word.
+    static func glossRefers(to target: String, _ g: Gloss) -> Bool {
+        let t = NSRegularExpression.escapedPattern(for: target.lowercased())
+        let text = ((g.english ?? "") + " " + (g.chinese ?? "") + " " + (g.note ?? "")).lowercased()
+        return text.range(of: "(^|[^a-z])\(t)([^a-z]|$)", options: .regularExpression) != nil
+            && (text.contains("also") || text.contains("variant") || text.contains("spelling") || text.contains("拼") || text.contains("=") || text.contains("同"))
+    }
+
     /// Spelling variants likely to be real, confusable words: vowel swaps (adapt → adopt, adept;
     /// affect → effect), doubled/undoubled letters and adjacent transpositions.
     public static func variants(_ word: String) -> [String] {
@@ -69,7 +102,7 @@ public enum Distractors {
         let properTarget = target.first?.isUppercase ?? false
         var seen = Set<String>(); var out: [Candidate] = []
         // Curated confusables come first, whatever the other rules say.
-        for (i, p) in Confusables.partners(of: t).enumerated() where seen.insert(p).inserted {
+        for (i, p) in Confusables.partners(of: t).enumerated() where !isSpellingVariant(t, p) && seen.insert(p).inserted {
             out.append(Candidate(word: p, score: -100 + Double(i)))
         }
         for c in candidates {
@@ -77,7 +110,7 @@ public enum Distractors {
             let l = w.lowercased()
             guard w.count >= 3, w.allSatisfy({ $0.isLetter }), seen.insert(l).inserted else { continue }
             guard (w.first?.isUppercase ?? false) == properTarget || lowerBook.contains(l) else { continue }
-            guard !syn.contains(l), !isSameFamily(t, l) else { continue }
+            guard !syn.contains(l), !isSameFamily(t, l), !isSpellingVariant(t, l) else { continue }
             let d = Suggester.distance(t, l)
             let inBook = lowerBook.contains(l)
             let sameRoot = !tRoots.isEmpty && !tRoots.isDisjoint(with: Set(RootTable.matches(l).map(\.morpheme)))
@@ -108,6 +141,7 @@ public enum Distractors {
     public static func keep(target: String, candidate: String, targetGloss: Gloss, candidateGloss: Gloss,
                             synonyms: Set<String> = []) -> Bool {
         let t = target.lowercased(), c = candidate.lowercased()
+        if isSpellingVariant(t, c) || glossRefers(to: t, candidateGloss) { return false }
         if Confusables.partners(of: t).contains(c) { return true }
         if synonyms.contains(c) { return false }
         if GlossExtractor.nearIdentical(targetGloss.chinese, candidateGloss.chinese) { return false }

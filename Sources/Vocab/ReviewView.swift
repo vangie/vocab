@@ -359,7 +359,7 @@ private struct Options: View {
 
     private func row(_ i: Int, _ opt: String, grid: Bool) -> some View {
         let answered = session.phase == .answered
-        let mark = answered ? (i == q.correctIndex ? Mark.right : i == session.chosen ? Mark.wrong : nil) : nil
+        let mark = answered ? (q.isCorrectChoice(i) ? Mark.right : i == session.chosen ? Mark.wrong : nil) : nil
         return HStack(alignment: .firstTextBaseline, spacing: 10) {
             // Small, light number on the first line's baseline.
             Text("\(i + 1)").font(.system(size: 12, weight: .medium).monospacedDigit()).foregroundStyle(.tertiary)

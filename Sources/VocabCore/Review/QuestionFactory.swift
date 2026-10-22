@@ -17,6 +17,13 @@ public struct ReviewQuestion: Identifiable, Sendable {
     public var audio: URL?
     /// The English word behind each option (choice questions with words), for IPA/pronunciation.
     public var optionWords: [String] = []
+
+    /// The right option, or one whose word is just another spelling of the answer (realise/realize).
+    public func isCorrectChoice(_ i: Int) -> Bool {
+        if i == correctIndex { return true }
+        guard optionWords.indices.contains(i), !optionWords[i].isEmpty else { return false }
+        return Distractors.isSpellingVariant(optionWords[i], word)
+    }
 }
 
 /// Everything a word needs for any question type, computed once per session.

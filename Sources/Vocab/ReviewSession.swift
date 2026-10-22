@@ -381,7 +381,7 @@ final class ReviewSession: ObservableObject {
     func choose(_ i: Int) {
         guard phase == .asking, let q = question, q.options.indices.contains(i) else { return }
         chosen = i
-        finish(correct: i == q.correctIndex)
+        finish(correct: q.isCorrectChoice(i))
     }
 
     func submitSpelling() {
@@ -554,7 +554,7 @@ extension ReviewSession {
             s.phase = .answered; return s
         }
         if let c = chosen {
-            s.chosen = c; s.lastCorrect = c == q.correctIndex
+            s.chosen = c; s.lastCorrect = q.isCorrectChoice(c)
             s.lastRating = s.lastCorrect ? .good : .forgot
             s.phase = .answered
         } else { s.phase = .asking }
