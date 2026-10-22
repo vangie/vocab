@@ -7,7 +7,7 @@ final class DictionaryLanguageTests: XCTestCase {
         XCTAssertEqual(G.groups(languages: ["zh_CN", "en"], name: "牛津英汉汉英词典"), [.simplified, .english])
         XCTAssertEqual(G.groups(languages: ["zh-Hant"], name: "x"), [.traditional])
         XCTAssertEqual(G.groups(languages: ["zh_TW"], name: "x"), [.traditional])
-        XCTAssertEqual(G.groups(languages: ["yue", "en"], name: "牛津粵英雙語詞典"), [.cantonese, .english])
+        XCTAssertEqual(G.groups(languages: ["yue", "en"], name: "牛津粵英雙語詞典"), [.traditional, .english])
         XCTAssertEqual(G.groups(languages: ["ja"], name: "x"), [.japanese])
         XCTAssertEqual(G.groups(languages: ["fr"], name: "x"), [.other])
     }
@@ -17,7 +17,7 @@ final class DictionaryLanguageTests: XCTestCase {
         XCTAssertEqual(G.groups(languages: [], name: "五南國語活用辭典"), [.traditional])
         XCTAssertEqual(G.groups(languages: [], name: "譯典通英漢雙向字典"), [.traditional, .english])
         XCTAssertEqual(G.groups(languages: [], name: "漢英對照成語詞典"), [.traditional, .english])
-        XCTAssertEqual(G.groups(languages: [], name: "英譯廣東口語詞典"), [.cantonese, .english])
+        XCTAssertEqual(G.groups(languages: [], name: "英譯廣東口語詞典"), [.traditional, .english])
         XCTAssertEqual(G.groups(languages: [], name: "スーパー大辞林"), [.japanese])
         XCTAssertEqual(G.groups(languages: [], name: "超級クラウン中日辞典 / クラウン日中辞典"), [.japanese])
         XCTAssertEqual(G.groups(languages: [], name: "ウィズダム英和辞典 / ウィズダム和英辞典"), [.japanese, .english])
@@ -48,5 +48,16 @@ final class DictionaryLanguageOverrideTests2: XCTestCase {
     func testSpeakerScriptInjected() {
         let s = EntryHTML.prepare("<html><head></head><body/></html>", resourceDirectory: nil)
         XCTAssertTrue(s.contains("v-spk")); XCTAssertTrue(s.contains("播放美音"))
+    }
+}
+
+final class DictionaryLanguageCantoneseRemovalTests: XCTestCase {
+    func testCantoneseDroppedFromSavedFilter() {
+        XCTAssertEqual(DictionaryLanguageGroup.decodeFilter(["cantonese", "english", "mandarin"]), [.english, .simplified])
+        XCTAssertNil(DictionaryLanguageGroup(rawValue: "cantonese"))
+    }
+    func testCantoneseByScript() {
+        XCTAssertEqual(DictionaryLanguageGroup.groups(languages: ["zh_HK"], name: "x"), [.traditional])
+        XCTAssertEqual(DictionaryLanguageGroup.groups(languages: [], name: "粤语词典"), [.simplified])
     }
 }
