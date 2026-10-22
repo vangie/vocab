@@ -145,13 +145,13 @@ public enum PlanMath {
         let per = effectiveNew(plan: plan, due: due)
         guard per > 0 else { return nil }
         let days = max(1, Int((Double(remaining) / Double(per)).rounded(.up)))
-        return calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now))
+        return calendar.date(byAdding: .day, value: days, to: StudyDay.day(now, calendar))
     }
 
     /// Choose a target: the date moves, the daily new limit follows.
     public static func setTarget(_ p: inout StudyPlan, preset: TargetPreset?, date: Date? = nil, remaining: Int, now: Date, calendar: Calendar = .current) {
         guard let preset else { p.targetDate = nil; p.targetPreset = nil; return }
-        let today = calendar.startOfDay(for: now)
+        let today = StudyDay.day(now, calendar)
         let target: Date
         if let d = preset.days { target = calendar.date(byAdding: .day, value: d, to: today)! }
         else { target = calendar.startOfDay(for: max(date ?? p.targetDate ?? calendar.date(byAdding: .day, value: 30, to: today)!,
@@ -169,7 +169,7 @@ public enum PlanMath {
         guard let d = projectedDate(remaining: remaining, plan: p, due: due, now: now, calendar: calendar) else { return }
         if d != p.targetDate {
             p.targetDate = d
-            let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: d).day ?? 0
+            let days = calendar.dateComponents([.day], from: StudyDay.day(now, calendar), to: d).day ?? 0
             p.targetPreset = TargetPreset.allCases.first { $0.days == days } ?? .custom
         }
     }
@@ -187,10 +187,10 @@ public enum PlanMath {
         -> (days: Int, finish: Date?, neededPerDay: Int?) {
         let per = max(1, plan.dailyNew)
         let days = plan.dailyNew <= 0 ? Int.max : Int((Double(remaining) / Double(per)).rounded(.up))
-        let finish = days == Int.max ? nil : calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now))
+        let finish = days == Int.max ? nil : calendar.date(byAdding: .day, value: days, to: StudyDay.day(now, calendar))
         var need: Int?
         if let t = plan.targetDate {
-            let left = max(1, calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: t)).day ?? 1)
+            let left = max(1, calendar.dateComponents([.day], from: StudyDay.day(now, calendar), to: calendar.startOfDay(for: t)).day ?? 1)
             need = Int((Double(remaining) / Double(left)).rounded(.up))
         }
         return (days, finish, need)

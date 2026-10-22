@@ -5,13 +5,15 @@ public struct DayRecord: Codable, Equatable, Sendable {
     public var newQuota = 0, newDone = 0
     public var reviewTarget = 0, reviewsDone = 0
     public var completed = false
+    /// The plan's daily new limit when `newQuota` was fixed (a plan edit that day re-fixes it).
+    public var newCap: Int? = nil
     /// Active study time in quiz sessions (seconds; idle gaps over 60 s not counted).
     public var studySeconds: Double = 0
     /// Nothing was scheduled that day: it neither counts nor breaks the streak.
     public var isRest: Bool { newQuota + reviewTarget == 0 }
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case newQuota, newDone, reviewTarget, reviewsDone, completed, studySeconds }
+    enum CodingKeys: String, CodingKey { case newQuota, newDone, reviewTarget, reviewsDone, completed, studySeconds, newCap }
     public init(from d: Decoder) throws {   // tolerate records saved before studySeconds existed
         let c = try d.container(keyedBy: CodingKeys.self)
         newQuota = try c.decodeIfPresent(Int.self, forKey: .newQuota) ?? 0
@@ -20,6 +22,7 @@ public struct DayRecord: Codable, Equatable, Sendable {
         reviewsDone = try c.decodeIfPresent(Int.self, forKey: .reviewsDone) ?? 0
         completed = try c.decodeIfPresent(Bool.self, forKey: .completed) ?? false
         studySeconds = try c.decodeIfPresent(Double.self, forKey: .studySeconds) ?? 0
+        newCap = try c.decodeIfPresent(Int.self, forKey: .newCap)
     }
 }
 
@@ -36,16 +39,23 @@ public struct DailyLog: Codable, Equatable, Sendable {
     }
 
     /// Record the current state: `newLeft` / `reviewsLeft` still waiting today, `newDone` / `reviewsDone` so far.
-    /// The day's targets are fixed by the first snapshot (later additions raise them, never lower them).
-    public mutating func snapshot(_ now: Date, newLeft: Int, reviewsLeft: Int, newDone: Int, reviewsDone: Int, calendar: Calendar = .current) {
-        let k = Self.key(now, calendar)
+    /// The new-word goal is fixed by the day's first snapshot (done + left then) and does not move as you
+    /// learn: extra groups raise `newDone` past it (rings over 100%). Only a change of the plan's daily
+    /// limit (`newCap`) during the day re-fixes it. Days are study days (rollover 02:00).
+    public mutating func snapshot(_ now: Date, newLeft: Int, reviewsLeft: Int, newDone: Int, reviewsDone: Int,
+                                  newCap: Int? = nil, calendar: Calendar = .current) {
+        let k = StudyDay.key(now, calendar)
+        let fresh = days[k] == nil
         var r = days[k] ?? DayRecord()
         r.newDone = max(r.newDone, newDone); r.reviewsDone = max(r.reviewsDone, reviewsDone)
-        r.newQuota = max(r.newQuota, r.newDone + newLeft)
+        if fresh || (newCap != nil && r.newCap != nil && newCap != r.newCap) || (r.newCap == nil && r.newQuota == 0) {
+            r.newQuota = r.newDone + newLeft
+            r.newCap = newCap
+        }
         // Reviews: done + what is still queueable now (not a high-water mark), so a card that leaves the
         // queue (斩, or filtered as a known-common word) also leaves the denominator: 13/14 can't stick.
         r.reviewTarget = r.reviewsDone + reviewsLeft
-        if newLeft == 0 && reviewsLeft == 0 && !r.isRest { r.completed = true }
+        if newLeft == 0 && reviewsLeft == 0 && r.newDone >= r.newQuota && !r.isRest { r.completed = true }
         days[k] = r
         prune(now, calendar)
     }
@@ -53,17 +63,17 @@ public struct DailyLog: Codable, Equatable, Sendable {
     /// Adds active study time between two interactions; a gap longer than `idleCap` is idle and not counted.
     public mutating func addStudy(_ seconds: Double, at now: Date, idleCap: Double = 60, calendar: Calendar = .current) {
         guard seconds > 0, seconds <= idleCap else { return }   // longer gap = idle, not counted
-        let k = Self.key(now, calendar)
+        let k = StudyDay.key(now, calendar)
         var r = days[k] ?? DayRecord()
         r.studySeconds += seconds
         days[k] = r
     }
 
-    public func today(_ now: Date, calendar: Calendar = .current) -> DayRecord { days[Self.key(now, calendar)] ?? DayRecord() }
+    public func today(_ now: Date, calendar: Calendar = .current) -> DayRecord { days[StudyDay.key(now, calendar)] ?? DayRecord() }
 
     public func streak(_ now: Date, calendar: Calendar = .current) -> Int {
         var n = today(now, calendar: calendar).completed ? 1 : 0
-        var d = calendar.startOfDay(for: now)
+        var d = StudyDay.day(now, calendar)
         for _ in 0..<800 {
             d = calendar.date(byAdding: .day, value: -1, to: d)!
             guard let r = days[Self.key(d, calendar)] else { break }

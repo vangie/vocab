@@ -61,8 +61,7 @@ final class ReviewSession: ObservableObject {
     static var dailyNewCap: Int { max(0, PlanModel.shared.plan.dailyNew) }
 
     private static var todayKey: String {
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
-        return f.string(from: Date())
+        StudyDay.key(Date())
     }
     static var introducedToday: Int {
         (UserDefaults.standard.dictionary(forKey: introducedKey)?[todayKey] as? Int) ?? 0
@@ -196,7 +195,8 @@ final class ReviewSession: ObservableObject {
         var log = DailyLog.load()
         let now = Date()
         log.snapshot(now, newLeft: preview.new, reviewsLeft: preview.reviews,
-                     newDone: Self.introducedToday, reviewsDone: Self.reviewedToday)
+                     newDone: Self.introducedToday, reviewsDone: Self.reviewedToday,
+                     newCap: PlanModel.shared.plan.dailyNew)
         log.save()
         today = log.today(now); streak = log.streak(now)
         overall = PlanModel.shared.progress()

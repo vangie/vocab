@@ -271,7 +271,7 @@ public struct SessionSnapshot: Codable {
 
     /// Resumable: same calendar day and cards left.
     public func resumable(now: Date = Date(), calendar: Calendar = .current) -> Bool {
-        !queue.finished && calendar.isDate(date, inSameDayAs: now)
+        !queue.finished && StudyDay.same(date, now, calendar)
     }
 
     public static let defaultsKey = "reviewSessionSnapshot"

@@ -781,7 +781,7 @@ private struct PlanDashboard: View {
     private var targetLine: String? {
         guard let target = plan.targetDate else { return nil }
         let cal = Calendar.current
-        let left = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: target).day ?? 0
+        let left = cal.dateComponents([.day], from: StudyDay.day(Date(), cal), to: target).day ?? 0
         let remaining = max(0, session.overall.total - session.overall.learned)
         let due = WordbookModel.shared.dueItems.filter { !SessionPlanner.isNew($0) }.count
         var s = "目标 \(target.formatted(.dateTime.month().day())) · 还有 \(max(0, left)) 天"
