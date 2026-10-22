@@ -75,7 +75,7 @@ private struct StartScreen: View {
                     } else if p.reviews + p.new == 0 {
                         Label("今天的任务完成了", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.title3.weight(.medium))
                         Button { session.start(extraNew: ReviewSession.extraGroupSize) } label: {
-                            Text("再学一组").frame(minWidth: 120)
+                            BigLabel(text: "再学一组")
                         }
                         .controlSize(.large).buttonBorderShape(.capsule)
                         .help("再学 \(ReviewSession.extraGroupSize) 个新词（含到期复习）")
@@ -113,18 +113,21 @@ private struct CheckScreen: View {
     @ObservedObject var session: ReviewSession
     var body: some View {
         VStack(spacing: 18) {
-            Spacer()
             Text(session.checkWord ?? "").font(.system(size: 36, weight: .bold))
-            Text("认识这个词吗？").foregroundStyle(.secondary)
-            HStack(spacing: 16) {
-                Button { session.answerCheck(known: false) } label: { Text("不认识，学一下").frame(width: 130) }
+            Text("认识这个词吗？").font(.system(size: 15)).foregroundStyle(.secondary)
+            HStack(spacing: 20) {
+                Button { session.answerCheck(known: false) } label: { BigLabel(text: "不认识，学一下", hint: "←") }
                     .controlSize(.large).keyboardShortcut(.leftArrow, modifiers: [])
-                Button { session.answerCheck(known: true) } label: { Text("认识，斩").frame(width: 130) }
+                Button { session.answerCheck(known: true) } label: { BigLabel(text: "认识，斩", hint: "→") }
                     .controlSize(.large).keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(.borderedProminent)
             }
+            .padding(.top, 8)
             Text("← 不认识 · → 认识").font(.caption).foregroundStyle(.tertiary)
-            Spacer()
         }
+        .padding(.horizontal, 20)
+        // Centred in the whole area below the top bar, both ways.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .multilineTextAlignment(.center)
     }
 }
 
@@ -443,7 +446,7 @@ private struct RecallCard: View {
                 if !session.revealed {
                     VStack(spacing: 16) {
                         Text("想一想它的意思").foregroundStyle(.secondary)
-                        Button("显示释义") { session.flip() }
+                        Button { session.flip() } label: { BigLabel(text: "显示释义", hint: "空格") }
                             .keyboardShortcut(.space, modifiers: []).controlSize(.large)
                         Text("空格").font(.caption).foregroundStyle(.tertiary)
                     }
@@ -504,7 +507,7 @@ private struct SpellingHelp: View {
                 hintButton
                 giveUpButton
             }
-            .buttonStyle(.borderless).controlSize(.small).foregroundStyle(.secondary)
+            .controlSize(.large).font(.system(size: 15))
             Text("↩ 提交 · Tab 提示（提示后最高计 模糊） · ⌘↩ 看答案（计 忘了）")
                 .font(.caption2).foregroundStyle(.tertiary)
         }
@@ -620,11 +623,7 @@ private struct AnswerBanner: View {
 
     private var continueButton: some View {
         Button { session.next() } label: {
-            HStack(spacing: 8) {
-                Text("继续").font(.system(size: 17, weight: .semibold))
-                Text("↩").font(.system(size: 15)).opacity(0.7)
-            }
-            .frame(minWidth: 200, minHeight: 36)   // ~44 pt tall with the large control padding
+            BigLabel(text: "继续", hint: "↩")
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
@@ -1069,9 +1068,19 @@ enum QuizRender {
             if q.optionWords.count == q.options.count { q.optionWords.swapAt(q.correctIndex, 1) }
             q.correctIndex = 1
         }
-        let chosen: Int? = a.contains("wrong") ? 2 : a.contains("right") ? 1 : nil
+        let check = a[2] == "check"
+        if check { q = f.make(item, type: .recall, using: &rng) }
+        let chosen: Int? = check ? -1 : a.contains("wrong") ? 2 : a.contains("right") ? 1 : nil
         let s = ReviewSession.preview(q, chosen: chosen)
-        let view = QuestionScreen(session: s).frame(width: size.width, height: size.height)
+        let screen = Group {
+            if check {
+                VStack(spacing: 0) {
+                    SessionHeader(session: s, tag: "认识吗", showRetire: false)
+                    FitHeight(levels: [.normal]) { _ in CheckScreen(session: s) }
+                }
+            } else { QuestionScreen(session: s) }
+        }
+        let view = screen.frame(width: size.width, height: size.height)
             .background(Color(nsColor: .windowBackgroundColor))
         let host = NSHostingView(rootView: view)
         let win = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)

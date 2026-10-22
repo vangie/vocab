@@ -474,19 +474,19 @@ struct VocabTestSheet: View {
                 VStack(spacing: 6) {
                     ForEach(Array(item.choices.enumerated()), id: \.offset) { i, c in
                         Button { check(c) } label: {
-                            HStack { Text("\(i + 1)").monospacedDigit().foregroundStyle(.secondary); Text(c).lineLimit(1); Spacer() }.frame(width: 320)
+                            HStack { Text("\(i + 1)").monospacedDigit().foregroundStyle(.secondary); Text(c).font(.system(size: 16)).lineLimit(1); Spacer() }.frame(width: 340).frame(minHeight: 32)
                         }
                         .controlSize(.large).keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [])
                     }
                 }
-                Button("不确定") { check("") }.buttonStyle(.borderless).padding(.top, 8).keyboardShortcut("0", modifiers: [])
+                Button("不确定") { check("") }.buttonStyle(.borderless).font(.system(size: 15)).padding(.top, 8).keyboardShortcut("0", modifiers: [])
             } else {
             Text("知道这个词的意思吗？").foregroundStyle(.secondary).padding(.top, 8)
             Spacer()
-            HStack(spacing: 16) {
-                Button { answer(false) } label: { Text("不认识").frame(width: 120) }
+            HStack(spacing: 20) {
+                Button { answer(false) } label: { BigLabel(text: "不认识", hint: "←") }
                     .controlSize(.large).keyboardShortcut(.leftArrow, modifiers: [])
-                Button { answer(true) } label: { Text("认识").frame(width: 120) }
+                Button { answer(true) } label: { BigLabel(text: "认识", hint: "→") }
                     .controlSize(.large).keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(.borderedProminent)
             }
             .disabled(busy)
@@ -675,13 +675,13 @@ struct HanziTestSheet: View {
                 VStack(spacing: 6) {
                     ForEach(Array(item.choices.enumerated()), id: \.offset) { i, c in
                         Button { reading(c) } label: {
-                            HStack { Text("\(i + 1)").monospacedDigit().foregroundStyle(.secondary); Text(c).lineLimit(1); Spacer() }
-                                .frame(width: 320)
+                            HStack { Text("\(i + 1)").monospacedDigit().foregroundStyle(.secondary); Text(c).font(.system(size: 16)).lineLimit(1); Spacer() }
+                                .frame(width: 340).frame(minHeight: 32)
                         }
                         .controlSize(.large).keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [])
                     }
                 }
-                Button("不确定") { reading("") }.buttonStyle(.borderless).padding(.top, 8).keyboardShortcut("0", modifiers: [])
+                Button("不确定") { reading("") }.buttonStyle(.borderless).font(.system(size: 15)).padding(.top, 8).keyboardShortcut("0", modifiers: [])
             } else if r.askingCheck {
                 Text("它读什么？").foregroundStyle(.secondary).padding(.top, 8)
                 Spacer()
@@ -691,14 +691,14 @@ struct HanziTestSheet: View {
                             .controlSize(.large).keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [])
                     }
                 }
-                Button("不确定") { reading("") }.buttonStyle(.borderless).padding(.top, 8).keyboardShortcut("0", modifiers: [])
+                Button("不确定") { reading("") }.buttonStyle(.borderless).font(.system(size: 15)).padding(.top, 8).keyboardShortcut("0", modifiers: [])
             } else {
                 Text("认识这个字吗？").foregroundStyle(.secondary).padding(.top, 8)
                 Spacer()
-                HStack(spacing: 16) {
-                    Button { answer(false) } label: { Text("不认识").frame(width: 120) }
+                HStack(spacing: 20) {
+                    Button { answer(false) } label: { BigLabel(text: "不认识", hint: "←") }
                         .controlSize(.large).keyboardShortcut(.leftArrow, modifiers: [])
-                    Button { answer(true) } label: { Text("认识").frame(width: 120) }
+                    Button { answer(true) } label: { BigLabel(text: "认识", hint: "→") }
                         .controlSize(.large).keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(.borderedProminent)
                 }
             }

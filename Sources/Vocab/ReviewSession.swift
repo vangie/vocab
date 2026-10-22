@@ -545,6 +545,7 @@ extension ReviewSession {
         for _ in 0..<done { queue.answer(correct: true) }
         s.queue = queue
         s.question = q
+        if q.type == .recall && chosen == -1 { s.checkWord = q.word; s.phase = .check; return s }
         if let c = chosen {
             s.chosen = c; s.lastCorrect = c == q.correctIndex
             s.lastRating = s.lastCorrect ? .good : .forgot
