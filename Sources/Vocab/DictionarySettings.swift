@@ -85,7 +85,7 @@ struct DictionarySettingsView: View {
         guard let raw = UserDefaults.standard.array(forKey: DictionaryLanguageGroup.filterKey) as? [String] else {
             return DictionaryLanguageGroup.defaultSelection
         }
-        let s = Set(raw.compactMap(DictionaryLanguageGroup.init(rawValue:)))
+        let s = DictionaryLanguageGroup.decodeFilter(raw)
         return s.isEmpty ? DictionaryLanguageGroup.defaultSelection : s
     }
     private func saveFilter() {
