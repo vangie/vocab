@@ -555,11 +555,17 @@ private struct AnswerBanner: View {
     var body: some View {
         VStack(spacing: d == .normal ? 10 : 6) {
             HStack(spacing: 10) {
-                Label(resultText, systemImage: session.lastCorrect ? "checkmark.circle.fill" : "arrow.uturn.backward.circle.fill")
-                    .foregroundStyle(session.lastCorrect ? Color(nsColor: .systemGreen) : Color(nsColor: .systemOrange))
-                    .font(.system(size: 15, weight: .semibold))
+                if hasCards {
+                    // The card colours already say right/wrong; only a quiet note on what happens next.
+                    if let note = subtleNote { Text(note).font(.system(size: 13)).foregroundStyle(.secondary) }
+                } else {
+                    Label(resultText, systemImage: session.lastCorrect ? "checkmark.circle.fill" : "arrow.uturn.backward.circle.fill")
+                        .foregroundStyle(session.lastCorrect ? Color(nsColor: .systemGreen) : Color(nsColor: .systemOrange))
+                        .font(.system(size: 15, weight: .semibold))
+                }
                 LookupLink(session: session, word: q.word, active: active, showWord: false)
             }
+            .frame(minHeight: 20)   // same line height with or without the result text: no jump
             if !cardsShowAnswer {
                 HStack(spacing: 6) {
                     Text(q.word).fontWeight(.semibold)
@@ -585,6 +591,14 @@ private struct AnswerBanner: View {
             continueButton
         }
         .padding(.top, 2)
+    }
+
+    /// Option-card questions: the cards show the result.
+    private var hasCards: Bool { !q.options.isEmpty && q.type != .spelling && q.type != .recall }
+    private var subtleNote: String? {
+        if !session.lastCorrect { return "稍后再来" }
+        if let r = session.lastRating, r != .good { return r.label }
+        return nil
     }
 
     private var resultText: String {
