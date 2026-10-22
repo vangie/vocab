@@ -208,7 +208,8 @@ private struct WordTitle: View {
     @Environment(\.quizDensity) private var d
     var body: some View {
         HStack(spacing: 10) {
-            Text(q.word).font(.system(size: d.headword, weight: .bold)).textSelection(.enabled)
+            Text(q.word).font(.system(size: d.headword, weight: .bold))
+                .wordLink(session.phase == .answered ? q.word : nil, session: session, restUnderline: false)
             SpeakButton(session: session)
         }
     }
@@ -346,6 +347,7 @@ private struct Options: View {
                 Text(opt).font(optionFont)
                     .multilineTextAlignment(.leading).lineLimit(grid ? 2 : nil)
                     .fixedSize(horizontal: false, vertical: true)
+                    .wordLink(answered && q.type == .meaningToWord ? opt : nil, session: session)
                 if q.type != .syllables {
                     // Fixed-height slot, reserved before the reveal too (hidden), so nothing moves; its width
                     // doesn't count toward the 2-column fit, so revealing never flips the layout.
@@ -353,6 +355,7 @@ private struct Options: View {
                         HStack(spacing: 6) {
                             if !q.optionNotes[i].isEmpty {
                                 Text(q.optionNotes[i]).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                                    .wordLink(answered && q.type == .wordToMeaning ? q.optionNotes[i] : nil, session: session)
                             }
                             if i < q.optionWords.count { PhoneticTag(session: session, word: q.optionWords[i], size: 13) }
                         }
@@ -563,7 +566,13 @@ private struct AnswerBanner: View {
                         .foregroundStyle(session.lastCorrect ? Color(nsColor: .systemGreen) : Color(nsColor: .systemOrange))
                         .font(.system(size: 15, weight: .semibold))
                 }
-                LookupLink(session: session, word: q.word, active: active, showWord: false)
+                if hasCards {
+                    // Words are links in the cards and headword; ⌘J still looks up the question's word.
+                    Button("") { session.lookUp(q.word) }.hidden().frame(width: 0, height: 0)
+                        .modifier(LookupKey(active: active))
+                } else {
+                    LookupLink(session: session, word: q.word, active: active, showWord: false)
+                }
             }
             .frame(minHeight: 20)   // same line height with or without the result text: no jump
             if !cardsShowAnswer {
@@ -611,8 +620,13 @@ private struct AnswerBanner: View {
 
     private var continueButton: some View {
         Button { session.next() } label: {
-            HStack(spacing: 6) { Text("继续"); Text("↩").foregroundStyle(.secondary) }.padding(.horizontal, 10)
+            HStack(spacing: 8) {
+                Text("继续").font(.system(size: 17, weight: .semibold))
+                Text("↩").font(.system(size: 15)).opacity(0.7)
+            }
+            .frame(minWidth: 200, minHeight: 36)   // ~44 pt tall with the large control padding
         }
+        .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .keyboardShortcut(active ? .defaultAction : nil)
         .help("继续（↩ 或空格）")
@@ -1092,5 +1106,41 @@ private struct SessionProgress: View {
         }
         .frame(height: 5)
         .accessibilityElement().accessibilityLabel("进度").accessibilityValue("\(Int(done * 100))%")
+    }
+}
+
+
+/// A word you can click to look up in 词典 (progress is kept; switching back resumes):
+/// plain until hovered, then accent + underline with a pointing-hand cursor. nil word = plain text.
+private struct WordLinkModifier: ViewModifier {
+    let word: String?
+    let session: ReviewSession
+    var restUnderline = true
+    @State private var hover = false
+    func body(content: Content) -> some View {
+        if let word {
+            content
+                // Faint underline at rest (it's a link), accent on hover.
+                .underline(hover || restUnderline, color: hover ? .accentColor : Color.secondary.opacity(0.35))
+                .modifier(HoverTint(hover: hover))
+                .contentShape(Rectangle())
+                .onTapGesture { session.lookUp(word) }
+                .onHover { h in
+                    hover = h; session.overLookupLink = h
+                    if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                .onDisappear { if hover { NSCursor.pop() }; session.overLookupLink = false }
+                .help("在词典中查「\(word)」")
+                .accessibilityAddTraits(.isLink)
+        } else { content }
+    }
+}
+private struct HoverTint: ViewModifier {
+    let hover: Bool
+    func body(content: Content) -> some View { if hover { content.foregroundStyle(Color.accentColor) } else { content } }
+}
+extension View {
+    fileprivate func wordLink(_ word: String?, session: ReviewSession, restUnderline: Bool = true) -> some View {
+        modifier(WordLinkModifier(word: word, session: session, restUnderline: restUnderline))
     }
 }
