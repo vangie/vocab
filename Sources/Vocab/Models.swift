@@ -29,9 +29,34 @@ enum DictionarySelection {
             if !ids.contains(BaikeClient.id) { ids.append(BaikeClient.id); d.set(ids, forKey: key) }
         }
         let all = svc.availableDictionaries()
+        ids = autoEnableNew(ids, available: all, defaults: d)
         var out = ids.compactMap { id in all.first { $0.id == id } }
         if out.isEmpty { out = active }
         return out
+    }
+
+    static let knownKey = "knownDictionaryIDs"
+
+    /// Dictionaries the user installs (bundles under ~/Library) after the selection was saved get
+    /// enabled once, on first sight. Apple's built-ins and ones the user later turns off stay as they are.
+    static func autoEnableNew(_ ids: [String], available: [DictionaryInfo], defaults d: UserDefaults,
+                              home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [String] {
+        let local = available.filter { !$0.isNetwork }.map(\.id)
+        guard let known = d.array(forKey: knownKey) as? [String] else {
+            d.set(local, forKey: knownKey); return ids   // first run: remember what's there, change nothing
+        }
+        var ids = ids
+        let fresh = available.filter { info in
+            !info.isNetwork && !known.contains(info.id) && !ids.contains(info.id)
+                && (info.bundleURL?.resolvingSymlinksInPath().path.hasPrefix(home + "/") ?? false)
+        }
+        if !fresh.isEmpty {
+            ids += fresh.map(\.id); d.set(ids, forKey: key)
+            VocabLog.log("auto-enabled new dictionaries: \(fresh.map(\.id).joined(separator: ", "))")
+        }
+        let merged = Array(Set(known).union(local)).sorted()
+        if merged != known.sorted() { d.set(merged, forKey: knownKey) }
+        return ids
     }
 }
 
