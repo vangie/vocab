@@ -1155,3 +1155,27 @@ extension View {
         modifier(WordLinkModifier(word: word, session: session, restUnderline: restUnderline))
     }
 }
+
+
+/// `Vocab --render-settings <out.png> [dark]`: Settings › 词典 offscreen, reading the app's prefs (read-only suite).
+enum SettingsRender {
+    @MainActor static func run(_ a: [String]) -> Never {
+        guard let path = a.first else { print("usage: --render-settings out.png [dark]"); exit(2) }
+        UserDefaults.standard.addSuite(named: "io.github.vangie.vocab")
+        let host = NSHostingView(rootView: DictionarySettingsView().background(Color(nsColor: .windowBackgroundColor)))
+        let size = host.fittingSize
+        let win = NSWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: max(size.width, 600), height: max(size.height, 500))),
+                           styleMask: [.borderless], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: a.contains("dark") ? .darkAqua : .aqua)
+        win.contentView = host
+        win.orderFrontRegardless(); win.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+        RunLoop.main.run(until: Date().addingTimeInterval(2.5))
+        win.setContentSize(host.fittingSize)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { exit(1) }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
+        print("wrote \(path)")
+        exit(0)
+    }
+}

@@ -28,6 +28,12 @@ func fail(_ s: String) -> Never { FileHandle.standardError.write(Data((s + "\n")
 guard args.count >= 2 else { fail("usage: vocab-smoke dicts|lookup|play|render|click|multitouch …") }
 
 switch args[1] {
+case "langs":   // language groups of every dictionary (Settings filter)
+    for d in svc.availableDictionaries() {
+        let l = DictionaryPrefs(bundleURL: d.bundleURL)?.languages ?? []
+        print(d.name, l, DictionaryLanguageGroup.groups(languages: l, name: d.name, id: d.id).map(\.rawValue).sorted())
+    }
+
 case "ipa":
     // vocab-smoke ipa <word>…   IPA + audio file the quiz would use
     let ds = svc.activeDictionaries() + svc.availableDictionaries().filter { $0.id == "com.apple.dictionary.zh_CN-en.OCD" }

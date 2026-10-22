@@ -77,6 +77,73 @@ struct DictionarySettingsView: View {
     @State private var enabled: [String] = []
     @State private var selection: String?
     @State private var contentHeight: CGFloat = 60
+    /// Language filter (persisted); all groups selected = 全部.
+    @State private var filter: Set<DictionaryLanguageGroup> = Self.loadFilter()
+    @State private var groupCache: [String: Set<DictionaryLanguageGroup>] = [:]
+
+    static func loadFilter() -> Set<DictionaryLanguageGroup> {
+        guard let raw = UserDefaults.standard.array(forKey: DictionaryLanguageGroup.filterKey) as? [String] else {
+            return DictionaryLanguageGroup.defaultSelection
+        }
+        let s = Set(raw.compactMap(DictionaryLanguageGroup.init(rawValue:)))
+        return s.isEmpty ? DictionaryLanguageGroup.defaultSelection : s
+    }
+    private func saveFilter() {
+        UserDefaults.standard.set(DictionaryLanguageGroup.allCases.filter(filter.contains).map(\.rawValue), forKey: DictionaryLanguageGroup.filterKey)
+    }
+    private func groups(_ d: DictionaryInfo) -> Set<DictionaryLanguageGroup> {
+        if let g = groupCache[d.id] { return g }
+        return DictionaryLanguageGroup.groups(languages: DictionaryPrefs(bundleURL: d.bundleURL)?.languages ?? [], name: d.name, id: d.id)
+    }
+    private var showsAll: Bool { filter.count == DictionaryLanguageGroup.allCases.count }
+    private var visible: [DictionaryInfo] { showsAll ? dicts : dicts.filter { !groups($0).isDisjoint(with: filter) } }
+    /// The table works on the filtered list; a reorder there keeps the hidden dictionaries' places.
+    private var visibleBinding: Binding<[DictionaryInfo]> {
+        Binding(get: { visible }, set: { newVisible in
+            let order = DictionaryLanguageGroup.merge(global: dicts.map(\.id), visibleInNewOrder: newVisible.map(\.id))
+            dicts = order.compactMap { id in dicts.first { $0.id == id } }
+        })
+    }
+
+    private var filterBar: some View {
+        HStack(spacing: 6) {
+            chip("全部", count: enabled.count, on: showsAll) {
+                filter = showsAll ? DictionaryLanguageGroup.defaultSelection : Set(DictionaryLanguageGroup.allCases)
+            }
+            ForEach(DictionaryLanguageGroup.allCases, id: \.self) { g in
+                chip(g.label, count: dicts.filter { enabled.contains($0.id) && groups($0).contains(g) }.count,
+                     on: !showsAll && filter.contains(g)) {
+                    if showsAll { filter = [g] }
+                    else if filter.contains(g) { if filter.count > 1 { filter.remove(g) } }
+                    else { filter.insert(g) }
+                }
+            }
+        }
+        .onChange(of: filter) { _, _ in
+            saveFilter()
+            if let s = selection, !visible.contains(where: { $0.id == s }) { selection = visible.first?.id }
+        }
+    }
+
+    private func chip(_ title: String, count: Int, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title).font(.system(size: 12)).fixedSize()
+                if count > 0 {
+                    Text("\(count)").font(.system(size: 10, weight: .semibold).monospacedDigit())
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(on ? Color.white.opacity(0.25) : Color.secondary.opacity(0.18), in: Capsule())
+                        .help("已启用 \(count) 本")
+                }
+            }
+            .padding(.horizontal, 9).padding(.vertical, 3)
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .background(on ? Color.accentColor : Color(nsColor: .controlBackgroundColor), in: Capsule())
+            .overlay(Capsule().strokeBorder(on ? Color.clear : Color(nsColor: .separatorColor)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
 
     var body: some View {
         // Like Dictionary.app: a fixed ~11-row list; the info box is as tall as its content (capped at
@@ -84,8 +151,9 @@ struct DictionarySettingsView: View {
         // selected dictionary with no empty space at the bottom.
         let maxDetail: CGFloat = 480     // about Dictionary.app's tallest (Longman) box; scrolls beyond
         VStack(alignment: .leading, spacing: 8) {
+            filterBar
             Text("将参考源拖移成你喜欢的顺序：").font(.system(size: 13))
-            DictionaryTable(dicts: $dicts, enabled: $enabled, selection: $selection,
+            DictionaryTable(dicts: visibleBinding, enabled: $enabled, selection: $selection,
                             onChange: persist, onResetOrder: resetOrder, onResetPrefs: resetPrefs)
                 .frame(height: Self.listHeight)
                 .padding(.bottom, 8)
@@ -109,7 +177,10 @@ struct DictionarySettingsView: View {
     private func reload() {
         dicts = DictionaryOrder.all()
         enabled = DictionarySelection.enabled().map(\.id)
-        if selection == nil { selection = dicts.first?.id }
+        var g: [String: Set<DictionaryLanguageGroup>] = [:]
+        for d in dicts { g[d.id] = DictionaryLanguageGroup.groups(languages: DictionaryPrefs(bundleURL: d.bundleURL)?.languages ?? [], name: d.name, id: d.id) }
+        groupCache = g
+        if selection == nil || !visible.contains(where: { $0.id == selection }) { selection = visible.first?.id }
     }
 
     private func resetOrder() {
