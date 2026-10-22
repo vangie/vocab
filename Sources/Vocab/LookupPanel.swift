@@ -10,12 +10,16 @@ final class LookupPanelController {
     private var panel: NSPanel?
     private var monitors: [Any] = []
 
+    private static var promptedForTrust = false
+
     func lookUpUnderCursor() {
         let trusted = WordUnderCursor.isTrusted
         VocabLog.log("lookUpUnderCursor: AXIsProcessTrusted=\(trusted) mouse=\(NSEvent.mouseLocation)")
         SettingsModel.shared.refreshTrust()
         guard trusted else {
-            WordUnderCursor.requestTrust()
+            // The prompting API at most once per launch (each call can raise a system dialog).
+            if !Self.promptedForTrust { Self.promptedForTrust = true; WordUnderCursor.requestTrust() }
+            else { AccessibilityOnboarding.shared.show() }
             return
         }
         guard let hit = WordUnderCursor.current() else {
