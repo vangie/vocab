@@ -5,6 +5,8 @@ import WebKit
 
 extension Notification.Name {
     static let vocabDictionaryPrefsChanged = Notification.Name("VocabDictionaryPrefsChanged")
+    /// The in-page Wikipedia language switcher picked another language.
+    static let vocabWikiLanguageChanged = Notification.Name("VocabWikiLanguageChanged")
     /// ~/Library/Dictionaries (or /Library/Dictionaries) changed: a dictionary was added or removed.
     static let vocabDictionariesInstalled = Notification.Name("VocabDictionariesInstalled")
 }

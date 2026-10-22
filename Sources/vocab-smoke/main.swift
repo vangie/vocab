@@ -100,7 +100,9 @@ case "render", "click":
     let isRender = args[1] == "render"
     let out = isRender ? args[3] : ""
     let dark = args.contains("dark")
-    let only = args.dropFirst(isRender ? 4 : 3).first(where: { $0 != "dark" && $0 != "jsform" && $0 != "wiki" && $0 != "baike" && !$0.hasPrefix("lang=") && $0 != "expand" })
+    let isPanel = args.contains("panel")
+    let pageWidth: CGFloat = isPanel ? 460 : 760
+    let only = args.dropFirst(isRender ? 4 : 3).first(where: { $0 != "dark" && $0 != "jsform" && $0 != "wiki" && $0 != "baike" && $0 != "panel" && !$0.hasPrefix("lang=") && $0 != "expand" })
     var entries = svc.lookup(word, in: dicts(only).filter { !$0.isNetwork })
     if args.contains("wiki"), let wd = svc.availableDictionaries().first(where: { $0.isWikipedia }) {
         // Same path as the app: our own fetch, then the entry (or the quiet failure note).
@@ -131,13 +133,13 @@ case "render", "click":
     let wv = MainActor.assumeIsolated { factory.makeWebView() }
     var heard: [(String, Bool)] = []
     MainActor.assumeIsolated { factory.onAudio = { heard.append(($0, $1)) } }
-    let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 900), styleMask: [.borderless], backing: .buffered, defer: false)
+    let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: pageWidth, height: 900), styleMask: [.borderless], backing: .buffered, defer: false)
     win.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
     win.backgroundColor = dark ? NSColor(white: 0.12, alpha: 1) : .white
     win.contentView = wv
     win.orderFrontRegardless()
     let pageURL = MainActor.assumeIsolated {
-        EntryWebViewFactory.pageURL(for: entries, showTitles: only == nil, emptyMessage: "")
+        EntryWebViewFactory.pageURL(for: entries, showTitles: only == nil, panel: isPanel, emptyMessage: "")
     }
     wv.load(URLRequest(url: pageURL))
     RunLoop.main.run(until: Date().addingTimeInterval(3))
@@ -150,7 +152,7 @@ case "render", "click":
         }
         wv.evaluateJavaScript((dark ? "document.body.style.background='#1e1e1e';" : "document.body.style.background='#fff';") + "document.body.scrollHeight") { h, _ in
             let height = min(4000, max(400, (h as? Double) ?? 900))
-            win.setContentSize(NSSize(width: 760, height: height))
+            win.setContentSize(NSSize(width: pageWidth, height: height))
             RunLoop.main.run(until: Date().addingTimeInterval(0.8))
             wv.takeSnapshot(with: nil) { img, err in
                 guard let img, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),

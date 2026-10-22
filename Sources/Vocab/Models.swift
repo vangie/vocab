@@ -227,10 +227,29 @@ final class LookupModel: ObservableObject {
         })
     }
 
+    /// One network source's entry for `term` (shared cache and Wikipedia language), for the quick-lookup popup.
+    func networkEntry(_ d: DictionaryInfo, _ term: String) async -> DictionaryEntry? {
+        let key = netKey(d, term)
+        if let cached = netCache[key] { return cached }
+        let e: DictionaryEntry?; let failed: Bool
+        if d.isWikipedia {
+            let o = await WikipediaClient.fetch(term, preferred: wikiLanguage)
+            e = WikipediaClient.entry(o, dictionary: d, term: term)
+            if case .failed = o { failed = true } else { failed = false }
+        } else {
+            let o = await BaikeClient.fetch(term)
+            e = BaikeClient.entry(o, term: term)
+            if case .failed = o { failed = true } else { failed = false }
+        }
+        if !failed { netCache[key] = .some(e) }
+        return e
+    }
+
     /// In-page Wikipedia language switcher.
     func setWikiLanguage(_ code: String) {
         guard WikipediaClient.languages().contains(code) else { return }
         wikiLanguage = code
+        NotificationCenter.default.post(name: .vocabWikiLanguageChanged, object: nil)
         guard !searchedTerm.isEmpty, let d = DictionarySelection.enabled().first(where: \.isWikipedia) else { return }
         let term = searchedTerm
         if let cached = netCache[netKey(d, term)] { netShown[d.id] = cached; rebuildEntries(); return }

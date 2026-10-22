@@ -176,6 +176,10 @@ struct PanelView: View {
     let close: () -> Void
     @State private var word = ""
     @State private var entries: [DictionaryEntry] = []
+    /// Local (instant) entries; network sources (Wikipedia, 百度百科) are appended as they arrive.
+    @State private var localEntries: [DictionaryEntry] = []
+    @State private var netEntries: [String: DictionaryEntry] = [:]
+    @State private var netGeneration: [String: Int] = [:]
     @State private var added = false
     @State private var editing = false
     @State private var draft = ""
@@ -189,6 +193,33 @@ struct PanelView: View {
         initialWord = word; self.context = context; self.surface = surface; self.source = source
         initialEntries = entries; self.close = close
         _word = State(initialValue: word); _entries = State(initialValue: entries)
+        _localEntries = State(initialValue: entries)
+    }
+
+    private func rebuild() {
+        let order = DictionarySelection.enabled().filter(\.isNetwork).map(\.id)
+        entries = localEntries + order.compactMap { netEntries[$0] }
+    }
+
+    /// Fetch the enabled network sources for the word on screen; placeholders show until each arrives.
+    private func loadNetwork(only: ((DictionaryInfo) -> Bool)? = nil) {
+        let term = word
+        let net = DictionarySelection.enabled().filter(\.isNetwork).filter { only?($0) ?? true }
+        if only == nil { netEntries = [:] }
+        for d in net {
+            netEntries[d.id] = WikipediaClient.statusEntry(d.isWikipedia ? "正在查询维基百科…" : "正在查询百度百科…", dictionary: d, term: term)
+        }
+        rebuild()
+        for d in net {
+            let gen = (netGeneration[d.id] ?? 0) + 1
+            netGeneration[d.id] = gen
+            Task { @MainActor in
+                let e = await LookupModel.shared.networkEntry(d, term)
+                guard gen == netGeneration[d.id], term == word else { return }
+                netEntries[d.id] = e
+                rebuild()
+            }
+        }
     }
 
     var body: some View {
@@ -214,7 +245,8 @@ struct PanelView: View {
             }
             .padding(.bottom, 4)
         }
-        .onAppear { added = WordbookModel.shared.contains(word) }
+        .onAppear { added = WordbookModel.shared.contains(word); loadNetwork() }
+        .onReceive(NotificationCenter.default.publisher(for: .vocabWikiLanguageChanged)) { _ in loadNetwork(only: { $0.isWikipedia }) }
     }
 
     /// Dictionaries with results, in display order (one chip per entry section).
@@ -301,7 +333,8 @@ struct PanelView: View {
         editing = false
         guard !t.isEmpty else { return }
         let r = Suggester.lookupWithFallback(t, in: DictionarySelection.enabled())
-        word = r.word; entries = r.entries
+        word = r.word; localEntries = r.entries; entries = r.entries
+        loadNetwork()
         added = WordbookModel.shared.contains(r.word)
     }
 
