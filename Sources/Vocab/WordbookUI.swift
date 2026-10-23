@@ -17,6 +17,23 @@ enum WordGroup: Hashable {
     case level(Familiarity)
 }
 
+/// 词书 filter of the 记词 list: where a word came from.
+enum WordSourceFilter: Hashable {
+    case all
+    /// Studied from a 词书 (in no wordbook).
+    case list(ExamList)
+    /// Added by looking it up (in one of 我的生词本).
+    case lookup
+
+    func matches(_ w: WordItem) -> Bool {
+        switch self {
+        case .all: true
+        case .list(let l): w.bookID == nil && w.sourceApp == l.sourceApp
+        case .lookup: w.bookID != nil
+        }
+    }
+}
+
 /// Which words of the group the table shows (scope bar, left).
 enum WordbookScope: String, CaseIterable, Identifiable {
     case all = "全部", due = "待复习", new = "新词", learning = "学习中", familiar = "熟悉", retired = "已斩"
@@ -218,7 +235,6 @@ final class WordbookModel: ObservableObject {
 struct WordbookSidebar: View {
     @EnvironmentObject var book: WordbookModel
     @ObservedObject private var session = ReviewSession.shared
-    @ObservedObject private var plan = PlanModel.shared
     @ObservedObject var state = AppState.shared
     @State private var renaming: Wordbook?
     @State private var newName = ""
@@ -229,25 +245,6 @@ struct WordbookSidebar: View {
                 Label("今日", systemImage: "flame")
                     .badge(session.preview.reviews + session.preview.new)
                     .tag(WordGroup.today)
-            }
-            if !studyLists.isEmpty {
-                Section("背单词") {
-                    ForEach(studyLists, id: \.self) { l in
-                        Label {
-                            HStack(spacing: 6) {
-                                Text(l.title)
-                                if activeLists.contains(l) {
-                                    Text("当前").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-                                        .padding(.horizontal, 5).padding(.vertical, 1)
-                                        .background(Color.secondary.opacity(0.15), in: Capsule())
-                                }
-                            }
-                        } icon: { Image(systemName: "text.book.closed") }
-                            .badge(book.items.filter { $0.bookID == nil && $0.sourceApp == l.sourceApp }.count)
-                            .tag(WordGroup.list(l))
-                            .help("从词书「\(l.title)」背过的单词")
-                    }
-                }
             }
             Section("学习进度") {
                 ForEach([Familiarity.learning, .familiar, .retired], id: \.self) { f in
@@ -295,16 +292,6 @@ struct WordbookSidebar: View {
         }
     }
 
-    /// 词书 with words studied, plus the plan's enabled ones, in list order.
-    private var studyLists: [ExamList] {
-        let used = Set(book.items.compactMap { $0.bookID == nil ? $0.sourceApp : nil })
-        return ExamList.allCases.filter { used.contains($0.sourceApp) || activeLists.contains($0) }
-    }
-
-    private var activeLists: Set<ExamList> {
-        Set(plan.plan.sources.filter(\.enabled).compactMap { s -> ExamList? in if case .list(let l) = s.id { return l }; return nil })
-    }
-
     private func icon(_ app: String) -> String {
         switch app {
         case "Safari", "Google Chrome", "Microsoft Edge", "Arc", "Brave Browser": return "globe"
@@ -330,6 +317,7 @@ struct WordbookSidebar: View {
 
 struct WordbookView: View {
     @EnvironmentObject var book: WordbookModel
+    @ObservedObject private var plan = PlanModel.shared
     var onOpen: (String) -> Void
     @ObservedObject var state = AppState.shared
     @State private var selection = Set<Int64>()
@@ -349,6 +337,7 @@ struct WordbookView: View {
         case .list(let l): base = base.filter { $0.bookID == nil && $0.sourceApp == l.sourceApp }
         case .level(let f): base = base.filter { $0.familiarity == f }
         }
+        base = base.filter(state.wordSource.matches)
         let q = state.wordFilter.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty {
             base = base.filter {
@@ -358,6 +347,59 @@ struct WordbookView: View {
             }
         }
         return base
+    }
+
+    /// 词书 with words studied, plus the plan's enabled ones, in list order.
+    private var studyLists: [ExamList] {
+        let used = Set(book.items.compactMap { $0.bookID == nil ? $0.sourceApp : nil })
+        return ExamList.allCases.filter { used.contains($0.sourceApp) || activeLists.contains($0) }
+    }
+
+    private var activeLists: Set<ExamList> {
+        Set(plan.plan.sources.filter(\.enabled).compactMap { s -> ExamList? in if case .list(let l) = s.id { return l }; return nil })
+    }
+
+    /// Words of the sidebar group, before the 词书 and status filters.
+    private var groupItems: [WordItem] {
+        switch state.wordGroup {
+        case .all, .today: book.items
+        case .book(let id): book.items.filter { $0.bookID == id }
+        case .tag(let t): book.items.filter { $0.tags.contains { $0.caseInsensitiveCompare(t) == .orderedSame } }
+        case .source(let s): book.items.filter { $0.bookID != nil && $0.sourceGroup == s }
+        case .list(let l): book.items.filter { $0.bookID == nil && $0.sourceApp == l.sourceApp }
+        case .level(let f): book.items.filter { $0.familiarity == f }
+        }
+    }
+
+    private func sourceTitle(_ f: WordSourceFilter) -> String {
+        switch f {
+        case .all: "全部词书"
+        case .list(let l): activeLists.contains(l) ? "\(l.title) · 当前" : l.title
+        case .lookup: "生词本（查词加入）"
+        }
+    }
+
+    private func sourcePicker(compact: Bool) -> some View {
+        let base = groupItems
+        let options: [WordSourceFilter] = [.all] + studyLists.reversed().map { .list($0) } + [.lookup]
+        return Menu {
+            ForEach(options, id: \.self) { o in
+                Button { state.wordSource = o } label: {
+                    let t = "\(sourceTitle(o))  \(base.filter(o.matches).count)"
+                    if state.wordSource == o { Label(t, systemImage: "checkmark") } else { Text(t) }
+                }
+                if o == .all { Divider() }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "text.book.closed")
+                if !compact || state.wordSource != .all {
+                    Text(state.wordSource == .all ? "全部词书" : sourceTitle(state.wordSource))
+                }
+            }
+        }
+        .menuStyle(.button).fixedSize()
+        .help("按来源筛选：词书或查词加入的生词")
     }
 
     private var groupTitle: String {
@@ -420,6 +462,7 @@ struct WordbookView: View {
 
     private func barContent(count: Int, rows: [WordItem], compact: Bool) -> some View {
         HStack(spacing: compact ? 6 : 10) {
+            sourcePicker(compact: compact)
             Picker("", selection: $state.wordScope) {
                 ForEach(WordbookScope.allCases) { s in Text(s.rawValue).tag(s) }
             }
@@ -956,13 +999,21 @@ enum WordbookRender {
         let want = a.dropFirst().first { $0 != "dark" }
         let items = model.items
         let pick = items.first { $0.word == want } ?? items.first { !$0.note.isEmpty } ?? items.first
+        if a.contains("list") {
+            AppState.shared.wordGroup = .all
+            if a.contains("cet6") { AppState.shared.wordSource = .list(.cet6); AppState.shared.wordScope = .learning }
+        }
         let root = HStack(spacing: 0) {
+          if a.contains("list") {
+            WordbookView(onOpen: { _ in }).frame(width: 1000)
+          } else {
             WordbookSidebar().frame(width: 230)
             Divider()
             if let pick { WordDetailView(item: pick, onOpen: { _ in }).frame(width: 380) }
             if let p2 = items.first(where: { $0.note.isEmpty && $0.id != pick?.id }) {
                 Divider(); WordDetailView(item: p2, onOpen: { _ in }).frame(width: 380)
             }
+          }
         }
         .environmentObject(model)
         .frame(width: 1000, height: 560).background(Color(nsColor: .windowBackgroundColor))

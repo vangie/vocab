@@ -7,7 +7,7 @@ enum AppScreen: Equatable {
     case lookup(String)
     /// 记词: a list (with its filter) or 今日 (rings / the quiz in progress; ReviewSession is shared,
     /// so coming back shows the same question in the same state).
-    case words(WordGroup, WordbookScope, String)
+    case words(WordGroup, WordbookScope, WordSourceFilter, String)
 }
 
 /// Global back/forward over app screens (toolbar ‹ ›, ⌘[ / ⌘], swipe).
@@ -26,11 +26,11 @@ final class AppNav: ObservableObject {
         guard bag.isEmpty else { return }
         let s = AppState.shared, l = LookupModel.shared
         Publishers.CombineLatest4(s.$mode, s.$wordGroup, s.$wordScope, s.$wordFilter)
-            .combineLatest(l.$searchedTerm)
+            .combineLatest(l.$searchedTerm, s.$wordSource)
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
-            .sink { [weak self] v, term in
+            .sink { [weak self] v, term, src in
                 let (mode, group, scope, filter) = v
-                self?.observe(mode == .lookup ? .lookup(term) : .words(group, scope, filter))
+                self?.observe(mode == .lookup ? .lookup(term) : .words(group, scope, src, filter))
             }.store(in: &bag)
         swipeMonitor = NSEvent.addLocalMonitorForEvents(matching: .swipe) { [weak self] e in
             guard let self, e.window?.toolbar?.identifier == "vocab.main" else { return e }
@@ -43,7 +43,7 @@ final class AppNav: ObservableObject {
     private func observe(_ s: AppScreen) {
         if case .lookup(let w) = s, w.isEmpty { return }
         if let r = restoring { if r == s { restoring = nil }; return }
-        if case .words(let g, let sc, _) = s, case .words(let g0, let sc0, _)? = stack.current, g == g0, sc == sc0 {
+        if case .words(let g, let sc, let src, _) = s, case .words(let g0, let sc0, let src0, _)? = stack.current, g == g0, sc == sc0, src == src0 {
             stack.replaceCurrent(s); return   // typing in the 记词 filter refines the same entry
         }
         stack.visit(s)
@@ -59,8 +59,8 @@ final class AppNav: ObservableObject {
         case .lookup(let w):
             st.mode = .lookup
             if LookupModel.shared.searchedTerm != w { LookupModel.shared.open(w, record: false) }
-        case .words(let g, let sc, let f):
-            st.wordGroup = g; st.wordScope = sc; st.wordFilter = f
+        case .words(let g, let sc, let src, let f):
+            st.wordGroup = g; st.wordScope = sc; st.wordSource = src; st.wordFilter = f
             st.mode = .words
         }
         // If nothing observable changed (already there), don't swallow the next real visit.

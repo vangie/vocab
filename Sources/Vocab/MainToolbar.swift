@@ -10,6 +10,8 @@ final class AppState: ObservableObject {
     /// Search text used to filter the wordbook in 生词本 mode.
     @Published var wordFilter = ""
     @Published var wordScope: WordbookScope = .all
+    /// 词书 filter of the 记词 list.
+    @Published var wordSource: WordSourceFilter = .all
     /// Sidebar grouping in 生词本 (wordbook, tag or source).
     @Published var wordGroup: WordGroup = .today
     /// Selected Settings tab ("general" / "dictionary" / "review").
