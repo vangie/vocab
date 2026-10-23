@@ -283,11 +283,6 @@ struct WordbookSidebar: View {
                             Button("删除生词本…") { confirmDelete(b) }.disabled(b.isDefault)
                         }
                 }
-                Button { book.promptNewBook() } label: {
-                    Label("新建生词本", systemImage: "plus").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("新建生词本 (⇧⌘N)")
             } header: {
                 HoverAddHeader(title: "我的生词本", help: "新建生词本 (⇧⌘N)") { book.promptNewBook() }
             }
@@ -905,11 +900,15 @@ struct HoverAddHeader: View {
         HStack {
             Text(title)
             Spacer()
-            Button(action: action) { Image(systemName: "plus").font(.system(size: 11, weight: .semibold)) }
+            Button(action: action) {
+                Image(systemName: "plus").font(.system(size: 10, weight: .semibold))
+                    .frame(width: 16, height: 16).contentShape(Rectangle())
+            }
                 .buttonStyle(.borderless)
+                .padding(.trailing, 11)
                 .help(help)
                 .accessibilityLabel("新建生词本")
-                .foregroundStyle(hover ? Color.primary : Color.secondary)
+                .foregroundStyle(hover ? Color.secondary : Color(nsColor: .tertiaryLabelColor))
         }
         .contentShape(Rectangle())
         .onHover { hover = $0 }
