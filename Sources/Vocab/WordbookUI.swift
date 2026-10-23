@@ -257,6 +257,11 @@ struct WordbookSidebar: View {
                             Button("删除生词本…") { confirmDelete(b) }.disabled(b.isDefault)
                         }
                 }
+                Button { book.promptNewBook() } label: {
+                    Label("新建生词本", systemImage: "plus").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("新建生词本 (⇧⌘N)")
             } header: {
                 HoverAddHeader(title: "生词本", help: "新建生词本 (⇧⌘N)") { book.promptNewBook() }
             }
@@ -360,7 +365,7 @@ struct WordbookView: View {
                     if selection.count == 1, let id = selection.first, let w = book.items.first(where: { $0.id == id }) {
                         WordDetailView(item: w, onOpen: onOpen)
                     } else {
-                        Text(selection.isEmpty ? "选择一个单词查看原句、标签和笔记" : "已选择 \(selection.count) 个单词")
+                        Text(selection.isEmpty ? "选择一个单词查看原句和笔记" : "已选择 \(selection.count) 个单词")
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(Color(nsColor: .textBackgroundColor))
@@ -732,71 +737,82 @@ struct WordDetailView: View {
     var onOpen: (String) -> Void
     @EnvironmentObject var book: WordbookModel
     @State private var note = ""
-    @State private var tagText = ""
+    @FocusState private var noteFocused: Bool
     @State private var editingNote = false
     @State private var contexts: [WordContext] = []
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(item.word).font(.title2.weight(.semibold))
-                    if let l = item.lemma { Text("原形 \(l)").foregroundStyle(.secondary) }
-                    Text(item.familiarity.title).font(.caption)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Color.secondary.opacity(0.15), in: Capsule())
-                    Spacer()
-                    Button("查词") { onOpen(item.word) }.controlSize(.small)
-                }
-                if !item.definition.isEmpty { Text(item.definition).foregroundStyle(.secondary).textSelection(.enabled) }
-
-                section("原句") {
-                    if contexts.isEmpty { Text("没有原句").foregroundStyle(.tertiary) }
-                    ForEach(contexts) { c in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(highlight(c.sentence, c.surface ?? item.word)).textSelection(.enabled)
-                            HStack(spacing: 6) {
-                                if let s = c.sourceURL, let u = URL(string: s) {
-                                    Link(c.sourceTitle ?? u.host ?? s, destination: u).lineLimit(1)
-                                } else if let t = c.sourceTitle ?? c.sourceApp { Text(t).lineLimit(1) }
-                                if c.sourceURL != nil || c.sourceTitle != nil, let a = c.sourceApp { Text("· \(a)") }
-                                Text("· " + c.added.formatted(date: .abbreviated, time: .omitted))
-                            }
-                            .font(.caption).foregroundStyle(.secondary)
-                        }
-                        .contextMenu { Button("删除这条原句") { book.deleteContext(c.id); contexts = book.contexts(item.id) } }
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(item.word).font(.title.weight(.semibold)).textSelection(.enabled)
+                        Text(item.familiarity.title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.14), in: Capsule())
+                        Spacer(minLength: 8)
+                        Button("查词") { onOpen(item.word) }.controlSize(.small)
+                    }
+                    if let l = item.lemma { Text("原形 \(l)").font(.callout).foregroundStyle(.secondary) }
+                    if !item.definition.isEmpty {
+                        Text(item.definition).font(.body).foregroundStyle(.secondary)
+                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     }
                 }
 
-                section("标签") {
-                    TextField("用逗号分隔，例如：GRE, 考研", text: $tagText)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(saveTags)
+                if !contexts.isEmpty {
+                    section("原句") {
+                        ForEach(contexts) { c in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(highlight(c.sentence, c.surface ?? item.word)).lineSpacing(2)
+                                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                                HStack(spacing: 6) {
+                                    if let s = c.sourceURL, let u = URL(string: s) {
+                                        Link(c.sourceTitle ?? u.host ?? s, destination: u).lineLimit(1)
+                                    } else if let t = c.sourceTitle ?? c.sourceApp { Text(t).lineLimit(1) }
+                                    if c.sourceURL != nil || c.sourceTitle != nil, let a = c.sourceApp { Text("· \(a)") }
+                                    Text("· " + c.added.formatted(date: .abbreviated, time: .omitted))
+                                }
+                                .font(.caption).foregroundStyle(.tertiary)
+                            }
+                            .padding(.leading, 10)
+                            .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 1).fill(Color.accentColor.opacity(0.5)).frame(width: 2) }
+                            .contextMenu { Button("删除这条原句") { book.deleteContext(c.id); contexts = book.contexts(item.id) } }
+                        }
+                    }
                 }
 
-                section("笔记") {
-                    if editingNote || note.isEmpty {
+                if editingNote {
+                    section("笔记") {
                         TextEditor(text: $note)
-                            .font(.body).frame(minHeight: 70)
+                            .font(.body).frame(minHeight: 80)
                             .scrollContentBackground(.hidden)
                             .padding(4)
                             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+                            .focused($noteFocused)
                         HStack {
                             Text("支持 Markdown").font(.caption).foregroundStyle(.tertiary)
                             Spacer()
-                            if editingNote { Button("完成") { saveNote(); editingNote = false }.controlSize(.small) }
+                            Button("完成") { saveNote(); editingNote = false }.controlSize(.small).keyboardShortcut(.return, modifiers: .command)
                         }
-                    } else {
-                        Text(markdown(note)).textSelection(.enabled)
+                    }
+                } else if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button { beginEdit() } label: { Label("添加笔记", systemImage: "plus") }
+                        .buttonStyle(.borderless).controlSize(.small)
+                } else {
+                    section("笔记", trailing: AnyView(
+                        Button { beginEdit() } label: { Image(systemName: "square.and.pencil") }
+                            .buttonStyle(.borderless).help("编辑笔记"))) {
+                        Text(markdown(note)).lineSpacing(2).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
-                            .onTapGesture(count: 2) { editingNote = true }
-                        Button("编辑笔记") { editingNote = true }.controlSize(.small)
+                            .onTapGesture(count: 2) { beginEdit() }
                     }
                 }
             }
-            .padding(14)
+            .padding(.horizontal, 18).padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color(nsColor: .textBackgroundColor))
@@ -805,8 +821,10 @@ struct WordDetailView: View {
         .onDisappear { flush(item.id) }
     }
 
+    private func beginEdit() { editingNote = true; DispatchQueue.main.async { noteFocused = true } }
+
     private func load() {
-        note = item.note; tagText = item.tags.joined(separator: ", "); editingNote = false
+        note = item.note; editingNote = false
         contexts = book.contexts(item.id)
     }
 
@@ -814,20 +832,17 @@ struct WordDetailView: View {
     private func flush(_ id: Int64) {
         guard let cur = book.items.first(where: { $0.id == id }) else { return }
         if note != cur.note { book.setNote(id, note) }
-        let tags = parsedTags
-        if tags != cur.tags.sorted() { book.setTags(id, tags) }
     }
 
-    private var parsedTags: [String] {
-        Array(Set(tagText.split(whereSeparator: { ",，;；".contains($0) }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })).sorted()
-    }
-
-    private func saveTags() { book.setTags(item.id, parsedTags) }
     private func saveNote() { book.setNote(item.id, note) }
 
-    @ViewBuilder private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+    @ViewBuilder private func section<C: View>(_ title: String, trailing: AnyView? = nil, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Spacer()
+                if let trailing { trailing }
+            }
             content()
         }
     }
@@ -851,7 +866,7 @@ struct AdaptiveLabelStyle: LabelStyle {
     }
 }
 
-/// Section header with a 「+」 at the right end that appears on hover (like Notes/Reminders).
+/// Section header with an always-visible 「+」 at the right end.
 struct HoverAddHeader: View {
     let title: String
     let help: String
@@ -865,7 +880,7 @@ struct HoverAddHeader: View {
                 .buttonStyle(.borderless)
                 .help(help)
                 .accessibilityLabel("新建生词本")
-                .opacity(hover ? 1 : 0)
+                .foregroundStyle(hover ? Color.primary : Color.secondary)
         }
         .contentShape(Rectangle())
         .onHover { hover = $0 }
@@ -899,5 +914,40 @@ final class WordLinkLabel: NSTextField {
         // Modifier clicks fall through to the table for multi-select.
         if let e = NSApp.currentEvent, e.type == .leftMouseDown, !e.modifierFlags.intersection([.command, .shift]).isEmpty { return nil }
         return super.hitTest(p)
+    }
+}
+
+
+/// `--render-wordbook out.png [dark]`: sidebar + detail of the first word, offscreen, on a temp copy of the DB.
+enum WordbookRender {
+    @MainActor static func run(_ a: [String]) -> Never {
+        guard let out = a.first else { print("usage: --render-wordbook out.png [dark] [word]"); exit(2) }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("vocab-render-\(UUID().uuidString).sqlite")
+        if let src = try? WordStore.defaultURL() { try? FileManager.default.copyItem(at: src, to: tmp) }
+        let model = WordbookModel(store: try? WordStore(url: tmp))
+        let want = a.dropFirst().first { $0 != "dark" }
+        let items = model.items
+        let pick = items.first { $0.word == want } ?? items.first { !$0.note.isEmpty } ?? items.first
+        let root = HStack(spacing: 0) {
+            WordbookSidebar().frame(width: 230)
+            Divider()
+            if let pick { WordDetailView(item: pick, onOpen: { _ in }).frame(width: 380) }
+            if let p2 = items.first(where: { $0.note.isEmpty && $0.id != pick?.id }) {
+                Divider(); WordDetailView(item: p2, onOpen: { _ in }).frame(width: 380)
+            }
+        }
+        .environmentObject(model)
+        .frame(width: 1000, height: 560).background(Color(nsColor: .windowBackgroundColor))
+        let host = NSHostingView(rootView: root)
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 560), styleMask: [.borderless], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: a.contains("dark") ? .darkAqua : .aqua)
+        win.contentView = host
+        win.orderFrontRegardless(); win.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+        RunLoop.main.run(until: Date().addingTimeInterval(3))
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { exit(1) }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: (out as NSString).expandingTildeInPath))
+        try? FileManager.default.removeItem(at: tmp)
+        print("wrote \(out)"); exit(0)
     }
 }
