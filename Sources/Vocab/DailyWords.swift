@@ -70,13 +70,6 @@ struct DailyWordsCard: View {
                     }
                 }
             }
-            HStack(spacing: 6) {
-                Text("输入单词开始查询")
-                Text("⌘F").font(.caption.monospaced()).padding(.horizontal, 5).padding(.vertical, 1)
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.35)))
-            }
-            .font(.callout).foregroundStyle(.tertiary)
-            .padding(.top, 6)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

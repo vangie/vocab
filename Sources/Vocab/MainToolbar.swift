@@ -117,7 +117,17 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         NotificationCenter.default.publisher(for: .vocabFocusSearch).sink { [weak self] _ in self?.focusSearch() }.store(in: &bag)
     }
 
+    private var lastMode: Mode?
+
     func refresh() {
+        if state.mode != lastMode {
+            let entering = state.mode == .lookup
+            lastMode = state.mode
+            if entering, lookup.query.trimmingCharacters(in: .whitespaces).isEmpty,
+               !(window?.firstResponder is NSTextView) {
+                DispatchQueue.main.async { [weak self] in self?.focusSearch() }
+            }
+        }
         navGroup?.subitems[0].isEnabled = AppNav.shared.canGoBack
         navGroup?.subitems[1].isEnabled = AppNav.shared.canGoForward
         modeControl?.selectedSegment = Mode.allCases.firstIndex(of: state.mode) ?? 0
@@ -382,6 +392,25 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
                 self.window?.makeFirstResponder(nil)   // the event then reaches the quiz's key shortcuts
             }
             return e
+        }) { focusMonitors.append(m) }
+        // 词典: type anywhere to search (Dictionary.app). The keystroke is handed to the search field's
+        // editor, so an input method (pinyin) starts composing there and nothing is dropped.
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
+            guard let self, e.window === self.window, let w = self.window, let f = self.searchItem?.searchField else { return e }
+            let textFocused = w.firstResponder is NSText || w.firstResponder is NSTextView
+            let mods = e.modifierFlags
+            // ⌘V with nothing focused (e.g. a dictation tool pasting): paste into search.
+            if self.state.mode == .lookup, !textFocused, mods.contains(.command), !mods.contains(.control),
+               e.charactersIgnoringModifiers == "v" {
+                self.focusSearch(); NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil); return nil
+            }
+            guard TypeToSearch.shouldRedirect(characters: e.characters, keyCode: e.keyCode,
+                                              command: mods.contains(.command), control: mods.contains(.control),
+                                              lookupMode: self.state.mode == .lookup, textFocused: textFocused) else { return e }
+            self.focusSearch()
+            guard let ed = f.currentEditor() else { return e }
+            ed.keyDown(with: e)   // through the editor's input context: IME marked text lands in the field
+            return nil
         }) { focusMonitors.append(m) }
         NotificationCenter.default.addObserver(forName: .vocabQuizQuestionShown, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.reclaimFocusForQuiz() }
