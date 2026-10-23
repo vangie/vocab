@@ -251,26 +251,10 @@ struct LookupDetailView: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
-    /// Like Dictionary.app: the prompt near the top, then the current dictionary — or, in 全部,
-    /// every enabled dictionary, one per line — centred.
+    /// 每日词汇 carousel, vertically centred: 我的生词本 words first, then 学习中/待复习.
     private var emptyState: some View {
-        let enabled = DictionarySelection.enabled()
-        let names = lookup.selectedDictionary.flatMap { id in enabled.first { $0.id == id }.map { [$0.displayName] } } ?? enabled.map(\.displayName)
-        return ScrollView {
-            VStack(spacing: 14) {
-                Text("请键入要查询的字词…")
-                    .font(.system(size: 26, design: .serif))
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 10)
-                ForEach(names, id: \.self) { n in
-                    Text(n).font(.system(size: 22, design: .serif)).foregroundStyle(.tertiary)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 120)
-            .padding(.bottom, 40)
-        }
-        .background(Color(nsColor: .textBackgroundColor))
+        DailyWordsCard(words: DailyWords.pick(book.items, due: book.dueItems), onOpen: { lookup.open($0) })
+            .background(Color(nsColor: .textBackgroundColor))
     }
 }
 
