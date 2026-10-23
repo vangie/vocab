@@ -22,9 +22,6 @@ struct VocabApp: App {
         .defaultSize(width: 860, height: 680)
         .windowResizability(.contentMinSize)
         .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("新建生词本…") { book.promptNewBook() }.keyboardShortcut("n", modifiers: [.command, .shift])
-            }
             CommandMenu("单词") {
                 Button("加入生词本") { lookup.addCurrentToWordbook() }
                     .keyboardShortcut("d", modifiers: [.command])

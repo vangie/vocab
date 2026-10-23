@@ -9,6 +9,8 @@ enum WordGroup: Hashable {
     case today
     case all
     case book(Int64)
+    /// 生词本: every word the user added (union of all wordbooks).
+    case wordbook
     case tag(String)
     case source(String)
     /// Words studied from a 词书 (in no wordbook).
@@ -236,52 +238,25 @@ struct WordbookSidebar: View {
     @EnvironmentObject var book: WordbookModel
     @ObservedObject private var session = ReviewSession.shared
     @ObservedObject var state = AppState.shared
-    @State private var renaming: Wordbook?
-    @State private var newName = ""
 
     var body: some View {
-        List(selection: Binding(get: { state.wordGroup }, set: { if let g = $0 { state.wordGroup = g } })) {
-            Section {
-                Label("今日", systemImage: "flame")
-                    .badge(session.preview.reviews + session.preview.new)
-                    .tag(WordGroup.today)
-                Label("单词", systemImage: "list.bullet.rectangle")
-                    .badge(book.items.count)
-                    .tag(WordGroup.all)
-                    .help("背单词与生词本中的所有单词；用列表上方的筛选按词书和状态查看")
-            }
-            if !book.tags.isEmpty {
-                Section("标签") {
-                    ForEach(book.tags, id: \.tag) { t in
-                        Label(t.tag, systemImage: "tag").badge(t.count).tag(WordGroup.tag(t.tag))
-                    }
-                }
-            }
-            Section {
-                ForEach(book.books) { b in
-                    Label(b.name, systemImage: b.isDefault ? "book.closed.fill" : "book.closed")
-                        .badge(book.items.filter { $0.bookID == b.id }.count)
-                        .tag(WordGroup.book(b.id))
-                        .dropDestination(for: String.self) { ids, _ in
-                            book.move(Set(ids.compactMap { Int64($0) }), to: b.id); return true
-                        }
-                        .contextMenu {
-                            Button("重命名…") { newName = b.name; renaming = b }
-                            Button("设为默认生词本") { book.setDefaultBook(b.id) }.disabled(b.isDefault)
-                            Divider()
-                            Button("删除生词本…") { confirmDelete(b) }.disabled(b.isDefault)
-                        }
-                }
-            } header: {
-                HoverAddHeader(title: "我的生词本", help: "新建生词本 (⇧⌘N)") { book.promptNewBook() }
-            }
+        let left = session.preview.reviews + session.preview.new
+        return List(selection: Binding(get: { state.wordGroup }, set: { if let g = $0 { state.wordGroup = g } })) {
+            Label("背单词", systemImage: "graduationcap")
+                .badge(left > 0 ? Text("\(left)") : Text(Image(systemName: "checkmark")))
+                .tag(WordGroup.today)
+                .help(left > 0 ? "今天还剩 \(session.preview.reviews) 个复习、\(session.preview.new) 个新词" : "今天的任务已完成")
+            Label("学习进度", systemImage: "chart.bar")
+                .badge(book.items.count)
+                .tag(WordGroup.all)
+                .help("所有单词；用列表上方的词书和状态筛选")
+            Label("生词本", systemImage: "book.closed")
+                .badge(book.items.filter { $0.bookID != nil }.count)
+                .tag(WordGroup.wordbook)
+                .help("查词时加入的单词")
         }
         .listStyle(.sidebar)
-        .alert("重命名生词本", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("名称", text: $newName)
-            Button("好") { if let r = renaming { book.renameBook(r.id, newName) }; renaming = nil }
-            Button("取消", role: .cancel) { renaming = nil }
-        }
+        .environment(\.sidebarRowSize, .medium)
     }
 
     private func icon(_ app: String) -> String {
@@ -292,17 +267,6 @@ struct WordbookSidebar: View {
         }
     }
 
-    private func confirmDelete(_ b: Wordbook) {
-        let a = NSAlert()
-        a.messageText = "删除生词本「\(b.name)」？"
-        a.informativeText = "其中的单词会移到默认生词本，不会被删除。"
-        a.addButton(withTitle: "删除"); a.addButton(withTitle: "取消")
-        a.buttons.first?.hasDestructiveAction = true
-        if a.runModal() == .alertFirstButtonReturn {
-            book.deleteBook(b.id)
-            if state.wordGroup == .book(b.id) { state.wordGroup = .today }
-        }
-    }
 }
 
 // MARK: - Main pane
@@ -324,6 +288,7 @@ struct WordbookView: View {
         switch state.wordGroup {
         case .all, .today: break
         case .book(let id): base = base.filter { $0.bookID == id }
+        case .wordbook: base = base.filter { $0.bookID != nil }
         case .tag(let t): base = base.filter { $0.tags.contains { $0.caseInsensitiveCompare(t) == .orderedSame } }
         case .source(let s): base = base.filter { $0.bookID != nil && $0.sourceGroup == s }
         case .list(let l): base = base.filter { $0.bookID == nil && $0.sourceApp == l.sourceApp }
@@ -335,7 +300,6 @@ struct WordbookView: View {
             base = base.filter {
                 $0.word.localizedCaseInsensitiveContains(q) || $0.definition.localizedCaseInsensitiveContains(q)
                     || $0.note.localizedCaseInsensitiveContains(q) || ($0.context ?? "").localizedCaseInsensitiveContains(q)
-                    || $0.tags.contains { $0.localizedCaseInsensitiveContains(q) }
             }
         }
         return base
@@ -356,6 +320,7 @@ struct WordbookView: View {
         switch state.wordGroup {
         case .all, .today: book.items
         case .book(let id): book.items.filter { $0.bookID == id }
+        case .wordbook: book.items.filter { $0.bookID != nil }
         case .tag(let t): book.items.filter { $0.tags.contains { $0.caseInsensitiveCompare(t) == .orderedSame } }
         case .source(let s): book.items.filter { $0.bookID != nil && $0.sourceGroup == s }
         case .list(let l): book.items.filter { $0.bookID == nil && $0.sourceApp == l.sourceApp }
@@ -367,7 +332,7 @@ struct WordbookView: View {
         switch f {
         case .all: "全部词书"
         case .list(let l): activeLists.contains(l) ? "\(l.title) · 当前" : l.title
-        case .lookup: "生词本（查词加入）"
+        case .lookup: "生词本"
         }
     }
 
@@ -405,8 +370,9 @@ struct WordbookView: View {
 
     private var groupTitle: String {
         switch state.wordGroup {
-        case .all, .today: return "单词"
+        case .all, .today: return "学习进度"
         case .book(let id): return book.books.first { $0.id == id }?.name ?? "生词本"
+        case .wordbook: return "生词本"
         case .tag(let t): return t
         case .source(let s): return s
         case .list(let l): return "词书 · \(l.title)"
@@ -729,28 +695,6 @@ struct WordTable: NSViewRepresentable {
             let cut = item(ids.count == 1 ? "斩" : "斩（\(ids.count) 个）", #selector(retire))
             cut.image = CleaverIcon.image()
             menu.addItem(cut)
-            menu.addItem(.separator())
-            let move = NSMenuItem(title: "移到生词本", action: nil, keyEquivalent: "")
-            let sub = NSMenu()
-            let current = Set(parent.rows.filter { ids.contains($0.id) }.compactMap(\.bookID))
-            for b in parent.books {
-                let i = item(b.name, #selector(moveTo(_:)), b.id)
-                if current == [b.id] { i.state = .on }
-                sub.addItem(i)
-            }
-            sub.addItem(.separator()); sub.addItem(item("新建生词本并移入…", #selector(moveToNew)))
-            move.submenu = sub; menu.addItem(move)
-            let tagItem = NSMenuItem(title: "标签", action: nil, keyEquivalent: "")
-            let tsub = NSMenu()
-            let selected = parent.rows.filter { ids.contains($0.id) }
-            for t in WordbookModel.shared.tags.map(\.tag) {
-                let all = selected.allSatisfy { $0.tags.contains(t) }
-                let i = item(t, #selector(toggleTag(_:)), t); i.state = all ? .on : selected.contains { $0.tags.contains(t) } ? .mixed : .off
-                tsub.addItem(i)
-            }
-            if tsub.numberOfItems > 0 { tsub.addItem(.separator()) }
-            tsub.addItem(item("添加标签…", #selector(addTag)))
-            tagItem.submenu = tsub; menu.addItem(tagItem)
             menu.addItem(.separator())
             menu.addItem(item(ids.count == 1 ? "删除…" : "删除 \(ids.count) 个单词…", #selector(delete)))
         }
