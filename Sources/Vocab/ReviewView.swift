@@ -366,26 +366,36 @@ private struct Options: View {
                 .frame(width: 12, alignment: .trailing)
             VStack(alignment: .leading, spacing: 2) {
                 // Never truncated: up to 2 lines in the grid (checked in useGrid), unlimited in one column.
-                Text(opt).font(optionFont)
-                    .multilineTextAlignment(.leading).lineLimit(grid ? 2 : nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .wordLink(answered && q.type == .meaningToWord ? opt : nil, session: session)
-                if q.type != .syllables {
-                    // Fixed-height slot, reserved before the reveal too (hidden), so nothing moves; its width
-                    // doesn't count toward the 2-column fit, so revealing never flips the layout.
-                    Color.clear.frame(height: 17).overlay(alignment: .leading) {
-                        HStack(spacing: 6) {
-                            if !q.optionNotes[i].isEmpty {
-                                Text(q.optionNotes[i]).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
-                                    .wordLink(answered && q.type == .wordToMeaning ? q.optionNotes[i] : nil, session: session)
-                            }
-                            if i < q.optionWords.count { PhoneticTag(session: session, word: q.optionWords[i], size: 13) }
-                        }
-                        .fixedSize()
-                        .opacity(answered ? 1 : 0)
-                        .allowsHitTesting(answered)
+                // 选词 (meaning → word): the phonetic + speaker sit on the headword line, right of the word.
+                let headPhonetic = q.type == .meaningToWord && i < q.optionWords.count
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(opt).font(optionFont)
+                        .multilineTextAlignment(.leading).lineLimit(grid ? 2 : nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .wordLink(answered && q.type == .meaningToWord ? opt : nil, session: session)
+                    if headPhonetic {
+                        PhoneticTag(session: session, word: q.optionWords[i], size: 13)
+                            .fixedSize().layoutPriority(1)
+                            .opacity(answered ? 1 : 0).allowsHitTesting(answered)
                     }
-                    .clipped()
+                }
+                if q.type != .syllables {
+                    // Laid out before the reveal too (hidden), so revealing never moves anything. The note
+                    // wraps to 2 lines (then …) inside the card; the phonetic keeps its full width.
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if !q.optionNotes[i].isEmpty {
+                            Text(q.optionNotes[i]).font(.system(size: 13)).foregroundStyle(.secondary)
+                                .lineLimit(2).truncationMode(.tail)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .wordLink(answered && q.type == .wordToMeaning ? q.optionNotes[i] : nil, session: session)
+                        }
+                        if !headPhonetic, i < q.optionWords.count {
+                            PhoneticTag(session: session, word: q.optionWords[i], size: 13).fixedSize().layoutPriority(1)
+                        }
+                    }
+                    .frame(minHeight: 17, alignment: .leading)
+                    .opacity(answered ? 1 : 0)
+                    .allowsHitTesting(answered)
                 }
             }
             Spacer(minLength: 0)
