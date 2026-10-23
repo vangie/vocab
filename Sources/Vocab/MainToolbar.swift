@@ -132,11 +132,12 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         navGroup?.subitems[1].isEnabled = AppNav.shared.canGoForward
         modeControl?.selectedSegment = Mode.allCases.firstIndex(of: state.mode) ?? 0
         let lookupMode = state.mode == .lookup
-        // ‹ › and 小|大 only do something in 词典: take them out of the toolbar elsewhere
+        // 小|大 only does something in 词典: take them out of the toolbar elsewhere
         // (removing items keeps AppKit's layout and » overflow exact, and the AX tree honest).
         setPresent(fontID, lookupMode, before: searchID)
         setPresent(studyID, state.mode == .words, before: searchID)
-        setPresent(navID, lookupMode, before: lookupMode ? fontID : searchID)
+        // ‹ › are global (history spans 词典 and 记词): always present, leftmost before the modes.
+        setPresent(navID, true, before: modeID)
         if let f = searchItem?.searchField {
             f.placeholderString = state.mode == .words ? "搜索单词" : "搜索"
             let want = state.mode == .words ? state.wordFilter : lookup.query

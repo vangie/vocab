@@ -54,7 +54,7 @@ struct DailyWordsCard: View {
     var body: some View {
         VStack(spacing: 18) {
             if !words.isEmpty {
-                Text("每日词汇").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Text("每日词汇").font(.system(size: 21, weight: .semibold)).foregroundStyle(.primary).padding(.bottom, 4)
                 HStack(spacing: 10) {
                     arrow("chevron.left", -1)
                     card(words[index % words.count]).id(index).transition(.opacity)
@@ -155,6 +155,29 @@ enum DictEmptyRender {
         host.cacheDisplay(in: host.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: (out as NSString).expandingTildeInPath))
         try? FileManager.default.removeItem(at: tmp)
+        print("wrote \(out)"); exit(0)
+    }
+}
+
+/// `--render-toolbar out.png [dark] [words]`: a titled window with the real main toolbar, offscreen.
+enum ToolbarRender {
+    @MainActor static func run(_ a: [String]) -> Never {
+        guard let out = a.first else { print("usage: --render-toolbar out.png [dark] [words]"); exit(2) }
+        if a.contains("words") { AppState.shared.mode = .words }
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 120),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        win.appearance = NSAppearance(named: a.contains("dark") ? .darkAqua : .aqua)
+        win.contentView = NSHostingView(rootView: Color(nsColor: .windowBackgroundColor))
+        MainToolbarController.launchFinished = true
+        MainToolbarController.shared.attach(to: win)
+        win.alphaValue = 1
+        win.orderFrontRegardless(); win.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+        RunLoop.main.run(until: Date().addingTimeInterval(3))
+        print("items: \(win.toolbar?.items.map(\.itemIdentifier.rawValue) ?? [])")
+        guard let v = win.contentView?.superview,
+              let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { exit(1) }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: (out as NSString).expandingTildeInPath))
         print("wrote \(out)"); exit(0)
     }
 }
