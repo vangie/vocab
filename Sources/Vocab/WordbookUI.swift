@@ -218,6 +218,7 @@ final class WordbookModel: ObservableObject {
 struct WordbookSidebar: View {
     @EnvironmentObject var book: WordbookModel
     @ObservedObject private var session = ReviewSession.shared
+    @ObservedObject private var plan = PlanModel.shared
     @ObservedObject var state = AppState.shared
     @State private var renaming: Wordbook?
     @State private var newName = ""
@@ -229,7 +230,26 @@ struct WordbookSidebar: View {
                     .badge(session.preview.reviews + session.preview.new)
                     .tag(WordGroup.today)
             }
-            Section("学习记录") {
+            if !studyLists.isEmpty {
+                Section("背单词") {
+                    ForEach(studyLists, id: \.self) { l in
+                        Label {
+                            HStack(spacing: 6) {
+                                Text(l.title)
+                                if activeLists.contains(l) {
+                                    Text("当前").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Color.secondary.opacity(0.15), in: Capsule())
+                                }
+                            }
+                        } icon: { Image(systemName: "text.book.closed") }
+                            .badge(book.items.filter { $0.bookID == nil && $0.sourceApp == l.sourceApp }.count)
+                            .tag(WordGroup.list(l))
+                            .help("从词书「\(l.title)」背过的单词")
+                    }
+                }
+            }
+            Section("学习进度") {
                 ForEach([Familiarity.learning, .familiar, .retired], id: \.self) { f in
                     Label {
                         Text(WordbookView.levelTitle(f))
@@ -238,11 +258,17 @@ struct WordbookSidebar: View {
                     }
                         .badge(book.items.filter { $0.familiarity == f }.count)
                         .tag(WordGroup.level(f))
-                        .help(f == .familiar ? "记忆稳定度 ≥ 21 天" : "")
+                        .help(f == .familiar ? "记忆稳定度 ≥ 21 天（背单词与生词本中的所有单词）" : "背单词与生词本中的所有单词")
+                }
+            }
+            if !book.tags.isEmpty {
+                Section("标签") {
+                    ForEach(book.tags, id: \.tag) { t in
+                        Label(t.tag, systemImage: "tag").badge(t.count).tag(WordGroup.tag(t.tag))
+                    }
                 }
             }
             Section {
-                Label("所有单词", systemImage: "tray.full").badge(book.items.count).tag(WordGroup.all)
                 ForEach(book.books) { b in
                     Label(b.name, systemImage: b.isDefault ? "book.closed.fill" : "book.closed")
                         .badge(book.items.filter { $0.bookID == b.id }.count)
@@ -263,14 +289,7 @@ struct WordbookSidebar: View {
                 .buttonStyle(.plain)
                 .help("新建生词本 (⇧⌘N)")
             } header: {
-                HoverAddHeader(title: "生词本", help: "新建生词本 (⇧⌘N)") { book.promptNewBook() }
-            }
-            if !book.tags.isEmpty {
-                Section("标签") {
-                    ForEach(book.tags, id: \.tag) { t in
-                        Label(t.tag, systemImage: "tag").badge(t.count).tag(WordGroup.tag(t.tag))
-                    }
-                }
+                HoverAddHeader(title: "我的生词本", help: "新建生词本 (⇧⌘N)") { book.promptNewBook() }
             }
         }
         .listStyle(.sidebar)
@@ -279,6 +298,16 @@ struct WordbookSidebar: View {
             Button("好") { if let r = renaming { book.renameBook(r.id, newName) }; renaming = nil }
             Button("取消", role: .cancel) { renaming = nil }
         }
+    }
+
+    /// 词书 with words studied, plus the plan's enabled ones, in list order.
+    private var studyLists: [ExamList] {
+        let used = Set(book.items.compactMap { $0.bookID == nil ? $0.sourceApp : nil })
+        return ExamList.allCases.filter { used.contains($0.sourceApp) || activeLists.contains($0) }
+    }
+
+    private var activeLists: Set<ExamList> {
+        Set(plan.plan.sources.filter(\.enabled).compactMap { s -> ExamList? in if case .list(let l) = s.id { return l }; return nil })
     }
 
     private func icon(_ app: String) -> String {
@@ -297,7 +326,7 @@ struct WordbookSidebar: View {
         a.buttons.first?.hasDestructiveAction = true
         if a.runModal() == .alertFirstButtonReturn {
             book.deleteBook(b.id)
-            if state.wordGroup == .book(b.id) { state.wordGroup = .all }
+            if state.wordGroup == .book(b.id) { state.wordGroup = .today }
         }
     }
 }
@@ -338,7 +367,7 @@ struct WordbookView: View {
 
     private var groupTitle: String {
         switch state.wordGroup {
-        case .all, .today: return "所有单词"
+        case .all, .today: return "全部单词"
         case .book(let id): return book.books.first { $0.id == id }?.name ?? "生词本"
         case .tag(let t): return t
         case .source(let s): return s
