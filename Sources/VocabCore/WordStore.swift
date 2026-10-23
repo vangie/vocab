@@ -52,7 +52,7 @@ public enum Familiarity: Int, CaseIterable, Sendable, Identifiable {
     }
 
     public var title: String {
-        switch self { case .new: "新词"; case .learning: "学习中"; case .familiar: "熟悉"; case .retired: "已斩" }
+        switch self { case .new: "新词"; case .learning: "学习中"; case .familiar: "已掌握"; case .retired: "已斩" }
     }
 }
 

@@ -36,7 +36,7 @@ enum WordSourceFilter: Hashable {
 
 /// Which words of the group the table shows (scope bar, left).
 enum WordbookScope: String, CaseIterable, Identifiable {
-    case all = "全部", due = "待复习", new = "新词", learning = "学习中", familiar = "熟悉", retired = "已斩"
+    case all = "全部", due = "待复习", new = "新词", learning = "学习中", familiar = "已掌握", retired = "已斩"
     var id: String { rawValue }
     /// The familiarity level this scope shows, if it is one.
     var familiarity: Familiarity? {
@@ -245,18 +245,10 @@ struct WordbookSidebar: View {
                 Label("今日", systemImage: "flame")
                     .badge(session.preview.reviews + session.preview.new)
                     .tag(WordGroup.today)
-            }
-            Section("学习进度") {
-                ForEach([Familiarity.learning, .familiar, .retired], id: \.self) { f in
-                    Label {
-                        Text(WordbookView.levelTitle(f))
-                    } icon: {
-                        if f == .retired { CleaverIcon.swiftUI } else { Image(systemName: f == .learning ? "graduationcap" : "checkmark.seal") }
-                    }
-                        .badge(book.items.filter { $0.familiarity == f }.count)
-                        .tag(WordGroup.level(f))
-                        .help(f == .familiar ? "记忆稳定度 ≥ 21 天（背单词与生词本中的所有单词）" : "背单词与生词本中的所有单词")
-                }
+                Label("单词", systemImage: "list.bullet.rectangle")
+                    .badge(book.items.count)
+                    .tag(WordGroup.all)
+                    .help("背单词与生词本中的所有单词；用列表上方的筛选按词书和状态查看")
             }
             if !book.tags.isEmpty {
                 Section("标签") {
@@ -379,6 +371,15 @@ struct WordbookView: View {
         }
     }
 
+    private func scopeCount(_ sc: WordbookScope) -> Int {
+        let base = groupItems.filter(state.wordSource.matches)
+        switch sc {
+        case .all: return base.count
+        case .due: let d = Set(book.dueItems.map(\.id)); return base.filter { d.contains($0.id) }.count
+        default: return base.filter { $0.familiarity == sc.familiarity }.count
+        }
+    }
+
     private func sourcePicker(compact: Bool) -> some View {
         let base = groupItems
         let options: [WordSourceFilter] = [.all] + studyLists.reversed().map { .list($0) } + [.lookup]
@@ -404,7 +405,7 @@ struct WordbookView: View {
 
     private var groupTitle: String {
         switch state.wordGroup {
-        case .all, .today: return "全部单词"
+        case .all, .today: return "单词"
         case .book(let id): return book.books.first { $0.id == id }?.name ?? "生词本"
         case .tag(let t): return t
         case .source(let s): return s
@@ -464,10 +465,12 @@ struct WordbookView: View {
         HStack(spacing: compact ? 6 : 10) {
             sourcePicker(compact: compact)
             Picker("", selection: $state.wordScope) {
-                ForEach(WordbookScope.allCases) { s in Text(s.rawValue).tag(s) }
+                ForEach(WordbookScope.allCases) { s in
+                    Text(compact ? s.rawValue : "\(s.rawValue) \(scopeCount(s))").tag(s)
+                }
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .help("待复习：现在到期的单词；其余按熟悉度筛选")
+            .help("待复习：现在到期 · 新词：还没学 · 学习中：记忆稳定度 < 21 天 · 已掌握：≥ 21 天 · 已斩：认识，不再复习")
             Spacer(minLength: 4)
             if !compact { Text("\(count) 个").foregroundStyle(.secondary).lineLimit(1).fixedSize() }
             Menu {
@@ -993,9 +996,12 @@ final class WordLinkLabel: NSTextField {
 enum WordbookRender {
     @MainActor static func run(_ a: [String]) -> Never {
         guard let out = a.first else { print("usage: --render-wordbook out.png [dark] [word]"); exit(2) }
+        UserDefaults.standard.addSuite(named: "io.github.vangie.vocab")
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("vocab-render-\(UUID().uuidString).sqlite")
         if let src = try? WordStore.defaultURL() { try? FileManager.default.copyItem(at: src, to: tmp) }
         let model = WordbookModel(store: try? WordStore(url: tmp))
+        // Unbundled render binary: its own "Vocab" defaults domain shadows the suite; show the real plan.
+        if let real = UserDefaults(suiteName: "io.github.vangie.vocab") { PlanModel.shared.plan = StudyPlan.load(real) }
         let want = a.dropFirst().first { $0 != "dark" }
         let items = model.items
         let pick = items.first { $0.word == want } ?? items.first { !$0.note.isEmpty } ?? items.first
