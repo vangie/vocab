@@ -369,13 +369,21 @@ private struct Options: View {
                 // 选词 (meaning → word): the phonetic + speaker sit on the headword line, right of the word.
                 let headPhonetic = q.type == .meaningToWord && i < q.optionWords.count
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(opt).font(optionFont)
-                        .multilineTextAlignment(.leading).lineLimit(grid ? 2 : nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .wordLink(answered && q.type == .meaningToWord ? opt : nil, session: session)
+                    // A headword never wraps or truncates; the phonetic yields (truncates) instead.
+                    Group {
+                        if q.type == .meaningToWord {
+                            Text(opt).font(optionFont).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                        } else {
+                            Text(opt).font(optionFont)
+                                .multilineTextAlignment(.leading).lineLimit(grid ? 2 : nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .layoutPriority(2)
+                    .wordLink(answered && q.type == .meaningToWord ? opt : nil, session: session)
                     if headPhonetic {
                         PhoneticTag(session: session, word: q.optionWords[i], size: 13)
-                            .fixedSize().layoutPriority(1)
+                            .layoutPriority(0)
                             .opacity(answered ? 1 : 0).allowsHitTesting(answered)
                     }
                 }
