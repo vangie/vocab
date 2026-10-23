@@ -110,12 +110,14 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         bag = []
         lookup.objectWillChange.sink { [weak self] _ in DispatchQueue.main.async { self?.refresh() } }.store(in: &bag)
         state.objectWillChange.sink { [weak self] _ in DispatchQueue.main.async { self?.refresh() } }.store(in: &bag)
+        AppNav.shared.objectWillChange.sink { [weak self] _ in DispatchQueue.main.async { self?.refresh() } }.store(in: &bag)
+        AppNav.shared.start()
         NotificationCenter.default.publisher(for: .vocabFocusSearch).sink { [weak self] _ in self?.focusSearch() }.store(in: &bag)
     }
 
     func refresh() {
-        navGroup?.subitems[0].isEnabled = lookup.canGoBack
-        navGroup?.subitems[1].isEnabled = lookup.canGoForward
+        navGroup?.subitems[0].isEnabled = AppNav.shared.canGoBack
+        navGroup?.subitems[1].isEnabled = AppNav.shared.canGoForward
         modeControl?.selectedSegment = Mode.allCases.firstIndex(of: state.mode) ?? 0
         let lookupMode = state.mode == .lookup
         // ‹ › and 小|大 only do something in 词典: take them out of the toolbar elsewhere
@@ -192,7 +194,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     }
 
     func toolbarDefaultItemIdentifiers(_ t: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarTrackingSeparator, modeID, .flexibleSpace, navID, fontID, searchID]
+        [.sidebarTrackingSeparator, navID, modeID, .flexibleSpace, fontID, searchID]
     }
 
     func toolbar(_ t: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar: Bool) -> NSToolbarItem? {
@@ -201,7 +203,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             let g = NSToolbarItemGroup(itemIdentifier: id,
                                        images: [NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "后退")!,
                                                 NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "前进")!],
-                                       selectionMode: .momentary, labels: ["后退", "前进"],
+                                       selectionMode: .momentary, labels: ["后退 (⌘[)", "前进 (⌘])"],
                                        target: self, action: #selector(nav(_:)))
             g.label = "后退/前进"
             g.controlRepresentation = .expanded
@@ -297,8 +299,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
     // MARK: actions
 
     @objc private func nav(_ g: NSToolbarItemGroup) {
-        state.mode = .lookup
-        if g.selectedIndex == 0 { lookup.back() } else { lookup.forward() }
+        if g.selectedIndex == 0 { AppNav.shared.back() } else { AppNav.shared.forward() }
     }
 
     @objc private func modeSeg(_ c: NSSegmentedControl) { setMode(c.selectedSegment) }

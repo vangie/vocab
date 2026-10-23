@@ -97,6 +97,43 @@ case "entries":   // entries <word> <dictID>: every entry with headword + audio 
         print("\(e.headword) \(t)  audio: \(EntryHTML.audioReferences(in: e.html).prefix(6).joined(separator: " "))")
     }
 
+case "fixwords":   // fixwords [apply]: headword case + clean 释义 for the real wordbook (backs up first)
+    let apply = args.contains("apply")
+    let url = WordStore.defaultURL()
+    if apply {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+        let bak = url.deletingLastPathComponent().appendingPathComponent("vocab-backup-pre-wordcase-\(f.string(from: Date())).sqlite")
+        guard let src = try? WordStore(url: url) else { fail("open") }
+        _ = src
+        let sh = Process(); sh.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3"); sh.arguments = [url.path, ".backup '\(bak.path)'"]
+        try? sh.run(); sh.waitUntilExit(); guard sh.terminationStatus == 0 else { fail("backup failed") }
+        print("backup: \(bak.lastPathComponent)")
+    }
+    guard let store = try? WordStore(url: url), let items = try? store.all() else { fail("open") }
+    let enabled = dicts(); let all = svc.availableDictionaries()
+    var renamed = 0, reextracted = 0
+    for it in items {
+        if it.word.contains(where: \.isUppercase) {
+            let c = WordCase.canonical(it.word, headwords: WordCase.headwords(it.word, in: enabled))
+            if c != it.word { print("case: \(it.word) → \(c)"); renamed += 1; if apply { try? store.renameWord(id: it.id, to: c) } }
+        }
+        guard it.dictionary != "ECDICT", !it.dictionary.isEmpty, let d = all.first(where: { $0.name == it.dictionary }),
+              let e = svc.lookup(it.word, in: [d], maxPerDictionary: 1).first else { continue }
+        let sum = e.summary
+        if sum != it.definition && !sum.isEmpty {
+            print("def: \(it.word) [\(it.dictionary)]\n   old: \(it.definition.prefix(80))\n   new: \(sum.prefix(80))"); reextracted += 1
+            if apply { try? store.setDefinition(id: it.id, sum) }
+        }
+    }
+    print("\(apply ? "applied" : "dry run"): renamed \(renamed), re-extracted \(reextracted)")
+
+case "snippet":   // snippet <word>: raw plain text start + snippet per enabled dictionary
+    let only = args.count > 3 ? svc.availableDictionaries().filter { $0.name.contains(args[3]) } : dicts()
+    for e in svc.lookup(args[2], in: only, maxPerDictionary: 1) {
+        print("[\(e.dictionary.name)] RAW: \(e.plainText.prefix(200).replacingOccurrences(of: "\n", with: "⏎"))")
+        if CommandLine.arguments.contains("html") { print(e.html.prefix(20000)) }; print("   SNIP: \(e.snippet)"); print("   SUM:  \(e.summary)")
+    }
+
 case "play":
     guard let e = svc.lookup(args[2], in: dicts()).first(where: { !EntryHTML.audioReferences(in: $0.html).isEmpty }),
           let dir = e.resourceDirectory, let a = EntryHTML.audioReferences(in: e.html).first else { fail("no audio") }

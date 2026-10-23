@@ -15,7 +15,7 @@ public enum Phonetics {
     public static func ipa(inHTML htmls: [String]) -> String? {
         func oxford(_ dialect: String) -> String? {
             for h in htmls {
-                guard let re = try? NSRegularExpression(pattern: "<span[^>]*\\bdialect=\"\(dialect)\"[^>]*\\bclass=\"ph\"[^>]*>([^<]+)<") else { continue }
+                guard let re = try? NSRegularExpression(pattern: "<span(?=[^>]*\\bdialect=\"\(dialect)\")(?=[^>]*\\bclass=\"ph\")[^>]*>([^<]+)<") else { continue }
                 let ns = h as NSString
                 if let m = re.firstMatch(in: h, range: NSRange(location: 0, length: ns.length)) {
                     let t = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)

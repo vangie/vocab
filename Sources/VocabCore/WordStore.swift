@@ -586,3 +586,14 @@ public final class WordStore: @unchecked Sendable {
         try transaction { for id in ids { try run("UPDATE words SET book_id = ? WHERE id = ?", [book, id]) } }
     }
 }
+
+extension WordStore {
+    /// Rename a word's stored spelling (case fix). Fails quietly if another row already has that spelling.
+    public func renameWord(id: Int64, to word: String) throws {
+        try run("UPDATE words SET word = ? WHERE id = ?", [word, id])
+    }
+    public func setDefinition(id: Int64, _ definition: String, dictionary: String? = nil) throws {
+        if let dictionary { try run("UPDATE words SET definition = ?, dictionary = ? WHERE id = ?", [definition, dictionary, id]) }
+        else { try run("UPDATE words SET definition = ? WHERE id = ?", [definition, id]) }
+    }
+}

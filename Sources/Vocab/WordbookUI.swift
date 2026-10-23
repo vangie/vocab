@@ -94,7 +94,8 @@ final class WordbookModel: ObservableObject {
         let lemma = Lemmatizer.lemma(of: surface ?? word, in: context)
         var book: Int64?
         if case .book(let id) = AppState.shared.wordGroup { book = id }
-        _ = try? store?.add(word: word, definition: entry.snippet, dictionary: entry.dictionary.name, context: context,
+        let word = WordCase.canonical(word, headwords: [entry.headword] + WordCase.headwords(word, in: DictionarySelection.enabled()))
+        _ = try? store?.add(word: word, definition: entry.summary, dictionary: entry.dictionary.name, context: context,
                             surface: surface, lemma: lemma, source: source, book: book)
         reload()
     }
@@ -560,6 +561,25 @@ struct WordTable: NSViewRepresentable {
                 b.font = .systemFont(ofSize: NSFont.systemFontSize)
                 return b
             }
+            if id == "word" {
+                let cell = (tableView.makeView(withIdentifier: col.identifier, owner: nil) as? NSTableCellView) ?? {
+                    let c = NSTableCellView(); c.identifier = col.identifier
+                    let t = WordLinkLabel(labelWithString: ""); t.lineBreakMode = .byTruncatingTail
+                    t.translatesAutoresizingMaskIntoConstraints = false
+                    c.addSubview(t); c.textField = t
+                    NSLayoutConstraint.activate([t.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 2),
+                                                 t.trailingAnchor.constraint(lessThanOrEqualTo: c.trailingAnchor, constant: -2),
+                                                 t.centerYAnchor.constraint(equalTo: c.centerYAnchor)])
+                    return c
+                }()
+                let t = cell.textField as! WordLinkLabel
+                t.stringValue = w.word; t.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+                t.textColor = .labelColor
+                t.toolTip = w.lemma.map { "在词典中查「\(w.word)」 · 原形：\($0)" } ?? "在词典中查「\(w.word)」"
+                let word = w.word
+                t.onClick = { [weak self] in self?.parent.onOpen(word) }
+                return cell
+            }
             let cell = (tableView.makeView(withIdentifier: col.identifier, owner: nil) as? NSTableCellView) ?? {
                 let c = NSTableCellView(); c.identifier = col.identifier
                 let t = NSTextField(labelWithString: ""); t.lineBreakMode = .byTruncatingTail
@@ -849,5 +869,35 @@ struct HoverAddHeader: View {
         }
         .contentShape(Rectangle())
         .onHover { hover = $0 }
+    }
+}
+
+
+/// The 单词 cell's text: pointing hand on hover, click looks the word up. Only the text itself is
+/// clickable, so clicking elsewhere in the row still selects it.
+final class WordLinkLabel: NSTextField {
+    var onClick: (() -> Void)?
+    private var area: NSTrackingArea?
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area { removeTrackingArea(area) }
+        let a = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(a); area = a
+    }
+    override func mouseEntered(with e: NSEvent) { textColor = .controlAccentColor }
+    override func mouseExited(with e: NSEvent) { textColor = .labelColor }
+    override func mouseDown(with e: NSEvent) {
+        if e.modifierFlags.contains(.command) || e.modifierFlags.contains(.shift) { super.mouseDown(with: e); return }
+        textColor = .labelColor
+        var v: NSView? = superview
+        while let x = v, !(x is NSTableView) { v = x.superview }
+        if let tv = v as? NSTableView { let r = tv.row(for: self); if r >= 0 { tv.selectRowIndexes([r], byExtendingSelection: false) } }
+        onClick?()
+    }
+    override func hitTest(_ p: NSPoint) -> NSView? {
+        // Modifier clicks fall through to the table for multi-select.
+        if let e = NSApp.currentEvent, e.type == .leftMouseDown, !e.modifierFlags.intersection([.command, .shift]).isEmpty { return nil }
+        return super.hitTest(p)
     }
 }

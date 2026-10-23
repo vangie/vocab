@@ -8,6 +8,7 @@ struct VocabApp: App {
     @StateObject private var book = WordbookModel.shared
     @StateObject private var settings = SettingsModel.shared
     @StateObject private var appState = AppState.shared
+    @StateObject private var appNav = AppNav.shared
 
     var body: some Scene {
         Window("生词", id: "main") {
@@ -58,8 +59,8 @@ struct VocabApp: App {
                 Divider()
             }
             CommandMenu("前往") {
-                Button("后退") { lookup.back() }.keyboardShortcut("[", modifiers: [.command]).disabled(!lookup.canGoBack || appState.mode != .lookup)
-                Button("前进") { lookup.forward() }.keyboardShortcut("]", modifiers: [.command]).disabled(!lookup.canGoForward || appState.mode != .lookup)
+                Button("后退") { AppNav.shared.back() }.keyboardShortcut("[", modifiers: [.command]).disabled(!appNav.canGoBack)
+                Button("前进") { AppNav.shared.forward() }.keyboardShortcut("]", modifiers: [.command]).disabled(!appNav.canGoForward)
             }
         }
 

@@ -89,7 +89,7 @@ public enum GlossExtractor {
 
     /// English definition: LDOCE `DEF`, Oxford `df`, Macmillan `DEFINITION`.
     public static func english(fromHTML html: String, maxLength: Int = 120) -> String? {
-        for el in elements(html, tag: "span", classPattern: "DEF[^\"]*|df[^\"]*|DEFINITION[^\"]*|def") {
+        for el in elements(html, tag: "span", classPattern: "DEF[^\"]*|df[^\"]*|DEFINITION[^\"]*|def|o-def-eng") {
             if el.contains("cn_txt") { continue }
             let t = text(el)
             if t.count >= 3, !hasCJK(t) { return clip(t, maxLength) }
@@ -103,7 +103,7 @@ public enum GlossExtractor {
         for el in elements(html, tag: "span", classPattern: "DEF[^\"]*") where el.contains("cn_txt") {
             let t = text(el); if hasCJK(t) { return clip(t, maxLength) }
         }
-        for el in elements(html, tag: "span", classPattern: "trans") {
+        for el in elements(html, tag: "span", classPattern: "trans|o-def-simp") {
             let t = text(el); if hasCJK(t) { return clip(t, maxLength) }
         }
         for el in elements(html, tag: "span", classPattern: "cn_txt[^\"]*") {
