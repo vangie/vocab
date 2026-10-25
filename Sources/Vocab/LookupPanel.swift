@@ -277,6 +277,7 @@ struct PanelView: View {
                                 .contentShape(Capsule())
                         }
                         .buttonStyle(.plain)
+                        .clickable(highlight: currentSection != i, radius: 10)
                         .id(i)
                     }
                 }
@@ -329,9 +330,12 @@ struct PanelView: View {
                     Image(systemName: added ? "star.fill" : "star").foregroundStyle(added ? Color.yellow : Color.accentColor)
                 }
             }
+            .padding(.horizontal, 4).padding(.vertical, 2)
+            .clickable()
             .disabled(entries.isEmpty)
             .help(added ? "点击移出生词本" : "加入生词本")
-            Button { openInMain() } label: { Image(systemName: "arrow.up.forward.app") }
+            Button { openInMain() } label: { Image(systemName: "arrow.up.forward.app").padding(.horizontal, 4).padding(.vertical, 2) }
+                .clickable()
                 .help("在「生词」中打开")
         }
         .buttonStyle(.borderless)
@@ -361,6 +365,7 @@ struct PanelView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .clickable(radius: 0)
     }
 
     private func openInMain() {

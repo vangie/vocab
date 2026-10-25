@@ -1034,9 +1034,9 @@ private struct LookupLink: View {
             if showWord { Text(word).fontWeight(.semibold).underline(hover)
                 .foregroundStyle(hover ? Color.accentColor : Color.primary)
                 .onTapGesture { session.lookUp(word) }
+                .handCursor()
                 .onHover { h in
                     hover = h; session.overLookupLink = h
-                    if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
                 .help("在词典中查「\(word)」（⌘J）") }
             Button { session.lookUp(word) } label: { Label("查词典", systemImage: "book").labelStyle(.titleAndIcon) }
@@ -1182,11 +1182,11 @@ private struct WordLinkModifier: ViewModifier {
                 .modifier(HoverTint(hover: hover))
                 .contentShape(Rectangle())
                 .onTapGesture { session.lookUp(word) }
+                .handCursor()
                 .onHover { h in
                     hover = h; session.overLookupLink = h
-                    if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
-                .onDisappear { if hover { NSCursor.pop() }; session.overLookupLink = false }
+                .onDisappear { session.overLookupLink = false }
                 .help("在词典中查「\(word)」")
                 .accessibilityAddTraits(.isLink)
         } else { content }
@@ -1234,9 +1234,9 @@ private struct SpeakerHover: ViewModifier {
     func body(content: Content) -> some View {
         content
             .foregroundStyle(over ? Color.accentColor : Color.primary.opacity(0.75))
+            .handCursor()
             .onHover { h in
                 over = h
-                if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 extra?(h)
             }
     }

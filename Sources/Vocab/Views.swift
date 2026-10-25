@@ -220,6 +220,8 @@ struct LookupDetailView: View {
                             .labelStyle(.titleAndIcon)
                         }
                         .buttonStyle(.borderless)
+                        .padding(.horizontal, 4).padding(.vertical, 2)
+                        .clickable()
                         .help(inBook ? "点击移出生词本" : "加入生词本 (⌘D)")
                     }
                     Button { AppState.shared.settingsTab = "dictionary"; AppState.shared.settingsRequest += 1 } label: {
@@ -227,6 +229,8 @@ struct LookupDetailView: View {
                     }
                     .buttonStyle(.borderless)
                     .focusable(false)
+                    .padding(.horizontal, 3).padding(.vertical, 2)
+                    .clickable()
                     .help("配置词典…")
                 })
             Divider()
@@ -323,6 +327,7 @@ struct DictionaryTabStrip<Trailing: View>: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .clickable(highlight: !on, radius: 10)
     }
 }
 

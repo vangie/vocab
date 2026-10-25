@@ -65,7 +65,7 @@ struct DailyWordsCard: View {
                         ForEach(words.indices, id: \.self) { i in
                             Circle().fill(i == index ? Color.primary.opacity(0.55) : Color.secondary.opacity(0.25))
                                 .frame(width: 6, height: 6)
-                                .onTapGesture { withAnimation(.easeInOut(duration: 0.35)) { index = i } }
+                                .onTapGesture { withAnimation(.easeInOut(duration: 0.35)) { index = i } }.handCursor()
                         }
                     }
                 }
@@ -120,7 +120,7 @@ struct DailyWordsCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(cardHover ? 0.35 : 0.18)))
         .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
         .contentShape(RoundedRectangle(cornerRadius: 12))
-        .onHover { h in cardHover = h; if h { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+        .handCursor { cardHover = $0 }
         .onTapGesture { onOpen(w.word) }
         .help("在词典中查「\(w.word)」")
     }
