@@ -400,10 +400,29 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             guard let self, e.window === self.window, let w = self.window, let f = self.searchItem?.searchField else { return e }
             let textFocused = w.firstResponder is NSText || w.firstResponder is NSTextView
             let mods = e.modifierFlags
-            // ⌘V with nothing focused (e.g. a dictation tool pasting): paste into search.
-            if self.state.mode == .lookup, !textFocused, mods.contains(.command), !mods.contains(.control),
-               e.charactersIgnoringModifiers == "v" {
-                self.focusSearch(); NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil); return nil
+            // ⌘-shortcuts in the search field are handed straight to its editor: views in the window
+            // (the entry WKWebView) otherwise claim ⌘V/⌘C/… as key equivalents before the Edit menu.
+            let cmd = mods.intersection([.command, .control, .option, .shift])
+            if mods.contains(.command), self.searchFocused, let ed = f.currentEditor() as? NSTextView {
+                let k = e.charactersIgnoringModifiers?.lowercased() ?? ""
+                switch (k, cmd) {
+                case ("v", [.command]): ed.paste(nil); return nil
+                case ("c", [.command]): ed.copy(nil); return nil
+                case ("x", [.command]): ed.cut(nil); return nil
+                case ("a", [.command]): ed.selectAll(nil); return nil
+                case ("z", [.command]): ed.undoManager?.undo(); return nil
+                case ("z", [.command, .shift]): ed.undoManager?.redo(); return nil
+                default: return e
+                }
+            }
+            // 词典, nothing text-focused: ⌘V looks the clipboard text up (one line, trimmed).
+            if self.state.mode == .lookup, !textFocused, cmd == [.command], e.charactersIgnoringModifiers == "v" {
+                guard let t = TypeToSearch.pasteQuery(NSPasteboard.general.string(forType: .string)) else { return e }
+                self.focusSearch()
+                f.stringValue = t
+                f.currentEditor()?.selectedRange = NSRange(location: (t as NSString).length, length: 0)
+                self.lookup.open(t)
+                return nil
             }
             guard TypeToSearch.shouldRedirect(characters: e.characters, keyCode: e.keyCode,
                                               command: mods.contains(.command), control: mods.contains(.control),

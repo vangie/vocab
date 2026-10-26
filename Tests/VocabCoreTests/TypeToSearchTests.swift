@@ -16,4 +16,12 @@ final class TypeToSearchTests: XCTestCase {
     func testOnlyInLookupWithoutFocus() {
         XCTAssertFalse(r("1", 18, lookup: false)); XCTAssertFalse(r("a", 0, focused: true))
     }
+
+    func testPasteQuery() {
+        XCTAssertEqual(TypeToSearch.pasteQuery("  serendipity \n"), "serendipity")
+        XCTAssertEqual(TypeToSearch.pasteQuery("take\n  off\tnow"), "take off now")
+        XCTAssertNil(TypeToSearch.pasteQuery(" \n\t "))
+        XCTAssertNil(TypeToSearch.pasteQuery(nil))
+        XCTAssertEqual(TypeToSearch.pasteQuery(String(repeating: "a", count: 300))?.count, 100)
+    }
 }

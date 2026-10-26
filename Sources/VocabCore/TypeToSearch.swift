@@ -19,4 +19,13 @@ public enum TypeToSearch {
         if CharacterSet.whitespacesAndNewlines.contains(u) { return false }
         return true
     }
+
+    /// Clipboard text for a ⌘V lookup: one line (runs of whitespace/newlines → one space), trimmed,
+    /// capped at 100 characters; nil when nothing is left.
+    public static func pasteQuery(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let t = raw.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
+        guard !t.isEmpty else { return nil }
+        return String(t.prefix(100))
+    }
 }
