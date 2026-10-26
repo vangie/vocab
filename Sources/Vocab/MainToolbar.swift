@@ -192,6 +192,14 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
         return img
     }
 
+    /// ⌘V lookup: the clipboard word goes into the search field (caret at end) and is shown at once.
+    private func pasteLookup(_ t: String, _ f: NSSearchField) {
+        focusSearch()
+        f.stringValue = t
+        f.currentEditor()?.selectedRange = NSRange(location: (t as NSString).length, length: 0)
+        lookup.open(t)
+    }
+
     func focusSearch() {
         guard let f = searchItem?.searchField, let w = window else { return }
         searchExplicit = true
@@ -406,7 +414,13 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             if mods.contains(.command), self.searchFocused, let ed = f.currentEditor() as? NSTextView {
                 let k = e.charactersIgnoringModifiers?.lowercased() ?? ""
                 switch (k, cmd) {
-                case ("v", [.command]): ed.paste(nil); return nil
+                case ("v", [.command]):
+                    // Empty or fully selected field in 词典: replace and look up at once; else a normal paste.
+                    let all = ed.selectedRange().location == 0 && ed.selectedRange().length == (ed.string as NSString).length
+                    if self.state.mode == .lookup, all, let t = TypeToSearch.pasteQuery(NSPasteboard.general.string(forType: .string)) {
+                        self.pasteLookup(t, f); return nil
+                    }
+                    ed.paste(nil); return nil
                 case ("c", [.command]): ed.copy(nil); return nil
                 case ("x", [.command]): ed.cut(nil); return nil
                 case ("a", [.command]): ed.selectAll(nil); return nil
@@ -418,10 +432,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             // 词典, nothing text-focused: ⌘V looks the clipboard text up (one line, trimmed).
             if self.state.mode == .lookup, !textFocused, cmd == [.command], e.charactersIgnoringModifiers == "v" {
                 guard let t = TypeToSearch.pasteQuery(NSPasteboard.general.string(forType: .string)) else { return e }
-                self.focusSearch()
-                f.stringValue = t
-                f.currentEditor()?.selectedRange = NSRange(location: (t as NSString).length, length: 0)
-                self.lookup.open(t)
+                self.pasteLookup(t, f)
                 return nil
             }
             guard TypeToSearch.shouldRedirect(characters: e.characters, keyCode: e.keyCode,
