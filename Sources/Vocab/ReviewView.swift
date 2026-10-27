@@ -251,12 +251,17 @@ private struct MeaningPrompt: View {
     @Environment(\.quizDensity) private var d
     var body: some View {
         VStack(spacing: 8) {
-            if let c = q.gloss.chinese { Text(c).font(.title2.weight(.semibold)).multilineTextAlignment(.center) }
+            if let c = q.gloss.chinese {
+                Text(c).font(.title2.weight(.semibold)).multilineTextAlignment(.center)
+                    .lineLimit(3).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+            }
             if let e = q.gloss.english {
                 Text(ContextHint.blank(e, word: q.word)).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    .lineLimit(d == .normal ? nil : 3)
+                    .lineLimit(3).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(maxWidth: 520)
+        .frame(maxWidth: .infinity)
     }
 }
 
