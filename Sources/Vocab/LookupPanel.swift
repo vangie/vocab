@@ -317,11 +317,13 @@ struct PanelView: View {
             .frame(height: 24)
             Spacer()
             Button {
+                // Optimistic: flip the star now; the DB write and headword lookup run off the main thread.
                 if added {
-                    WordbookModel.shared.remove(word: word); added = false
+                    added = false
+                    WordbookModel.shared.removeInBackground(word: word)
                 } else if let e = entries.first {
-                    WordbookModel.shared.add(entry: e, word: word, context: context, surface: surface, source: source)
                     added = true
+                    WordbookModel.shared.addInBackground(entry: e, word: word, context: context, surface: surface, source: source)
                 }
             } label: {
                 Label {

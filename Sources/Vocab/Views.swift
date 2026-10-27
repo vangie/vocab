@@ -211,7 +211,7 @@ struct LookupDetailView: View {
                 trailing: {
                     if !lookup.entries.isEmpty {
                         let inBook = book.contains(lookup.searchedTerm)
-                        Button { if inBook { book.remove(word: lookup.searchedTerm) } else { lookup.addCurrentToWordbook() } } label: {
+                        Button { if inBook { book.removeInBackground(word: lookup.searchedTerm) } else { lookup.addCurrentToWordbook() } } label: {
                             Label {
                                 Text(inBook ? "已在生词本" : "加入生词本")
                             } icon: {

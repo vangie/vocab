@@ -360,7 +360,7 @@ final class LookupModel: ObservableObject {
     func addCurrentToWordbook() {
         let pool = visibleEntries.isEmpty ? entries : visibleEntries
         guard let e = pool.first else { return }
-        WordbookModel.shared.add(entry: e, word: searchedTerm.isEmpty ? e.headword : searchedTerm, context: nil)
+        WordbookModel.shared.addInBackground(entry: e, word: searchedTerm.isEmpty ? e.headword : searchedTerm, context: nil)
         flash("已加入生词本：\(e.headword)")
     }
 

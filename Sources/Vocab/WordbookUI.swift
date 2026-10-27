@@ -83,11 +83,62 @@ final class WordbookModel: ObservableObject {
 
     init(store: WordStore?) { self.store = store; reload() }
 
-    func reload() {
-        items = (try? store?.all()) ?? []
-        dueItems = (try? store?.due()) ?? []
-        books = (try? store?.books()) ?? []
-        tags = (try? store?.allTags()) ?? []
+    func reload() { apply(Self.snapshot(store)) }
+
+    struct Snapshot: Sendable { var items: [WordItem]; var due: [WordItem]; var books: [Wordbook]; var tags: [(tag: String, count: Int)] }
+    nonisolated static func snapshot(_ store: WordStore?) -> Snapshot {
+        Snapshot(items: (try? store?.all()) ?? [], due: (try? store?.due()) ?? [],
+                 books: (try? store?.books()) ?? [], tags: (try? store?.allTags()) ?? [])
+    }
+    /// Publish only what changed: every assignment invalidates the whole main window (MainView observes us).
+    private func apply(_ s: Snapshot) {
+        if items != s.items { items = s.items }
+        if dueItems != s.due { dueItems = s.due }
+        if books != s.books { books = s.books }
+        if !tags.elementsEqual(s.tags, by: { $0.tag == $1.tag && $0.count == $1.count }) { tags = s.tags }
+    }
+
+    /// Serial off-main queue for the star toggle (SQLite write + dictionary headword lookup), so a click never hitches.
+    private nonisolated static let io = DispatchQueue(label: "vocab.wordbook.io", qos: .userInitiated)
+    /// Words with a toggle still being written; `contains` answers optimistically for them.
+    private var pending: [String: Bool] = [:]
+
+    func addInBackground(entry: DictionaryEntry, word: String, context: String?, surface: String? = nil, source: WordSource? = nil,
+                         done: (@MainActor () -> Void)? = nil) {
+        var book: Int64?
+        if case .book(let id) = AppState.shared.wordGroup { book = id }
+        let dicts = DictionarySelection.enabled(), store = store, key = word.lowercased()
+        pending[key] = true
+        Self.io.async {
+            let t0 = CFAbsoluteTimeGetCurrent()
+            let lemma = Lemmatizer.lemma(of: surface ?? word, in: context)
+            let w = WordCase.canonical(word, headwords: [entry.headword] + WordCase.headwords(word, in: dicts))
+            _ = try? store?.add(word: w, definition: entry.summary, dictionary: entry.dictionary.name, context: context,
+                                surface: surface, lemma: lemma, source: source, book: book)
+            let snap = Self.snapshot(store)
+            let bg = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+            DispatchQueue.main.async {
+                let t1 = CFAbsoluteTimeGetCurrent()
+                self.pending[key] = nil; self.apply(snap); done?()
+                VocabLog.log(String(format: "wordbook add %@: bg %.1fms, main %.1fms", w, bg, (CFAbsoluteTimeGetCurrent() - t1) * 1000))
+            }
+        }
+    }
+
+    func removeInBackground(word: String, done: (@MainActor () -> Void)? = nil) {
+        let store = store, key = word.lowercased()
+        pending[key] = false
+        Self.io.async {
+            let t0 = CFAbsoluteTimeGetCurrent()
+            if let w = (try? store?.find(word: word)) ?? nil { try? store?.transaction { try store?.delete(id: w.id) } }
+            let snap = Self.snapshot(store)
+            let bg = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+            DispatchQueue.main.async {
+                let t1 = CFAbsoluteTimeGetCurrent()
+                self.pending[key] = nil; self.apply(snap); done?()
+                VocabLog.log(String(format: "wordbook remove %@: bg %.1fms, main %.1fms", word, bg, (CFAbsoluteTimeGetCurrent() - t1) * 1000))
+            }
+        }
     }
 
     /// Source groups with counts, most used first.
@@ -126,7 +177,10 @@ final class WordbookModel: ObservableObject {
         reload()
     }
 
-    func contains(_ word: String) -> Bool { ((try? store?.find(word: word)) ?? nil) != nil }
+    func contains(_ word: String) -> Bool {
+        if let p = pending[word.lowercased()] { return p }
+        return ((try? store?.find(word: word)) ?? nil) != nil
+    }
 
     func remove(word: String) {
         guard let w = (try? store?.find(word: word)) ?? nil else { return }

@@ -98,6 +98,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let i = CommandLine.arguments.firstIndex(of: "--render-dict-empty") {
             DictEmptyRender.run(Array(CommandLine.arguments[(i + 1)...]))
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--bench-toggle") {
+            ToggleBench.run(Array(CommandLine.arguments[(i + 1)...]))
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--render-quiz") {
             QuizRender.run(Array(CommandLine.arguments[(i + 1)...]))
         }
