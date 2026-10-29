@@ -60,6 +60,8 @@ public enum EntryHTML {
     .v-spk { cursor: pointer !important; transition: opacity .12s, color .12s; }
     .v-spk:hover { opacity: 1 !important; color: -apple-system-control-accent !important; filter: drop-shadow(0 0 1px -apple-system-control-accent); }
     img.v-spk:hover { opacity: .7 !important; }
+    /* OALD BrE / NAmE labels: same fixed gap before the /IPA/ for both (a plain margin could be lost). */
+    .o-pron-geo { display: inline-block; margin-right: .35em !important; }
     """
 
     /// Marks every audio trigger (Longman BrE/AmE, OALD, example speakers…) with
