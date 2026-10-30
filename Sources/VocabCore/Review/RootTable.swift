@@ -14,6 +14,10 @@ public struct Morpheme: Hashable, Sendable {
         case .root: forms.joined(separator: "/")
         }
     }
+    /// 前缀 / 词根 / 后缀.
+    public var kindLabel: String {
+        switch kind { case .prefix: "前缀"; case .root: "词根"; case .suffix: "后缀" }
+    }
 }
 
 public struct MorphemeMatch: Hashable, Sendable {

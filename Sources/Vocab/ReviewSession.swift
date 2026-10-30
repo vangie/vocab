@@ -33,6 +33,8 @@ final class ReviewSession: ObservableObject {
     @Published private(set) var lastCorrect = false
     @Published private(set) var lastRating: ReviewRating?
     @Published private(set) var marks: [LetterMark] = []
+    /// 拼写: re-typing after a wrong answer (百词斩 style). The rating stays as first recorded.
+    @Published private(set) var retrying = false
     @Published private(set) var stats = Stats()
     @Published private(set) var preview = (reviews: 0, new: 0)
 
@@ -273,7 +275,7 @@ final class ReviewSession: ObservableObject {
     private func loadCurrent() {
         flushFirstSight()
         saveSnapshot()
-        revealed = false; typed = ""; hintsUsed = 0; gaveUp = false; chosen = nil; marks = []; lastRating = nil; lastAnswer = nil
+        revealed = false; typed = ""; hintsUsed = 0; gaveUp = false; chosen = nil; marks = []; lastRating = nil; lastAnswer = nil; retrying = false
         guard let id = queue.current, let item = items[id], let factory else { end(); return }
         if quickCheck.contains(id) {
             quickCheck.remove(id)
@@ -387,7 +389,27 @@ final class ReviewSession: ObservableObject {
     func submitSpelling() {
         guard phase == .asking, let q = question, q.type == .spelling, !typed.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         marks = SpellingCheck.diff(typed: typed.trimmingCharacters(in: .whitespaces), answer: q.word)
-        finish(correct: SpellingCheck.isCorrect(typed, q.word))
+        let ok = SpellingCheck.isAccepted(typed, q.word)
+        if retrying { settleRetry(correct: ok); return }
+        finish(correct: ok)
+    }
+
+    /// Retry answers are feedback only: nothing is rated or counted again.
+    private func settleRetry(correct: Bool) {
+        guard let q = question else { return }
+        activity()
+        lastCorrect = correct
+        phase = .answered
+        if !correct { speak(q) }
+        if correct && Self.autoAdvance { scheduleAutoAdvance() }
+    }
+
+    /// After a wrong spelling, 继续 asks the same word again with an empty field.
+    private func startRetry() {
+        cancelAutoAdvance()
+        retrying = true; typed = ""; marks = []; gaveUp = false; hintsUsed = 0; lastCorrect = false
+        phase = .asking
+        askedAt = Date()
     }
 
     /// 提示: reveal one more letter; the field is filled with that prefix (the user's own typing is kept
@@ -404,6 +426,7 @@ final class ReviewSession: ObservableObject {
     func giveUpSpelling() {
         guard phase == .asking, let q = question, q.type == .spelling else { return }
         marks = []; gaveUp = true
+        if retrying { settleRetry(correct: false); return }
         finish(correct: false)
     }
 
@@ -516,6 +539,7 @@ final class ReviewSession: ObservableObject {
         cancelAutoAdvance()
         activity()
         guard phase == .answered || phase == .asking else { return }
+        if phase == .answered, question?.type == .spelling, !lastCorrect { startRetry(); return }
         if queue.finished { end() } else { loadCurrent() }
     }
 
@@ -527,7 +551,7 @@ final class ReviewSession: ObservableObject {
         // Retiring overwrites the review state just written by the answer (Scheduler.retire).
         if let rid = materialize(q.itemID) { _ = try? book.store?.retire(id: rid) }
         noteFirstSight(q.itemID, retired: true)   // no-op unless this is the word's first sight
-        if phase == .asking { queue.retire() }
+        if phase == .asking && !retrying { queue.retire() }
         else {
             queue.dropCurrentRequeue(q.itemID)   // also removes a wrong answer's relearning requeue
             if let a = lastAnswer { stats.unrecord(a.rating, correct: a.correct, type: a.type) }
@@ -549,8 +573,9 @@ extension ReviewSession {
         s.question = q
         if q.type == .recall && chosen == -1 { s.checkWord = q.word; s.phase = .check; return s }
         if q.type == .spelling, let t = typed {
+            if t == "@retry" { s.retrying = true; s.lastRating = .forgot; s.phase = .asking; return s }
             s.typed = t; s.marks = SpellingCheck.diff(typed: t, answer: q.word)
-            s.lastCorrect = SpellingCheck.isCorrect(t, q.word); s.lastRating = s.lastCorrect ? .good : .forgot
+            s.lastCorrect = SpellingCheck.isAccepted(t, q.word); s.lastRating = s.lastCorrect ? .good : .forgot
             s.phase = .answered; return s
         }
         if let c = chosen {

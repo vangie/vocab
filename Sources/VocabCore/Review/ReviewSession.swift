@@ -162,6 +162,26 @@ public enum SpellingCheck {
         typed.trimmingCharacters(in: .whitespaces).lowercased() == answer.lowercased()
     }
 
+    /// A BrE/AmE spelling of the answer (realize for realise): accepted, no penalty.
+    public static func isVariant(_ typed: String, _ answer: String) -> Bool {
+        let t = typed.trimmingCharacters(in: .whitespaces)
+        return !isCorrect(t, answer) && t.count >= 3 && Distractors.isSpellingVariant(t, answer)
+    }
+
+    /// Exact or a spelling variant.
+    public static func isAccepted(_ typed: String, _ answer: String) -> Bool {
+        isCorrect(typed, answer) || isVariant(typed, answer)
+    }
+
+    /// 「也对，英式拼法 realise」 when the typed text is a variant of the answer.
+    public static func variantNote(_ typed: String, _ answer: String) -> String? {
+        guard isVariant(typed, answer) else { return nil }
+        let a = answer.lowercased()
+        // The answer is the British form when normalising it to the AmE skeleton changes it.
+        let british = Distractors.spellingKey(a) != a
+        return "也对，\(british ? "英式" : "美式")拼法 \(answer)"
+    }
+
     /// Align the user's input against the answer (Levenshtein backtrace), in reading order:
     /// correct / wrong carry the typed letter (wrong = substitution), missing = answer letter left out,
     /// extra = typed letter not in the answer. Dropping `missing` reproduces exactly what was typed.

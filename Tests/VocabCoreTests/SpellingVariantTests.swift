@@ -25,3 +25,20 @@ final class SpellingVariantTests: XCTestCase {
         XCTAssertTrue(q.isCorrectChoice(0)); XCTAssertTrue(q.isCorrectChoice(1)); XCTAssertFalse(q.isCorrectChoice(2))
     }
 }
+
+final class SpellingAnswerVariantTests: XCTestCase {
+    func testVariantAccepted() {
+        XCTAssertTrue(SpellingCheck.isAccepted("realize", "realise"))
+        XCTAssertTrue(SpellingCheck.isVariant(" Color ", "colour"))
+        XCTAssertTrue(SpellingCheck.isAccepted("center", "centre"))
+        XCTAssertFalse(SpellingCheck.isVariant("realise", "realise"))
+        XCTAssertFalse(SpellingCheck.isAccepted("realy", "realise"))
+        XCTAssertFalse(SpellingCheck.isAccepted("affect", "effect"))
+    }
+    func testVariantNote() {
+        XCTAssertEqual(SpellingCheck.variantNote("realize", "realise"), "也对，英式拼法 realise")
+        XCTAssertEqual(SpellingCheck.variantNote("colour", "color"), "也对，美式拼法 color")
+        XCTAssertNil(SpellingCheck.variantNote("realise", "realise"))
+        XCTAssertNil(SpellingCheck.variantNote("relise", "realise"))
+    }
+}

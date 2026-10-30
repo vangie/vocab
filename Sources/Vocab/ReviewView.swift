@@ -507,10 +507,24 @@ private struct SpellingCard: View {
         let answered = session.phase == .answered
         VStack(spacing: 14) {
             // After answering only the speaker by the phonetic remains (kept in layout + ⌘R: no jump).
-            Button { session.speak() } label: { Image(systemName: "speaker.wave.2.fill").font(.system(size: 28)) }.help("播放读音").speakerHover()
-                .buttonStyle(.borderless).help("再听一遍（⌘R）").keyboardShortcut("r", modifiers: .command)
-                .opacity(answered ? 0 : 1).allowsHitTesting(!answered).accessibilityHidden(answered)
+            // After answering the word itself takes the speaker's slot: word · /IPA/ · speaker, once.
+            ZStack {
+                Button { session.speak() } label: { Image(systemName: "speaker.wave.2.fill").font(.system(size: 28)) }.help("播放读音").speakerHover()
+                    .buttonStyle(.borderless).help("再听一遍（⌘R）").keyboardShortcut("r", modifiers: .command)
+                    .opacity(answered ? 0 : 1).allowsHitTesting(!answered).accessibilityHidden(answered)
+                if answered {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(q.word).font(.system(size: 24, weight: .semibold)).fixedSize()
+                            .wordLink(q.word, session: session, restUnderline: false)
+                        PhoneticTag(session: session, word: q.word, audio: q.audio, size: 16).fixedSize()
+                    }
+                }
+            }
+            .frame(minHeight: 34)
             MeaningPrompt(q: q)
+            if session.retrying && !answered {
+                Text("再拼一次，加深印象").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
             // Input and comparison share one slot; help row and feedback share the next: no jump on submit.
             ZStack(alignment: .top) {
                 SpellingComparison(session: session, q: q).opacity(answered ? 1 : 0).allowsHitTesting(answered)
@@ -544,32 +558,26 @@ private struct SpellingComparison: View {
     let q: ReviewQuestion
     static let font = Font.system(size: 26, weight: .semibold, design: .monospaced)
     static let labelWidth: CGFloat = 34
-    @State private var typedGloss: String?
+    /// System red / green adapt to light and dark (darker in light, brighter in dark).
+    static let right = Color(nsColor: .systemGreen)
+    static let bad = Color(nsColor: .systemRed)
 
     private var typedShown: Bool { !session.gaveUp && !session.marks.isEmpty }
 
     var body: some View {
-        let answered = session.phase == .answered
         let wrong = !session.lastCorrect
         VStack(spacing: 8) {
             VStack(spacing: 4) {
                 if typedShown {
                     line(wrong ? "你的" : nil) { cells(session.marks.map(typedCell)) }
                 }
-                if wrong || !typedShown {
-                    line(typedShown ? "正确" : nil) {
-                        cells(typedShown ? session.marks.compactMap(answerCell) : q.word.map { ($0, Color.primary, false, false) })
-                    }
-                    .wordLink(q.word, session: session, restUnderline: false)
+                if wrong && typedShown {
+                    line("正确") { cells(session.marks.compactMap(answerCell)) }
                 }
             }
             .frame(minHeight: 32)
-            PhoneticTag(session: session, word: q.word, audio: q.audio, size: 15).fixedSize()
-            Text(answered && wrong ? (typedGloss ?? " ") : " ")
-                .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1).frame(height: 16)
         }
         .padding(.top, 4)
-        .task(id: "\(session.typed)|\(answered)") { await loadTypedGloss() }
     }
 
     /// Label | letters | equal spacer, so the letters stay centered on the axis.
@@ -585,10 +593,11 @@ private struct SpellingComparison: View {
     private typealias Cell = (ch: Character, color: Color, underline: Bool, strike: Bool)
 
     private func typedCell(_ m: LetterMark) -> Cell {
-        switch m.kind {
-        case .correct: (m.char, session.lastCorrect ? .green : .primary, false, false)
-        case .wrong: (m.char, .red, false, false)
-        case .extra: (m.char, .red, false, true)
+        if session.lastCorrect { return (m.char, Self.right, false, false) }   // exact or an accepted variant
+        return switch m.kind {
+        case .correct: (m.char, session.lastCorrect ? Self.right : .primary, false, false)
+        case .wrong: (m.char, Self.bad, false, false)
+        case .extra: (m.char, Self.bad, false, true)
         case .missing: ("·", Color.secondary.opacity(0.5), false, false)   // placeholder: not typed
         }
     }
@@ -596,7 +605,7 @@ private struct SpellingComparison: View {
     private func answerCell(_ m: LetterMark) -> Cell? {
         switch m.kind {
         case .correct: (m.expected ?? m.char, .primary, false, false)
-        case .wrong, .missing: (m.expected ?? m.char, .orange, true, false)
+        case .wrong, .missing: (m.expected ?? m.char, Self.right, true, false)
         case .extra: (" ", .clear, false, false)   // keeps the column under an extra letter
         }
     }
@@ -605,30 +614,12 @@ private struct SpellingComparison: View {
         HStack(spacing: 1) {
             ForEach(Array(cs.enumerated()), id: \.offset) { _, c in
                 Text(String(c.ch)).font(Self.font).foregroundStyle(c.color)
-                    .strikethrough(c.strike, color: .red)
+                    .strikethrough(c.strike, color: Self.bad)
                     .overlay(alignment: .bottom) {
-                        if c.underline { Rectangle().fill(.orange).frame(height: 2).padding(.horizontal, 2).offset(y: -2) }
+                        if c.underline { Rectangle().fill(Self.right).frame(height: 2).padding(.horizontal, 2).offset(y: -2) }
                     }
             }
         }
-    }
-
-    /// 「force：力量；武力」 when the wrong input is a dictionary word in its own right.
-    private func loadTypedGloss() async {
-        typedGloss = nil
-        let t = session.typed.trimmingCharacters(in: .whitespaces)
-        guard session.phase == .answered, !session.lastCorrect, !session.gaveUp, t.count >= 2,
-              t.lowercased() != q.word.lowercased() else { return }
-        let dicts = ReviewSession.phoneticDicts
-        let g: String? = await Task.detached(priority: .utility) {
-            let es = DictionaryService.shared.lookup(t, in: dicts, maxPerDictionary: 1)
-            guard let e = es.first(where: { $0.headword.lowercased() == t.lowercased() }) else { return nil }
-            for x in es where x.headword.lowercased() == t.lowercased() {
-                if let c = GlossExtractor.chinese(fromHTML: x.html) { return c }
-            }
-            return GlossExtractor.english(fromHTML: e.html, maxLength: 40)
-        }.value
-        if let g { typedGloss = "\(t)：\(g)" }
     }
 }
 
@@ -680,7 +671,25 @@ private struct AnswerBanner: View {
             Text(note ?? " ").font(.system(size: 13)).foregroundStyle(.secondary)
                 .frame(minHeight: 18)
                 .background { Button("") { session.lookUp(q.word) }.hidden().modifier(LookupKey(active: active)) }
-            if needsGloss {
+            if q.type == .roots {
+                // Line 1: word /IPA/ 🔊 meaning. Line 2: the affix, labelled.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(q.word).font(.system(size: 16, weight: .semibold)).fixedSize()
+                    PhoneticTag(session: session, word: q.word, audio: q.audio, size: 14).fixedSize()
+                    Text(q.gloss.short + (q.gloss.note.map { "（\($0)）" } ?? ""))
+                        .font(.system(size: 14)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: 560)
+                if let m = q.morpheme {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(m.morpheme.kindLabel).font(.system(size: 11)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary))
+                        Text("\(m.morpheme.display)：\(m.morpheme.meaning)（\(m.morpheme.gloss)）")
+                            .font(.system(size: 13)).foregroundStyle(.secondary)
+                    }
+                }
+            } else if needsGloss {
                 HStack(spacing: 6) {
                     if q.type == .syllables, q.syllables.count > 1 { Text(q.syllables.joined(separator: "·")).foregroundStyle(.secondary).fixedSize() }
                     PhoneticTag(session: session, word: q.word, audio: q.audio, size: 14).fixedSize()
@@ -693,9 +702,6 @@ private struct AnswerBanner: View {
                 // A followed cross-reference is explained here only (options never show it).
                 Text(n).font(.system(size: 13)).foregroundStyle(.secondary)
             }
-            if let m = q.morpheme, q.type == .roots {
-                Text("\(m.morpheme.display)：\(m.morpheme.meaning)（\(m.morpheme.gloss)）").font(.system(size: 14)).foregroundStyle(.secondary)
-            }
             HStack(spacing: 16) {
                 continueButton
                 if q.type != .recall { RetireButton(session: session) }
@@ -705,7 +711,9 @@ private struct AnswerBanner: View {
     }
 
     private var note: String? {
-        if !session.lastCorrect { return q.type == .recall || q.type == .spelling ? nil : "答错了，稍后再来" }
+        if !session.lastCorrect { return nil }   // cards / letter colours already show it
+        if q.type == .spelling, let n = SpellingCheck.variantNote(session.typed, q.word) { return n }
+        if session.retrying { return "拼对了" }
         if let r = session.lastRating, r != .good { return r.label }
         return nil
     }
