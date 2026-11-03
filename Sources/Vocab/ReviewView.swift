@@ -673,28 +673,43 @@ private struct DictationCard: View {
     @ObservedObject var session: ReviewSession
     let q: ReviewQuestion
     @FocusState private var focused: Bool
+    
+    // TTS fallback indicator
+    private var usingTTS: Bool { q.audio == nil }
+    
     var body: some View {
         let answered = session.phase == .answered
         VStack(spacing: 14) {
             // Large speaker button as the main prompt (audio only, no word shown until after answering)
             ZStack {
-                Button { session.speak() } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 36))
-                        Text("听音拼写").font(.system(size: 14)).foregroundStyle(.secondary)
+                VStack(spacing: 8) {
+                    Button { session.speak() } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: "speaker.wave.2.fill").font(.system(size: 36))
+                            Text("听音拼写").font(.system(size: 14)).foregroundStyle(.secondary)
+                        }
+                    }.speakerHover()
+                    .buttonStyle(.borderless).help("播放读音（⌘R）").keyboardShortcut("r", modifiers: .command)
+                    
+                    // TTS fallback note
+                    if usingTTS && !answered {
+                        Text("(系统语音)").font(.caption).foregroundStyle(.tertiary)
                     }
-                }.speakerHover()
-                .buttonStyle(.borderless).help("播放读音（⌘R）").keyboardShortcut("r", modifiers: .command)
+                }
                 .opacity(answered ? 0 : 1).allowsHitTesting(!answered).accessibilityHidden(answered)
+                
                 if answered {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(q.word).font(.system(size: 24, weight: .semibold)).fixedSize()
                             .wordLink(q.word, session: session, restUnderline: false)
                         PhoneticTag(session: session, word: q.word, audio: q.audio, size: 16).fixedSize()
+                        if usingTTS {
+                            Text("(TTS)").font(.caption).foregroundStyle(.tertiary)
+                        }
                     }
                 }
             }
-            .frame(minHeight: 60)
+            .frame(minHeight: usingTTS ? 80 : 60)
             MeaningPrompt(q: q)
             if session.retrying && !answered {
                 Text("再拼一次，加深印象").font(.system(size: 13)).foregroundStyle(.secondary)

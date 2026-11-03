@@ -192,11 +192,23 @@ struct SearchField: NSViewRepresentable {
             case #selector(NSResponder.moveDown(_:)): parent.onMove(1); return true
             case #selector(NSResponder.moveUp(_:)): parent.onMove(-1); return true
             case #selector(NSResponder.insertNewline(_:)): parent.onCommit(); return true
+            case #selector(NSResponder.paste(_:)):
+                // Detect multi-word paste for reading mode
+                if let pasteString = NSPasteboard.general.string(forType: .string) {
+                    let wordCount = pasteString.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+                    if wordCount > 2 {
+                        // Multi-word text: enter reading mode
+                        LookupModel.shared.search(pasteString, isReading: true)
+                        return true
+                    }
+                }
+                return false  // single word: normal paste
             default: return false
             }
         }
     }
 }
+
 
 struct LookupDetailView: View {
     @EnvironmentObject var lookup: LookupModel
@@ -204,6 +216,16 @@ struct LookupDetailView: View {
 
     var body: some View {
         let _ = lookup.dictionariesVersion   // re-render when the enabled dictionaries change
+        
+        // Reading mode: show clickable passage instead of dictionary entries
+        if !lookup.readingText.isEmpty {
+            return AnyView(ReadingView(text: $lookup.readingText, onExit: { lookup.exitReading() }))
+        }
+        
+        return AnyView(normalLookup)
+    }
+    
+    private var normalLookup: some View {
         VStack(spacing: 0) {
             DictionaryTabStrip(
                 dictionaries: lookup.searchedTerm.isEmpty ? DictionarySelection.enabled() : lookup.dictionariesWithResults,

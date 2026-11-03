@@ -66,6 +66,8 @@ final class LookupModel: ObservableObject {
 
     /// Text in the search field.
     @Published var query = ""
+    /// Reading mode: when ⌘V pastes multi-word text, show ReadingView instead of instant lookup.
+    @Published var readingText = ""
     /// Sidebar rows for the current query.
     @Published private(set) var suggestions: [Suggestion] = []
     /// The query the current `suggestions` belong to.
@@ -288,11 +290,25 @@ final class LookupModel: ObservableObject {
         if !searchedTerm.isEmpty { show(searchedTerm, record: false) }
     }
 
-    func search(_ term: String? = nil) {
-        if let term { query = term }
+    func search(_ term: String? = nil, isReading: Bool = false) {
+        if let term { 
+            // Multi-word paste: enter reading mode
+            if isReading && term.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count > 2 {
+                readingText = term
+                query = ""
+                return
+            }
+            query = term 
+        }
+        readingText = ""  // exit reading mode when searching normally
         queryChanged()
         let t = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !t.isEmpty { recordVisit(t) }
+    }
+    
+    /// Exit reading mode and return to normal lookup.
+    func exitReading() {
+        readingText = ""
     }
 
     /// Open a word from history/recents: fill the field, show it, no suggestion churn.

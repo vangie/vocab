@@ -699,7 +699,30 @@ struct WordTable: NSViewRepresentable {
                 t.stringValue = d.isEmpty ? "未知" : d
                 t.textColor = d.isEmpty ? .tertiaryLabelColor : .secondaryLabelColor
                 t.toolTip = w.sourceTitle
-            case "familiarity": t.stringValue = w.familiarity.title; t.textColor = .secondaryLabelColor
+            case "familiarity":
+                // Mastered toggle: click to retire/unretire (hand cursor via tracking area)
+                let isMastered = Scheduler.isMastered(w.review)
+                if isMastered {
+                    // Make "已斩" clickable to unretire
+                    t.stringValue = "已斩 ↺"
+                    t.textColor = .systemGreen
+                    t.toolTip = "点击恢复复习（已掌握 → 学习中）"
+                    // Add click handler via tag
+                    cell.tag = row
+                    if let existing = cell.subviews.first(where: { $0 is NSClickGestureRecognizer }) {
+                        cell.removeGestureRecognizer(existing as! NSGestureRecognizer)
+                    }
+                    let click = NSClickGestureRecognizer(target: self, action: #selector(toggleMastered(_:)))
+                    cell.addGestureRecognizer(click)
+                    // Hand cursor via tracking area
+                    cell.trackingAreas.forEach { cell.removeTrackingArea($0) }
+                    cell.addTrackingArea(NSTrackingArea(rect: cell.bounds, options: [.activeInKeyWindow, .cursorUpdate, .inVisibleRect], owner: self))
+                } else {
+                    t.stringValue = w.familiarity.title
+                    t.textColor = .secondaryLabelColor
+                    t.toolTip = nil
+                    cell.trackingAreas.forEach { cell.removeTrackingArea($0) }
+                }
             case "added": t.stringValue = w.added.formatted(date: .numeric, time: .omitted)
             case "due":
                 if w.familiarity == .retired { t.stringValue = "已斩"; t.textColor = .secondaryLabelColor }
@@ -712,6 +735,32 @@ struct WordTable: NSViewRepresentable {
         @objc func openSource(_ b: NSButton) {
             guard b.tag < sorted.count, let s = sorted[b.tag].sourceURL, let u = URL(string: s) else { return }
             NSWorkspace.shared.open(u)
+        }
+        
+        override func cursorUpdate(with event: NSEvent) {
+            NSCursor.pointingHand.set()
+        }
+        
+        @objc func toggleMastered(_ gesture: NSClickGestureRecognizer) {
+            guard let view = gesture.view as? NSTableCellView, view.tag < sorted.count else { return }
+            let item = sorted[view.tag]
+            let isMastered = Scheduler.isMastered(item.review)
+            
+            Task { @MainActor in
+                do {
+                    if isMastered {
+                        _ = try WordbookModel.shared.store?.unretire(id: item.id)
+                        WordbookModel.shared.flash("已恢复复习：\(item.word)")
+                    } else {
+                        _ = try WordbookModel.shared.store?.retire(id: item.id)
+                        WordbookModel.shared.flash("已标记为已掌握：\(item.word)")
+                    }
+                    WordbookModel.shared.reload()
+                    table?.reloadData()
+                } catch {
+                    WordbookModel.shared.flash("操作失败")
+                }
+            }
         }
 
         @objc func doubleClick(_ tv: NSTableView) {

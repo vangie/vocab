@@ -114,6 +114,24 @@ final class MasteredStateTests: XCTestCase {
         XCTAssertFalse(Scheduler.isMastered(item.review), "Unretired word back in rotation")
         XCTAssertLessThan(item.review.intervalDays, 2, "Unretired with short interval")
     }
+    
+    func testMasteredTogglePreservesCounts() throws {
+        let store = try WordStore(url: nil)
+        var item = try store.add(word: "toggle", definition: "切换", dictionary: "test")
+        
+        // Review it a few times
+        item = try store.review(id: item.id, rating: .good)!
+        item = try store.review(id: item.id, rating: .good)!
+        let reps = item.review.repetitions
+        
+        // Retire
+        item = try store.retire(id: item.id)!
+        XCTAssertGreaterThan(item.review.repetitions, reps, "Retire increments reps")
+        
+        // Unretire preserves history
+        item = try store.unretire(id: item.id)!
+        XCTAssertGreaterThan(item.review.repetitions, 0, "History preserved after unretire")
+    }
 }
 
 final class DictationTests: XCTestCase {

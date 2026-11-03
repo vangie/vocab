@@ -4,7 +4,8 @@ import VocabCore
 /// Click-to-look-up reading: paste a passage, each word/character clickable to look up and add to wordbook.
 /// Works for classical Chinese (per-character) as well as English (per-word).
 struct ReadingView: View {
-    @State private var text = ""
+    @Binding var text: String
+    var onExit: (() -> Void)?
     @State private var selectedWord: String?
     @ObservedObject var lookup = LookupModel.shared
     @ObservedObject var book = WordbookModel.shared
@@ -21,15 +22,16 @@ struct ReadingView: View {
                 }
             }
         }
-        .onAppear { loadPasteboard() }
     }
 
     private var toolbar: some View {
         HStack {
             Text("阅读模式").font(.headline)
             Spacer()
-            Button("粘贴") { loadPasteboard() }
-                .keyboardShortcut("v", modifiers: .command)
+            Button("返回查词") { 
+                text = ""
+                onExit?()
+            }
             Button("清空") { text = "" }
         }
         .padding()
@@ -40,8 +42,8 @@ struct ReadingView: View {
         VStack(spacing: 16) {
             Spacer()
             Image(systemName: "doc.text").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("粘贴文章，点击单词或汉字查词").foregroundStyle(.secondary)
-            Text("⌘V 粘贴 · 点击查词 · 支持中英文").font(.caption).foregroundStyle(.tertiary)
+            Text("文章已清空").foregroundStyle(.secondary)
+            Text("返回查词或粘贴新文章").font(.caption).foregroundStyle(.tertiary)
             Spacer()
         }
     }
@@ -64,14 +66,8 @@ struct ReadingView: View {
         .font(.body)
     }
 
-    private func loadPasteboard() {
-        if let s = NSPasteboard.general.string(forType: .string), !s.isEmpty {
-            text = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-    }
-
     private func lookupWord(_ word: String) {
-        lookup.search(word)
+        lookup.search(word, isReading: false)
     }
 
     /// Tokenize text into words (English/numbers) and non-words (punctuation, spaces).
