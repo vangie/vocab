@@ -23,7 +23,12 @@ struct VocabApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandMenu("单词") {
-                Button("加入生词本") { lookup.addCurrentToWordbook() }
+                Button("加入生词本") {
+                    // ⌘D in 记词 is 「不认识」 (the menu shortcut would otherwise swallow it).
+                    if AppState.shared.mode == .words, ReviewSession.shared.phase == .asking {
+                        ReviewSession.shared.markDontKnow()
+                    } else { lookup.addCurrentToWordbook() }
+                }
                     .keyboardShortcut("d", modifiers: [.command])
                 Menu("导入到生词本") {
                     Button("CSV…") { book.importCSV() }

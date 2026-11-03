@@ -290,26 +290,25 @@ final class LookupModel: ObservableObject {
         if !searchedTerm.isEmpty { show(searchedTerm, record: false) }
     }
 
-    func search(_ term: String? = nil, isReading: Bool = false) {
-        if let term { 
-            // Multi-word paste: enter reading mode
-            if isReading && term.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count > 2 {
-                readingText = term
-                query = ""
-                return
-            }
-            query = term 
-        }
-        readingText = ""  // exit reading mode when searching normally
+    func search(_ term: String? = nil) {
+        if let term { query = term }
+        readingText = ""  // a normal search leaves reading mode
         queryChanged()
         let t = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !t.isEmpty { recordVisit(t) }
     }
-    
-    /// Exit reading mode and return to normal lookup.
-    func exitReading() {
-        readingText = ""
+
+    /// ⌘V of a passage in 词典: show it as clickable text (each word / CJK character looks itself up).
+    func enterReading(_ text: String) { readingText = text }
+
+    /// A word clicked in the reading passage: look it up below the passage, staying in reading mode.
+    func lookUpFromReading(_ word: String) {
+        let keep = readingText
+        open(word)
+        readingText = keep
     }
+
+    func exitReading() { readingText = "" }
 
     /// Open a word from history/recents: fill the field, show it, no suggestion churn.
     func open(_ word: String, record: Bool = true) {

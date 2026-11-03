@@ -133,21 +133,36 @@ public struct ReviewQueue: Sendable, Codable, Equatable {
     public private(set) var pending: [Int64]
     public private(set) var done: Set<Int64> = []
     public private(set) var wrong: [Int64: Int] = [:]
-    /// Words missed in this session that need final re-test.
+    /// Words answered wrong in the main pass: re-tested once more in a final pass at the end of the
+    /// session (even if a later requeue got them right). Cleared as the final pass gets them right.
     public private(set) var missedWords: Set<Int64> = []
-    /// Track if we're in the final re-test pass.
+    /// True once the final re-test pass of `missedWords` has started.
     public private(set) var inFinalPass = false
+    /// Cards in the final pass when it started (for progress).
+    public private(set) var finalTotal = 0
     public let total: Int
     public static let requeueGap = 3
 
     public init(ids: [Int64]) { pending = ids; total = ids.count }
+
+    private enum CodingKeys: String, CodingKey { case pending, done, wrong, missedWords, inFinalPass, finalTotal, total }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        pending = try c.decode([Int64].self, forKey: .pending)
+        done = try c.decodeIfPresent(Set<Int64>.self, forKey: .done) ?? []
+        wrong = try c.decodeIfPresent([Int64: Int].self, forKey: .wrong) ?? [:]
+        missedWords = try c.decodeIfPresent(Set<Int64>.self, forKey: .missedWords) ?? []
+        inFinalPass = try c.decodeIfPresent(Bool.self, forKey: .inFinalPass) ?? false
+        finalTotal = try c.decodeIfPresent(Int.self, forKey: .finalTotal) ?? 0
+        total = try c.decode(Int.self, forKey: .total)
+    }
+
     public var current: Int64? { pending.first }
+    /// Done when nothing is pending and no final pass is still owed.
     public var finished: Bool { pending.isEmpty && (inFinalPass || missedWords.isEmpty) }
-    public var progress: Double { 
+    public var progress: Double {
         if inFinalPass {
-            let finalTotal = missedWords.count
-            let finalDone = finalTotal - pending.count
-            return finalTotal > 0 ? Double(total + finalDone) / Double(total + finalTotal) : 1
+            return finalTotal > 0 ? Double(total + finalTotal - pending.count) / Double(total + finalTotal) : 1
         }
         return total == 0 ? 1 : Double(done.count) / Double(total)
     }
@@ -155,28 +170,29 @@ public struct ReviewQueue: Sendable, Codable, Equatable {
     public mutating func answer(correct: Bool) {
         guard let id = pending.first else { return }
         pending.removeFirst()
-        if correct { 
+        if inFinalPass {
+            // Final pass: one more look either way; a wrong answer is rated but not requeued again.
+            if correct { missedWords.remove(id) } else { wrong[id, default: 0] += 1 }
             done.insert(id)
-            missedWords.remove(id)  // cleared in final pass
-        } else { 
+            return
+        }
+        if correct {
+            done.insert(id)
+        } else {
             wrong[id, default: 0] += 1
-            if !inFinalPass {
-                pending.insert(id, at: min(pending.count, Self.requeueGap))
-                missedWords.insert(id)  // mark for final re-test
-            } else {
-                // In final pass: still wrong, give up and move on
-                done.insert(id)
-            }
+            pending.insert(id, at: min(pending.count, Self.requeueGap))
+            missedWords.insert(id)
         }
     }
-    
-    /// Start final re-test pass of missed words.
+
+    /// Start the final re-test pass of missed words (only once the main queue is empty).
     public mutating func startFinalPass() {
         guard !missedWords.isEmpty, pending.isEmpty, !inFinalPass else { return }
         inFinalPass = true
-        pending = Array(missedWords).sorted()  // deterministic order
+        pending = missedWords.sorted()
+        finalTotal = pending.count
     }
-    
+
     /// 斩 after the card was already answered: forget any pending repeat of it.
     public mutating func dropCurrentRequeue(_ id: Int64) {
         pending.removeAll { $0 == id }

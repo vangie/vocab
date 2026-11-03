@@ -32,6 +32,7 @@ final class ReviewSession: ObservableObject {
     private var lastAnswer: (rating: ReviewRating, correct: Bool, type: QuestionType)?
     /// Inline drill state: when a word is answered wrong or marked "don't know", drill it immediately.
     @Published private(set) var drillState: InlineDrillState?
+    private var drillAfterAnswer = false
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var question: ReviewQuestion?
@@ -263,7 +264,7 @@ final class ReviewSession: ObservableObject {
         let dicts = DictionarySelection.enabled()
         let thesaurus = DictionaryService.shared.availableDictionaries().first { $0.id == "com.apple.dictionary.OTE" }
         factory = QuestionFactory(dicts: dicts, thesaurus: thesaurus, book: book.items.map(\.word))
-        if queue.finished { end() } else { loadCurrent() }
+        advance()
     }
 
     func discardResumable() { SessionSnapshot.clear(); resumable = nil }
@@ -388,7 +389,7 @@ final class ReviewSession: ObservableObject {
         if known {
             if let rid = materialize(id) { _ = try? book.store?.retire(id: rid) }
             queue.retire(); stats.retired += 1
-            if queue.finished { end() } else { loadCurrent() }
+            advance()
         } else {
             loadCurrent()
         }
@@ -403,7 +404,7 @@ final class ReviewSession: ObservableObject {
     }
 
     func submitSpelling() {
-        guard phase == .asking, let q = question, q.type == .spelling, !typed.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        guard phase == .asking, let q = question, (q.type == .spelling || q.type == .dictation), !typed.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         marks = SpellingCheck.diff(typed: typed.trimmingCharacters(in: .whitespaces), answer: q.word)
         let ok = SpellingCheck.isAccepted(typed, q.word)
         if retrying { settleRetry(correct: ok); return }
@@ -431,7 +432,7 @@ final class ReviewSession: ObservableObject {
     /// 提示: reveal one more letter; the field is filled with that prefix (the user's own typing is kept
     /// when it already matches it).
     func hint() {
-        guard phase == .asking, let q = question, q.type == .spelling, hintsUsed < SpellingHint.maxHints(q.word) else { return }
+        guard phase == .asking, let q = question, (q.type == .spelling || q.type == .dictation), hintsUsed < SpellingHint.maxHints(q.word) else { return }
         activity()
         hintsUsed += 1
         let prefix = String(q.word.prefix(hintsUsed))
@@ -440,7 +441,7 @@ final class ReviewSession: ObservableObject {
 
     /// 不会，看答案: show the spelling with the usual feedback; counts as 忘了 and goes to retry-later.
     func giveUpSpelling() {
-        guard phase == .asking, let q = question, q.type == .spelling else { return }
+        guard phase == .asking, let q = question, (q.type == .spelling || q.type == .dictation) else { return }
         marks = []; gaveUp = true
         if retrying { settleRetry(correct: false); return }
         finish(correct: false)
@@ -456,6 +457,7 @@ final class ReviewSession: ObservableObject {
         guard phase == .asking, question?.type == .recall, revealed else { return }
         activity()
         apply(r, correct: r != .forgot)
+        if r == .forgot { startInlineDrill(); return }   // 忘了: practise it right now
         next()
     }
 
@@ -479,11 +481,8 @@ final class ReviewSession: ObservableObject {
         apply(r, correct: correct)
         lastCorrect = correct
         
-        // Trigger inline drill on wrong answer (key feature #8)
-        if !correct && !retrying {
-            startInlineDrill()
-            return
-        }
+        // 不认识: no answer to show, drill right away.
+        if !correct && drillAfterAnswer { drillAfterAnswer = false; startInlineDrill(); return }
         
         phase = .answered
         if q.type == .meaningToWord || !correct { speak(q) }
@@ -577,19 +576,22 @@ final class ReviewSession: ObservableObject {
         // After inline drill, return to normal flow
         if phase == .inlineDrill {
             drillState = nil
-            if queue.finished { end() } else { loadCurrent() }
+            advance()
             return
         }
         
         if phase == .answered, question?.type == .spelling || question?.type == .dictation, !lastCorrect { startRetry(); return }
         
-        // Check if main queue done but final pass needed
-        if queue.pending.isEmpty && !queue.inFinalPass && !queue.missedWords.isEmpty {
-            queue.startFinalPass()
-            loadCurrent()
-            return
+        // A wrong choice/recall: drill it once right after the feedback (spelling retypes via startRetry).
+        if phase == .answered, !lastCorrect, let t = question?.type, t != .spelling, t != .dictation, t != .recall {
+            startInlineDrill(); return
         }
-        
+        advance()
+    }
+
+    /// Move to the next card; when the main queue runs out, start the final pass of missed words.
+    private func advance() {
+        if queue.pending.isEmpty && !queue.inFinalPass && !queue.missedWords.isEmpty { queue.startFinalPass() }
         if queue.finished { end() } else { loadCurrent() }
     }
 
@@ -629,9 +631,10 @@ final class ReviewSession: ObservableObject {
 
     /// Mark "don't know" and start inline drill.
     func markDontKnow() {
-        guard phase == .asking else { return }
-        activity()
-        startInlineDrill()
+        guard phase == .asking, question != nil else { return }
+        // Counts as a wrong answer (rated 忘了, requeued, re-tested in the final pass), then drill.
+        drillAfterAnswer = true
+        finish(correct: false)
     }
 
     /// 斩 / 已掌握: retire the word for good.
@@ -649,7 +652,7 @@ final class ReviewSession: ObservableObject {
         }
         lastAnswer = nil
         stats.retired += 1
-        if queue.finished { end() } else { loadCurrent() }
+        advance()
     }
 }
 

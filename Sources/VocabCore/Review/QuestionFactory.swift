@@ -116,9 +116,15 @@ public final class QuestionFactory: @unchecked Sendable {
             guard Distractors.keep(target: word, candidate: c.word, targetGloss: target, candidateGloss: g, synonyms: syn) else { continue }
             if out.contains(where: { $0.1.short == g.short || GlossExtractor.nearIdentical($0.1.chinese, g.chinese) }) { continue }
             out.append((c.word, g))
-            if out.count == want { break }
+            if out.count == want * 2 { break }
         }
-        return out
+        // Among the kept (spelling-confusable, not synonymous) words, prefer those whose Chinese meaning
+        // is related but different (moderate gloss overlap): plausible wrong answers. Spelling rank breaks ties.
+        let scored = out.enumerated().map { i, e -> (Double, (String, Gloss)) in
+            let sim = Distractors.chineseGlossSimilarity(target.chinese, e.1.chinese)
+            return (Double(i) - (sim >= 0.15 && sim < 0.5 ? 3 : 0), e)
+        }
+        return scored.sorted { $0.0 < $1.0 }.prefix(want).map(\.1)
     }
 
     public func materials(for word: String) -> WordMaterials {

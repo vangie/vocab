@@ -4,23 +4,15 @@ import VocabCore
 /// Click-to-look-up reading: paste a passage, each word/character clickable to look up and add to wordbook.
 /// Works for classical Chinese (per-character) as well as English (per-word).
 struct ReadingView: View {
-    @Binding var text: String
+    let text: String
     var onExit: (() -> Void)?
-    @State private var selectedWord: String?
     @ObservedObject var lookup = LookupModel.shared
     @ObservedObject var book = WordbookModel.shared
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
-            if text.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    clickableText
-                        .padding(20)
-                }
-            }
+            ScrollView { clickableText.padding(20) }
         }
     }
 
@@ -28,24 +20,10 @@ struct ReadingView: View {
         HStack {
             Text("阅读模式").font(.headline)
             Spacer()
-            Button("返回查词") { 
-                text = ""
-                onExit?()
-            }
-            Button("清空") { text = "" }
+            Button("返回查词") { onExit?() }.handCursor()
         }
         .padding()
         .background(.background.secondary)
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "doc.text").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("文章已清空").foregroundStyle(.secondary)
-            Text("返回查词或粘贴新文章").font(.caption).foregroundStyle(.tertiary)
-            Spacer()
-        }
     }
 
     private var clickableText: some View {
@@ -56,8 +34,8 @@ struct ReadingView: View {
                     Text(token.text)
                         .foregroundStyle(Color.primary)
                         .underline(color: .secondary.opacity(0.3))
-                        .clickable(highlight: false, radius: 3) { _ in }
                         .onTapGesture { lookupWord(token.text) }
+                        .clickable(highlight: false, radius: 3)
                 } else {
                     Text(token.text).foregroundStyle(.secondary)
                 }
@@ -67,7 +45,7 @@ struct ReadingView: View {
     }
 
     private func lookupWord(_ word: String) {
-        lookup.search(word, isReading: false)
+        lookup.lookUpFromReading(word)
     }
 
     /// Tokenize text into words (English/numbers) and non-words (punctuation, spaces).
@@ -85,8 +63,8 @@ struct ReadingView: View {
         }
 
         for char in s {
-            let isCJK = ("" + String(char)).unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
-            let isLetter = char.isLetter || char.isNumber
+            let isCJK = char.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) || (0x3400...0x4DBF).contains($0.value) }
+            let isLetter = char.isLetter || char.isNumber || ((char == "'" || char == "’" || char == "-") && isCurrentWord)
             let isWord = isCJK || isLetter
 
             if isCJK {

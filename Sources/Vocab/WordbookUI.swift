@@ -720,22 +720,26 @@ struct WordTable: NSViewRepresentable {
                 t.textColor = d.isEmpty ? .tertiaryLabelColor : .secondaryLabelColor
                 t.toolTip = w.sourceTitle
             case "familiarity":
-                // Mastered toggle: clickable text with hand cursor
-                let isMastered = Scheduler.isMastered(w.review)
-                if isMastered {
-                    // Create SwiftUI view with clickable toggle
-                    let toggleView = MasteredToggle(word: w, isMastered: true, row: row, coordinator: self)
-                    let hostingView = NSHostingView(rootView: toggleView)
-                    hostingView.translatesAutoresizingMaskIntoConstraints = false
-                    // Clear existing subviews
-                    cell.subviews.forEach { $0.removeFromSuperview() }
-                    cell.addSubview(hostingView)
+                // Mastered: a clickable 「已斩 ↺」 (hand cursor) that puts the word back into review.
+                // Its own cell identifier, so the reusable text cells are never altered.
+                if Scheduler.isMastered(w.review) {
+                    let mid = NSUserInterfaceItemIdentifier("familiarity.mastered")
+                    let toggle = MasteredToggle(word: w, isMastered: true, row: row, coordinator: self)
+                    if let c = tableView.makeView(withIdentifier: mid, owner: nil) as? NSTableCellView,
+                       let h = c.subviews.first as? NSHostingView<MasteredToggle> {
+                        h.rootView = toggle
+                        return c
+                    }
+                    let c = NSTableCellView(); c.identifier = mid
+                    let h = NSHostingView(rootView: toggle)
+                    h.translatesAutoresizingMaskIntoConstraints = false
+                    c.addSubview(h)
                     NSLayoutConstraint.activate([
-                        hostingView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
-                        hostingView.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
-                        hostingView.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+                        h.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 2),
+                        h.trailingAnchor.constraint(lessThanOrEqualTo: c.trailingAnchor, constant: -2),
+                        h.centerYAnchor.constraint(equalTo: c.centerYAnchor)
                     ])
-                    return cell
+                    return c
                 } else {
                     t.stringValue = w.familiarity.title
                     t.textColor = .secondaryLabelColor

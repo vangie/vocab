@@ -22,6 +22,16 @@ public enum TypeToSearch {
 
     /// Clipboard text for a ⌘V lookup: one line (runs of whitespace/newlines → one space), trimmed,
     /// capped at 100 characters; nil when nothing is left.
+    /// Clipboard text that is a passage to read rather than a term to look up: more than 3 words,
+    /// more than one non-empty line, or a run of 8+ CJK characters (Chinese has no spaces).
+    public static func isPassage(_ raw: String?) -> Bool {
+        guard let raw else { return false }
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.split(whereSeparator: \.isNewline).filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }).count > 1 { return true }
+        if t.split(whereSeparator: { $0.isWhitespace }).count > 3 { return true }
+        return t.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) || (0x3400...0x4DBF).contains($0.value) }.count >= 8
+    }
+
     public static func pasteQuery(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let t = raw.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")

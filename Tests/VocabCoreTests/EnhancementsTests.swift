@@ -81,21 +81,37 @@ final class StudyTimerTests: XCTestCase {
 
     func testStudyTimeSplitsAt2AM() {
         let cal = Calendar.current
-        let day1End = cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 23, minute: 50))!
-        let day2Start = cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 0, minute: 10))!
-        
-        // 20 min session spanning 2am boundary (23:50 - 00:10)
+        // The study day rolls over at 02:00 (not midnight): 01:59 → 02:01 spans two study days.
+        let before = cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 1, minute: 59))!
+        let after = cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 2, minute: 1))!
         var log = DailyLog()
-        let sessionSeconds = day2Start.timeIntervalSince(day1End)  // 1200 seconds (20 min)
-        log.addStudy(sessionSeconds, at: day2Start, from: day1End)
+        let gap = after.timeIntervalSince(before)   // 120 s, under the 3-minute idle cap
+        log.addStudy(gap, at: after, from: before, calendar: cal)
 
-        // Both days get their proportional time (10 min each side of 2am)
-        let day1Secs = log.days[DailyLog.key(day1End, cal)]?.studySeconds ?? 0
-        let day2Secs = log.days[DailyLog.key(day2Start, cal)]?.studySeconds ?? 0
-        
-        XCTAssertGreaterThan(day1Secs, 0, "Day 1 has study time")
-        XCTAssertGreaterThan(day2Secs, 0, "Day 2 has study time")
-        XCTAssertEqual(day1Secs + day2Secs, sessionSeconds, accuracy: 1, "Total time preserved")
+        let day1Secs = log.days[StudyDay.key(before, cal)]?.studySeconds ?? 0
+        let day2Secs = log.days[StudyDay.key(after, cal)]?.studySeconds ?? 0
+        XCTAssertNotEqual(StudyDay.key(before, cal), StudyDay.key(after, cal))
+        XCTAssertEqual(day1Secs, 60, accuracy: 1, "Before 02:00 goes to the previous study day")
+        XCTAssertEqual(day2Secs, 60, accuracy: 1, "After 02:00 goes to the new study day")
+        XCTAssertEqual(day1Secs + day2Secs, gap, accuracy: 1, "Total time preserved")
+    }
+
+    func testMidnightIsNotADayBoundary() {
+        let cal = Calendar.current
+        let a = cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 23, minute: 59))!
+        let b = cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 0, minute: 1))!
+        var log = DailyLog()
+        log.addStudy(120, at: b, from: a, calendar: cal)
+        XCTAssertEqual(log.days[StudyDay.key(a, cal)]?.studySeconds ?? 0, 120, accuracy: 0.01)
+    }
+
+    func testIdleGapAcrossBoundaryNotCounted() {
+        let cal = Calendar.current
+        let a = cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 1, minute: 50))!
+        let b = cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 2, minute: 10))!
+        var log = DailyLog()
+        log.addStudy(b.timeIntervalSince(a), at: b, from: a, calendar: cal)
+        XCTAssertTrue(log.days.values.allSatisfy { $0.studySeconds == 0 }, "20 min idle is not study time")
     }
 }
 
@@ -197,8 +213,13 @@ final class InlineDrillTests: XCTestCase {
         q.answer(correct: true)
         q.answer(correct: true)
         q.answer(correct: true)  // word 1 again
-        
-        XCTAssertFalse(q.missedWords.contains(1), "Cleared from missed when answered correctly")
+
+        // Still owed a final re-test (see FinalPassTests); cleared only when the final pass gets it right.
+        XCTAssertTrue(q.missedWords.contains(1))
+        q.startFinalPass()
+        q.answer(correct: true)
+        XCTAssertFalse(q.missedWords.contains(1), "Cleared when answered correctly in the final pass")
+        XCTAssertTrue(q.finished)
     }
 }
 
@@ -228,5 +249,16 @@ final class FinalPassTests: XCTestCase {
         // Answer in final pass
         q.answer(correct: true)
         XCTAssertTrue(q.finished, "Finished after final pass")
+    }
+}
+
+final class PassagePasteTests: XCTestCase {
+    func testPassageDetection() {
+        XCTAssertFalse(TypeToSearch.isPassage("adjust"))
+        XCTAssertFalse(TypeToSearch.isPassage("look up to"))
+        XCTAssertFalse(TypeToSearch.isPassage("调整"))
+        XCTAssertTrue(TypeToSearch.isPassage("The quick brown fox jumps over the lazy dog."))
+        XCTAssertTrue(TypeToSearch.isPassage("却说天下大势，分久必合，合久必分。"), "Chinese has no spaces")
+        XCTAssertTrue(TypeToSearch.isPassage("first line\nsecond line"))
     }
 }

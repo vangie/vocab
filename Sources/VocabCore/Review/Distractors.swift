@@ -146,27 +146,33 @@ public enum Distractors {
         return d <= 2 || phoneticKey(a) == phoneticKey(b) || (commonPrefix(a, b) >= 3 && d <= 3)
     }
 
-    /// Chinese gloss similarity for better distractor selection: shared characters and bigram overlap.
-    /// Returns 0-1 score; higher = more similar. Uses Jaccard similarity on both character and bigram level.
+    /// Chinese function/filler characters that carry no meaning of their own (的, 使, 以 …).
+    static let glossStopChars: Set<Character> = Set("的地得了着过是在把被使让以对于与和及或等之其某人物事者一个种")
+
+    /// How much two Chinese glosses mean alike, 0…1: overlap of content characters and of in-segment
+    /// bigrams (a bigram never spans punctuation), each measured against the shorter gloss so a short
+    /// gloss inside a long one still counts. 调整 / 调节 ≈ 0.35, 调整…以适用 / 调整，调节 = 0.5, 收养 / 适应 = 0.
     public static func chineseGlossSimilarity(_ a: String?, _ b: String?) -> Double {
         guard let a, let b, !a.isEmpty, !b.isEmpty else { return 0 }
-        let ca = Set(a.filter { GlossExtractor.hasCJK(String($0)) })
-        let cb = Set(b.filter { GlossExtractor.hasCJK(String($0)) })
+        func chars(_ s: String) -> Set<Character> {
+            Set(s.filter { GlossExtractor.hasCJK(String($0)) && !glossStopChars.contains($0) })
+        }
+        func bigrams(_ s: String) -> Set<String> {
+            var out = Set<String>()
+            for seg in s.split(whereSeparator: { !GlossExtractor.hasCJK(String($0)) }) {
+                let c = Array(seg)
+                if c.count >= 2 { for i in 0..<(c.count - 1) { out.insert(String(c[i...i + 1])) } }
+            }
+            return out
+        }
+        func overlap<T>(_ x: Set<T>, _ y: Set<T>) -> Double {
+            guard !x.isEmpty, !y.isEmpty else { return 0 }
+            return Double(x.intersection(y).count) / Double(min(x.count, y.count))
+        }
+        let ca = chars(a), cb = chars(b)
         guard !ca.isEmpty, !cb.isEmpty else { return 0 }
-        
-        // Character-level Jaccard similarity
-        let charIntersect = ca.intersection(cb).count
-        let charUnion = ca.union(cb).count
-        let charSim = charUnion > 0 ? Double(charIntersect) / Double(charUnion) : 0
-        
-        // Bigram-level Jaccard similarity
-        let ba = GlossExtractor.bigrams(a), bb = GlossExtractor.bigrams(b)
-        let bigramIntersect = ba.intersection(bb).count
-        let bigramUnion = ba.union(bb).count
-        let bigramSim = bigramUnion > 0 ? Double(bigramIntersect) / Double(bigramUnion) : 0
-        
-        // Weight bigrams more heavily (they capture meaning better than single chars)
-        return charSim * 0.4 + bigramSim * 0.6
+        // Sharing a single character is a weaker signal than sharing a word, so it is damped.
+        return max(overlap(ca, cb) * 0.7, overlap(bigrams(a), bigrams(b)))
     }
 
     /// Should `candidate` stay as a distractor for `target`? Curated confusables always stay.

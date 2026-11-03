@@ -124,6 +124,11 @@ final class RatingAndSessionTests: XCTestCase {
         q.answer(correct: true); q.answer(correct: true); q.answer(correct: true)
         XCTAssertEqual(q.current, 1)
         q.answer(correct: true); q.retire()
+        // The missed word is re-tested once more in the final pass before the round ends.
+        XCTAssertFalse(q.finished)
+        q.startFinalPass()
+        XCTAssertEqual(q.pending, [1])
+        q.answer(correct: true)
         XCTAssertTrue(q.finished)
         XCTAssertEqual(q.wrong[1], 1)
     }

@@ -417,6 +417,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
                 case ("v", [.command]):
                     // Empty or fully selected field in 词典: replace and look up at once; else a normal paste.
                     let all = ed.selectedRange().location == 0 && ed.selectedRange().length == (ed.string as NSString).length
+                    if self.state.mode == .lookup, all, let raw = NSPasteboard.general.string(forType: .string), TypeToSearch.isPassage(raw) {
+                        self.lookup.enterReading(raw); return nil
+                    }
                     if self.state.mode == .lookup, all, let t = TypeToSearch.pasteQuery(NSPasteboard.general.string(forType: .string)) {
                         self.pasteLookup(t, f); return nil
                     }
@@ -431,7 +434,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSSearchFieldDel
             }
             // 词典, nothing text-focused: ⌘V looks the clipboard text up (one line, trimmed).
             if self.state.mode == .lookup, !textFocused, cmd == [.command], e.charactersIgnoringModifiers == "v" {
-                guard let t = TypeToSearch.pasteQuery(NSPasteboard.general.string(forType: .string)) else { return e }
+                let raw = NSPasteboard.general.string(forType: .string)
+                if TypeToSearch.isPassage(raw), let raw { self.lookup.enterReading(raw); return nil }
+                guard let t = TypeToSearch.pasteQuery(raw) else { return e }
                 self.pasteLookup(t, f)
                 return nil
             }
