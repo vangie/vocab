@@ -351,7 +351,8 @@ final class ReviewSession: ObservableObject {
         }
         question = q; previousType = q.type; askedAt = Date(); phase = .asking
         NotificationCenter.default.post(name: .vocabQuizQuestionShown, object: nil)
-        if q.type != .meaningToWord { speak(q) }   // that one would give the answer away
+        // 看意思选词 / 拼写 would be given away by the sound (拼写 with audio is just 听写).
+        if q.type != .meaningToWord && q.type != .spelling { speak(q) }
     }
 
     /// Dictionaries for IPA: the enabled ones plus Oxford E–C (which has American IPA).
@@ -666,7 +667,7 @@ extension ReviewSession {
         s.queue = queue
         s.question = q
         if q.type == .recall && chosen == -1 { s.checkWord = q.word; s.phase = .check; return s }
-        if q.type == .spelling, let t = typed {
+        if q.type == .spelling || q.type == .dictation, let t = typed {
             if t == "@retry" { s.retrying = true; s.lastRating = .forgot; s.phase = .asking; return s }
             s.typed = t; s.marks = SpellingCheck.diff(typed: t, answer: q.word)
             s.lastCorrect = SpellingCheck.isAccepted(t, q.word); s.lastRating = s.lastCorrect ? .good : .forgot

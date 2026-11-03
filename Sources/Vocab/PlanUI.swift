@@ -485,9 +485,9 @@ struct VocabTestSheet: View {
             Spacer()
             HStack(spacing: 20) {
                 Button { answer(false) } label: { BigLabel(text: "不认识", hint: "←") }
-                    .controlSize(.large).keyboardShortcut(.leftArrow, modifiers: [])
+                    .buttonStyle(QuizButtonStyle(height: 44)).keyboardShortcut(.leftArrow, modifiers: [])
                 Button { answer(true) } label: { BigLabel(text: "认识", hint: "→") }
-                    .controlSize(.large).keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(QuizButtonStyle(prominent: true, height: 44))
             }
             .disabled(busy)
             }
@@ -697,9 +697,9 @@ struct HanziTestSheet: View {
                 Spacer()
                 HStack(spacing: 20) {
                     Button { answer(false) } label: { BigLabel(text: "不认识", hint: "←") }
-                        .controlSize(.large).keyboardShortcut(.leftArrow, modifiers: [])
+                        .buttonStyle(QuizButtonStyle(height: 44)).keyboardShortcut(.leftArrow, modifiers: [])
                     Button { answer(true) } label: { BigLabel(text: "认识", hint: "→") }
-                        .controlSize(.large).keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.rightArrow, modifiers: []).buttonStyle(QuizButtonStyle(prominent: true, height: 44))
                 }
             }
             HStack {
