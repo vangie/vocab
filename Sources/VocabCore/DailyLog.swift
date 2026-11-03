@@ -62,10 +62,45 @@ public struct DailyLog: Codable, Equatable, Sendable {
 
     /// Adds active study time between two interactions; a gap longer than `idleCap` is idle and not counted.
     /// Handles sleep/wake by splitting time at 2am day boundary; idle gaps > 3 min pause the timer.
-    public mutating func addStudy(_ seconds: Double, at now: Date, idleCap: Double = 180, calendar: Calendar = .current) {
+    /// When a session spans the 2am boundary, time is attributed to each day proportionally.
+    public mutating func addStudy(_ seconds: Double, at now: Date, from previous: Date? = nil, idleCap: Double = 180, calendar: Calendar = .current) {
         guard seconds > 0 else { return }
         // Idle detection: gaps > 3 min not counted (pause after inactivity)
         guard seconds <= idleCap else { return }
+        
+        // If we have the previous timestamp, split time across 2am boundary if needed
+        if let prev = previous {
+            let nowDay = StudyDay.day(now, calendar)
+            let prevDay = StudyDay.day(prev, calendar)
+            
+            if nowDay != prevDay {
+                // Session crossed 2am boundary: split time proportionally
+                let rollover = calendar.date(bySettingHour: 2, minute: 0, second: 0, of: nowDay)!
+                let beforeRollover = max(0, rollover.timeIntervalSince(prev))
+                let afterRollover = max(0, now.timeIntervalSince(rollover))
+                let total = beforeRollover + afterRollover
+                
+                if total > 0 && total <= idleCap {
+                    // Split proportionally
+                    let beforeSecs = seconds * (beforeRollover / total)
+                    let afterSecs = seconds * (afterRollover / total)
+                    
+                    if beforeSecs > 0 {
+                        var r1 = days[StudyDay.key(prev, calendar)] ?? DayRecord()
+                        r1.studySeconds += beforeSecs
+                        days[StudyDay.key(prev, calendar)] = r1
+                    }
+                    if afterSecs > 0 {
+                        var r2 = days[StudyDay.key(now, calendar)] ?? DayRecord()
+                        r2.studySeconds += afterSecs
+                        days[StudyDay.key(now, calendar)] = r2
+                    }
+                    return
+                }
+            }
+        }
+        
+        // Normal case: add all time to current day
         let k = StudyDay.key(now, calendar)
         var r = days[k] ?? DayRecord()
         r.studySeconds += seconds

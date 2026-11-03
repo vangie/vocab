@@ -329,11 +329,14 @@ final class ReviewSession: ObservableObject {
     static let studyGoalKey = "dailyStudyGoalMinutes"
     static var studyGoalMinutes: Int { max(1, UserDefaults.standard.object(forKey: studyGoalKey) as? Int ?? 15) }
     private var lastActivity: Date?
-    /// Called on every interaction in a session; time since the previous one counts unless idle (> 60 s).
+    /// Called on every interaction in a session; time since the previous one counts unless idle (> 3 min).
+    /// Handles 2am boundary crossing and sleep/wake automatically via DailyLog splitting.
     private func activity() {
         let now = Date()
-        if let l = lastActivity {
-            var log = DailyLog.load(); log.addStudy(now.timeIntervalSince(l), at: now); log.save()
+        if let prev = lastActivity {
+            var log = DailyLog.load()
+            log.addStudy(now.timeIntervalSince(prev), at: now, from: prev)
+            log.save()
             today = log.today(now)
         }
         lastActivity = now
@@ -459,11 +462,29 @@ final class ReviewSession: ObservableObject {
     private func finish(correct: Bool) {
         guard let q = question else { return }
         activity()
-        let secs = Date().timeIntervalSince(askedAt)
-        let r = RatingMap.capped(RatingMap.rating(correct: correct, seconds: secs, type: q.type, length: q.word.count),
-                                 hinted: q.type == .spelling && hintsUsed > 0)
+        
+        // Auto-rating: use wrong count if available, else time-based
+        let wrongCount = queue.wrong[q.itemID] ?? 0
+        let r: ReviewRating
+        if wrongCount > 0 || !correct {
+            // Use auto-rating from wrong attempts
+            r = RatingMap.fromWrongCount(wrongCount + (correct ? 0 : 1))
+        } else {
+            // First correct answer: time-based rating
+            let secs = Date().timeIntervalSince(askedAt)
+            r = RatingMap.capped(RatingMap.rating(correct: correct, seconds: secs, type: q.type, length: q.word.count),
+                                     hinted: (q.type == .spelling || q.type == .dictation) && hintsUsed > 0)
+        }
+        
         apply(r, correct: correct)
         lastCorrect = correct
+        
+        // Trigger inline drill on wrong answer (key feature #8)
+        if !correct && !retrying {
+            startInlineDrill()
+            return
+        }
+        
         phase = .answered
         if q.type == .meaningToWord || !correct { speak(q) }
         if correct && Self.autoAdvance { scheduleAutoAdvance() }
@@ -561,6 +582,14 @@ final class ReviewSession: ObservableObject {
         }
         
         if phase == .answered, question?.type == .spelling || question?.type == .dictation, !lastCorrect { startRetry(); return }
+        
+        // Check if main queue done but final pass needed
+        if queue.pending.isEmpty && !queue.inFinalPass && !queue.missedWords.isEmpty {
+            queue.startFinalPass()
+            loadCurrent()
+            return
+        }
+        
         if queue.finished { end() } else { loadCurrent() }
     }
 

@@ -239,6 +239,17 @@ private struct RetireButton: View {
     }
 }
 
+/// 「不认识」: triggers inline drill immediately when user actively says they don't know.
+private struct DontKnowButton: View {
+    let session: ReviewSession
+    var body: some View {
+        Button { session.markDontKnow() } label: { BigLabel(text: "不认识", hint: "⌘D") }
+            .controlSize(.large)
+            .keyboardShortcut("d", modifiers: .command)
+            .help("不认识：立即练习这个词（⌘D）")
+    }
+}
+
 private struct SpeakButton: View {
     let session: ReviewSession
     var body: some View {
@@ -489,7 +500,8 @@ private struct RecallCard: View {
                 }
                 .opacity(session.revealed ? 1 : 0).allowsHitTesting(session.revealed)
                 if !session.revealed {
-                    HStack(spacing: 16) {
+                    HStack(spacing: 12) {
+                        DontKnowButton(session: session)
                         Button { session.flip() } label: { BigLabel(text: "显示释义", hint: "空格") }
                             .keyboardShortcut(.space, modifiers: []).controlSize(.large).buttonStyle(.borderedProminent)
                         RetireButton(session: session)

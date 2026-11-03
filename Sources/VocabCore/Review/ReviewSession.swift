@@ -128,32 +128,67 @@ public enum SessionPlanner {
 }
 
 /// The in-session queue: a wrong answer comes back a few cards later.
+/// After the main queue finishes, missed words are re-tested in a final pass (wrongWordClear).
 public struct ReviewQueue: Sendable, Codable, Equatable {
     public private(set) var pending: [Int64]
     public private(set) var done: Set<Int64> = []
     public private(set) var wrong: [Int64: Int] = [:]
+    /// Words missed in this session that need final re-test.
+    public private(set) var missedWords: Set<Int64> = []
+    /// Track if we're in the final re-test pass.
+    public private(set) var inFinalPass = false
     public let total: Int
     public static let requeueGap = 3
 
     public init(ids: [Int64]) { pending = ids; total = ids.count }
     public var current: Int64? { pending.first }
-    public var finished: Bool { pending.isEmpty }
-    public var progress: Double { total == 0 ? 1 : Double(done.count) / Double(total) }
+    public var finished: Bool { pending.isEmpty && (inFinalPass || missedWords.isEmpty) }
+    public var progress: Double { 
+        if inFinalPass {
+            let finalTotal = missedWords.count
+            let finalDone = finalTotal - pending.count
+            return finalTotal > 0 ? Double(total + finalDone) / Double(total + finalTotal) : 1
+        }
+        return total == 0 ? 1 : Double(done.count) / Double(total)
+    }
 
     public mutating func answer(correct: Bool) {
         guard let id = pending.first else { return }
         pending.removeFirst()
-        if correct { done.insert(id) }
-        else { wrong[id, default: 0] += 1; pending.insert(id, at: min(pending.count, Self.requeueGap)) }
+        if correct { 
+            done.insert(id)
+            missedWords.remove(id)  // cleared in final pass
+        } else { 
+            wrong[id, default: 0] += 1
+            if !inFinalPass {
+                pending.insert(id, at: min(pending.count, Self.requeueGap))
+                missedWords.insert(id)  // mark for final re-test
+            } else {
+                // In final pass: still wrong, give up and move on
+                done.insert(id)
+            }
+        }
     }
+    
+    /// Start final re-test pass of missed words.
+    public mutating func startFinalPass() {
+        guard !missedWords.isEmpty, pending.isEmpty, !inFinalPass else { return }
+        inFinalPass = true
+        pending = Array(missedWords).sorted()  // deterministic order
+    }
+    
     /// 斩 after the card was already answered: forget any pending repeat of it.
     public mutating func dropCurrentRequeue(_ id: Int64) {
-        pending.removeAll { $0 == id }; done.insert(id)
+        pending.removeAll { $0 == id }
+        done.insert(id)
+        missedWords.remove(id)
     }
     /// 斩: drop a card from the session for good.
     public mutating func retire() {
         guard let id = pending.first else { return }
-        pending.removeFirst(); done.insert(id)
+        pending.removeFirst()
+        done.insert(id)
+        missedWords.remove(id)
     }
 }
 

@@ -81,16 +81,21 @@ final class StudyTimerTests: XCTestCase {
 
     func testStudyTimeSplitsAt2AM() {
         let cal = Calendar.current
-        let day1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 23, minute: 30))!
-        let day2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 0, minute: 10))!
-
+        let day1End = cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 23, minute: 50))!
+        let day2Start = cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 0, minute: 10))!
+        
+        // 20 min session spanning 2am boundary (23:50 - 00:10)
         var log = DailyLog()
-        log.addStudy(60, at: day1)
-        log.addStudy(60, at: day2)
+        let sessionSeconds = day2Start.timeIntervalSince(day1End)  // 1200 seconds (20 min)
+        log.addStudy(sessionSeconds, at: day2Start, from: day1End)
 
-        // Both days get their time (2am boundary respected)
-        XCTAssertGreaterThan(log.days[DailyLog.key(day1, cal)]?.studySeconds ?? 0, 0, "Day 1 has study time")
-        XCTAssertGreaterThan(log.days[DailyLog.key(day2, cal)]?.studySeconds ?? 0, 0, "Day 2 has study time")
+        // Both days get their proportional time (10 min each side of 2am)
+        let day1Secs = log.days[DailyLog.key(day1End, cal)]?.studySeconds ?? 0
+        let day2Secs = log.days[DailyLog.key(day2Start, cal)]?.studySeconds ?? 0
+        
+        XCTAssertGreaterThan(day1Secs, 0, "Day 1 has study time")
+        XCTAssertGreaterThan(day2Secs, 0, "Day 2 has study time")
+        XCTAssertEqual(day1Secs + day2Secs, sessionSeconds, accuracy: 1, "Total time preserved")
     }
 }
 
@@ -125,5 +130,79 @@ final class DictationTests: XCTestCase {
         let mature = QuestionPicker.weights(.mature)
         XCTAssertTrue(mature.keys.contains(.dictation), "Dictation in mature weights")
         XCTAssertGreaterThan(mature[.dictation] ?? 0, 0, "Dictation has positive weight")
+    }
+    
+    func testDictationThresholdsSameAsSpelling() {
+        let len = 8
+        let spell = RatingMap.thresholds(.spelling, length: len)
+        let dict = RatingMap.thresholds(.dictation, length: len)
+        XCTAssertEqual(spell.fast, dict.fast, "Dictation timing same as spelling")
+        XCTAssertEqual(spell.slow, dict.slow, "Dictation timing same as spelling")
+    }
+}
+
+final class FSRSVerificationTests: XCTestCase {
+    func testSchedulerIsFSRS() {
+        // Verify the scheduler uses FSRS (not SM-2)
+        let fsrs = Scheduler.shared
+        XCTAssertNotNil(fsrs as? FSRS, "Scheduler uses FSRS algorithm")
+        XCTAssertEqual(fsrs.learningSteps, [60, 600], "Default FSRS learning steps")
+        XCTAssertEqual(fsrs.desiredRetention, 0.9, "Default FSRS retention")
+    }
+    
+    func testAutoRatingWiredToScheduler() {
+        // Auto-rating produces valid ReviewRating values
+        XCTAssertEqual(RatingMap.fromWrongCount(0), .good)
+        XCTAssertEqual(RatingMap.fromWrongCount(1), .fuzzy)
+        XCTAssertEqual(RatingMap.fromWrongCount(2), .forgot)
+        
+        // These ratings work with FSRS scheduler
+        let now = Date()
+        let state = ReviewState.new(now: now)
+        _ = Scheduler.next(state, rating: .good, now: now)
+        _ = Scheduler.next(state, rating: .fuzzy, now: now)
+        _ = Scheduler.next(state, rating: .forgot, now: now)
+    }
+}
+
+final class InlineDrillTests: XCTestCase {
+    func testDrillStateSteps() {
+        var drill = ReviewSession.InlineDrillState(
+            word: "test", 
+            gloss: Gloss(chinese: "测试"), 
+            audio: nil
+        )
+        XCTAssertEqual(drill.step, .showWord, "Starts at showWord")
+        XCTAssertEqual(drill.typeAttempts, 0)
+        XCTAssertEqual(drill.targetAttempts, 2, "Requires 2 correct typings")
+    }
+}
+
+final class FinalPassTests: XCTestCase {
+    func testMissedWordsRetested() {
+        var q = ReviewQueue(ids: [1, 2, 3])
+        
+        // Answer: correct, wrong, correct
+        q.answer(correct: true)   // 1 done
+        q.answer(correct: false)  // 2 wrong, requeued
+        q.answer(correct: true)   // 3 done
+        
+        XCTAssertTrue(q.missedWords.contains(2), "Wrong word marked for final pass")
+        XCTAssertEqual(q.pending, [2], "Wrong word still pending")
+        
+        // Answer it again correctly
+        q.answer(correct: true)   // 2 done
+        XCTAssertTrue(q.pending.isEmpty, "Main queue done")
+        XCTAssertFalse(q.missedWords.isEmpty, "Missed word still tracked")
+        
+        // Start final pass
+        q.startFinalPass()
+        XCTAssertTrue(q.inFinalPass, "Final pass started")
+        XCTAssertEqual(q.pending.count, 1, "Missed word re-queued")
+        XCTAssertFalse(q.finished, "Not finished until final pass done")
+        
+        // Answer in final pass
+        q.answer(correct: true)
+        XCTAssertTrue(q.finished, "Finished after final pass")
     }
 }

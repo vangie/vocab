@@ -92,8 +92,10 @@ public enum Distractors {
 
     /// Rank candidate words by how confusable they are with `target`, dropping same-family words,
     /// true synonyms (two right answers) and junk. `book` words get a small bonus (you've met them).
+    /// Uses Chinese gloss similarity when available to prefer plausible-but-distinguishable options.
     public static func rank(target: String, candidates: [String], synonyms: Set<String> = [],
-                            book: Set<String> = [], limit: Int = 8) -> [Candidate] {
+                            book: Set<String> = [], limit: Int = 8, targetGloss: Gloss? = nil,
+                            candidateGlosses: [String: Gloss] = [:]) -> [Candidate] {
         let t = target.lowercased()
         let tKey = phoneticKey(t)
         let tRoots = Set(RootTable.matches(t).filter { $0.morpheme.kind == .root }.map(\.morpheme))
@@ -124,6 +126,15 @@ public enum Distractors {
             s += Double(abs(l.count - t.count)) * 0.3
             if inBook { s -= 1 }
             if sameRoot { s -= 1 }
+            
+            // Use Chinese gloss similarity to prefer moderate similarity (plausible but not too close)
+            if let tg = targetGloss, let cg = candidateGlosses[l] {
+                let sim = chineseGlossSimilarity(tg.chinese, cg.chinese)
+                // Optimal similarity: 0.2-0.5 (plausible relation but distinguishable)
+                if sim > 0.2 && sim < 0.5 { s -= 1.5 }  // boost plausible distractors
+                else if sim >= 0.5 { s += 2 }  // penalize too similar (confusing, not fair)
+            }
+            
             out.append(Candidate(word: w, score: s))
         }
         return Array(out.sorted { ($0.score, $0.word) < ($1.score, $1.word) }.prefix(limit))
@@ -136,15 +147,26 @@ public enum Distractors {
     }
 
     /// Chinese gloss similarity for better distractor selection: shared characters and bigram overlap.
+    /// Returns 0-1 score; higher = more similar. Uses Jaccard similarity on both character and bigram level.
     public static func chineseGlossSimilarity(_ a: String?, _ b: String?) -> Double {
         guard let a, let b, !a.isEmpty, !b.isEmpty else { return 0 }
         let ca = Set(a.filter { GlossExtractor.hasCJK(String($0)) })
         let cb = Set(b.filter { GlossExtractor.hasCJK(String($0)) })
         guard !ca.isEmpty, !cb.isEmpty else { return 0 }
-        let charOverlap = Double(ca.intersection(cb).count) / Double(ca.union(cb).count)
+        
+        // Character-level Jaccard similarity
+        let charIntersect = ca.intersection(cb).count
+        let charUnion = ca.union(cb).count
+        let charSim = charUnion > 0 ? Double(charIntersect) / Double(charUnion) : 0
+        
+        // Bigram-level Jaccard similarity
         let ba = GlossExtractor.bigrams(a), bb = GlossExtractor.bigrams(b)
-        let bigramOverlap = ba.isEmpty || bb.isEmpty ? 0 : Double(ba.intersection(bb).count) / Double(ba.union(bb).count)
-        return (charOverlap + bigramOverlap) / 2
+        let bigramIntersect = ba.intersection(bb).count
+        let bigramUnion = ba.union(bb).count
+        let bigramSim = bigramUnion > 0 ? Double(bigramIntersect) / Double(bigramUnion) : 0
+        
+        // Weight bigrams more heavily (they capture meaning better than single chars)
+        return charSim * 0.4 + bigramSim * 0.6
     }
 
     /// Should `candidate` stay as a distractor for `target`? Curated confusables always stay.
