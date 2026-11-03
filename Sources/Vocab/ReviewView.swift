@@ -15,6 +15,7 @@ struct ReviewView: View {
             case .summary: FitHeight(levels: [.normal]) { _ in SummaryScreen(session: session) }
             case .loading: if session.question == nil { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) } else { QuestionScreen(session: session) }
             case .asking, .answered: QuestionScreen(session: session)
+            case .inlineDrill: InlineDrillScreen(session: session)
             case .check:
                 // Same pinned top bar + progress as the quiz; 认识，斩 already retires, so no 斩 here.
                 VStack(spacing: 0) {
@@ -1374,6 +1375,65 @@ private struct SpeakerHover: ViewModifier {
 
 extension View {
     func speakerHover(_ extra: ((Bool) -> Void)? = nil) -> some View { modifier(SpeakerHover(extra: extra)) }
+}
+
+/// Inline drill: brief practice when answer is wrong or "don't know" clicked.
+/// Show word+meaning+audio, then type correctly 2-3 times, then quick recall check before continuing.
+private struct InlineDrillScreen: View {
+    @ObservedObject var session: ReviewSession
+    var body: some View {
+        guard let drill = session.drillState else {
+            return AnyView(ProgressView())
+        }
+        return AnyView(
+            VStack(spacing: 0) {
+                SessionHeader(session: session, tag: "巩固练习", showRetire: false)
+                FitHeight(levels: [.normal]) { _ in drillContent(drill) }
+            }
+        )
+    }
+
+    private func drillContent(_ drill: ReviewSession.InlineDrillState) -> some View {
+        VStack(spacing: 20) {
+            Spacer()
+            switch drill.step {
+            case .showWord:
+                VStack(spacing: 16) {
+                    Text(drill.word).font(.system(size: 36, weight: .bold))
+                    if let audio = drill.audio {
+                        Button { session.pronounce(drill.word, audio: audio) } label: {
+                            Image(systemName: "speaker.wave.2").font(.system(size: 24))
+                        }.buttonStyle(.borderless)
+                    }
+                    Text(drill.gloss.short).font(.title3).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).padding(.horizontal, 40)
+                    Button { session.advanceDrill() } label: {
+                        Text("开始练习").font(.title3.weight(.semibold)).frame(minWidth: 180, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                }
+            case .typeAgain:
+                VStack(spacing: 16) {
+                    Text("拼写这个单词").foregroundStyle(.secondary)
+                    Text(drill.gloss.short).font(.title3)
+                    TextField("输入单词", text: $session.typed)
+                        .textFieldStyle(.roundedBorder).font(.system(size: 22))
+                        .multilineTextAlignment(.center).frame(maxWidth: 320)
+                        .onSubmit { session.advanceDrill() }
+                    Text("已完成 \(drill.typeAttempts)/\(drill.targetAttempts) 次")
+                        .font(.caption).foregroundStyle(.tertiary)
+                    Button { session.advanceDrill() } label: { Text("确认") }
+                        .buttonStyle(.borderedProminent).controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                }
+            case .done:
+                Text("继续").font(.title3)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+    }
 }
 
 /// `--render-panel out.png word [dark]`: offscreen render of the lookup popup (read-only).

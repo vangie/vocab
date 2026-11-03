@@ -31,7 +31,7 @@ final class ReviewSession: ObservableObject {
     /// The answer just recorded for the current card (so 斩 in the answered state can replace it).
     private var lastAnswer: (rating: ReviewRating, correct: Bool, type: QuestionType)?
     /// Inline drill state: when a word is answered wrong or marked "don't know", drill it immediately.
-    private var drillState: InlineDrillState?
+    @Published private(set) var drillState: InlineDrillState?
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var question: ReviewQuestion?
@@ -551,9 +551,58 @@ final class ReviewSession: ObservableObject {
     func next() {
         cancelAutoAdvance()
         activity()
-        guard phase == .answered || phase == .asking else { return }
-        if phase == .answered, question?.type == .spelling, !lastCorrect { startRetry(); return }
+        guard phase == .answered || phase == .asking || phase == .inlineDrill else { return }
+        
+        // After inline drill, return to normal flow
+        if phase == .inlineDrill {
+            drillState = nil
+            if queue.finished { end() } else { loadCurrent() }
+            return
+        }
+        
+        if phase == .answered, question?.type == .spelling || question?.type == .dictation, !lastCorrect { startRetry(); return }
         if queue.finished { end() } else { loadCurrent() }
+    }
+
+    /// Start inline drill: immediately practice the word when wrong or "don't know" is clicked.
+    func startInlineDrill() {
+        guard let q = question, let item = items[q.itemID] else { return }
+        let factory = self.factory ?? QuestionFactory(dicts: DictionarySelection.enabled(), thesaurus: nil, book: [])
+        let m = factory.materials(for: item.word)
+        drillState = InlineDrillState(word: item.word, gloss: m.gloss, audio: m.audio)
+        phase = .inlineDrill
+        speak(q)  // hear the word
+    }
+
+    /// Continue inline drill: type again or finish.
+    func advanceDrill() {
+        guard var drill = drillState else { return }
+        switch drill.step {
+        case .showWord:
+            drill.step = .typeAgain
+            typed = ""
+            drillState = drill
+        case .typeAgain:
+            if SpellingCheck.isAccepted(typed, drill.word) {
+                drill.typeAttempts += 1
+                if drill.typeAttempts >= drill.targetAttempts {
+                    drill.step = .done
+                    drillState = drill
+                    next()  // done, move on
+                } else {
+                    typed = ""  // type again
+                }
+            }
+        case .done:
+            next()
+        }
+    }
+
+    /// Mark "don't know" and start inline drill.
+    func markDontKnow() {
+        guard phase == .asking else { return }
+        activity()
+        startInlineDrill()
     }
 
     /// 斩 / 已掌握: retire the word for good.
