@@ -14,11 +14,24 @@ final class ReviewSession: ObservableObject {
     static let capKey = "reviewDailyNewCap"
     static let introducedKey = "reviewNewIntroduced"
 
-    enum Phase: Equatable { case idle, loading, check, asking, answered, summary }
+    enum Phase: Equatable { case idle, loading, check, asking, answered, inlineDrill, summary }
+
+    /// Inline drill: when wrong/don't-know, immediately drill the word (see+hear, type 2-3x, recall check).
+    struct InlineDrillState {
+        enum Step: Equatable { case showWord, typeAgain, done }
+        var step: Step = .showWord
+        var word: String
+        var gloss: Gloss
+        var audio: URL?
+        var typeAttempts = 0
+        var targetAttempts = 2  // type correctly 2x
+    }
 
     typealias Stats = SessionStats
     /// The answer just recorded for the current card (so 斩 in the answered state can replace it).
     private var lastAnswer: (rating: ReviewRating, correct: Bool, type: QuestionType)?
+    /// Inline drill state: when a word is answered wrong or marked "don't know", drill it immediately.
+    private var drillState: InlineDrillState?
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var question: ReviewQuestion?

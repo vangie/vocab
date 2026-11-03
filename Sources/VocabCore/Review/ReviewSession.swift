@@ -7,11 +7,12 @@ public enum QuestionType: String, CaseIterable, Sendable, Codable {
     case spelling        // 拼写
     case syllables       // 音节拆分 — retired: never generated (kept so old stats still decode)
     case roots           // 词根
+    case dictation       // 听写
 
     public var label: String {
         switch self {
         case .recall: "看词想意思"; case .meaningToWord: "看意思选词"; case .wordToMeaning: "看词选意思"
-        case .spelling: "拼写"; case .syllables: "音节拆分"; case .roots: "词根词缀"
+        case .spelling: "拼写"; case .syllables: "音节拆分"; case .roots: "词根词缀"; case .dictation: "听写"
         }
     }
     public var isObjective: Bool { self != .recall }
@@ -32,7 +33,7 @@ public enum RatingMap {
     /// Seconds under which a correct answer counts as fast (Easy) and over which it counts as slow (Hard).
     public static func thresholds(_ t: QuestionType, length: Int) -> (fast: Double, slow: Double) {
         switch t {
-        case .spelling: return (2.5 + 0.35 * Double(length), 8 + 0.8 * Double(length))
+        case .spelling, .dictation: return (2.5 + 0.35 * Double(length), 8 + 0.8 * Double(length))
         case .meaningToWord, .wordToMeaning: return (3, 9)
         case .syllables, .roots: return (4, 12)
         case .recall: return (0, .infinity)
@@ -48,7 +49,17 @@ public enum RatingMap {
         return .good
     }
 
-    /// A spelling answered after using 提示 can at best count as 模糊.
+    /// Auto-rating from wrong attempts: first try correct = Good, one miss = Hard, 2+ = Again.
+    /// Based on TypeWords approach: eliminates manual rating for objective questions.
+    public static func fromWrongCount(_ wrongCount: Int) -> ReviewRating {
+        switch wrongCount {
+        case 0: return .good
+        case 1: return .fuzzy
+        default: return .forgot
+        }
+    }
+
+    /// A spelling/dictation answered after using 提示 can at best count as 模糊.
     public static func capped(_ r: ReviewRating, hinted: Bool) -> ReviewRating {
         guard hinted, r == .good || r == .easy else { return r }
         return .fuzzy
@@ -64,19 +75,20 @@ public enum SpellingHint {
     public static func maxHints(_ word: String) -> Int { max(0, word.count - 1) }
 }
 
-/// Picks the question type for a card. New and learning cards only get objective types; the
+/// Picks the question type for a card. New words first see/learn (recognition → spelling), review words test recall.
 /// self-graded 看词想意思 is reserved for mature cards and kept rare (≤ `maxRecallShare`).
 public enum QuestionPicker {
     public static let maxRecallShare = 0.15
+    /// Separate flows: new words (see then spell), learning (mixed practice), mature (recall-focused).
     public static func weights(_ stage: CardStage) -> [QuestionType: Double] {
         switch stage {
-        case .new: [.wordToMeaning: 3, .meaningToWord: 2]
-        case .learning: [.meaningToWord: 2, .wordToMeaning: 1.5, .roots: 1.5, .spelling: 1.5]
-        case .mature: [.spelling: 3, .meaningToWord: 1.5, .roots: 1, .recall: 0.9]
+        case .new: [.wordToMeaning: 4, .meaningToWord: 3]  // recognition first for new words
+        case .learning: [.meaningToWord: 2, .wordToMeaning: 1.5, .spelling: 2, .dictation: 1.5, .roots: 1.5]
+        case .mature: [.dictation: 2.5, .spelling: 2, .meaningToWord: 1, .roots: 1, .recall: 0.9]  // test recall
         }
     }
     /// Objective fallbacks when a card's stage weights have nothing available.
-    static let fallback: [QuestionType] = [.wordToMeaning, .meaningToWord, .spelling, .roots]
+    static let fallback: [QuestionType] = [.wordToMeaning, .meaningToWord, .dictation, .spelling, .roots]
 
     /// `available` lists the types this card can support (roots need a match, choices need distractors…).
     /// Avoids repeating the previous type so the session interleaves.

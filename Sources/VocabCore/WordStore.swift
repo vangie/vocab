@@ -499,6 +499,18 @@ public final class WordStore: @unchecked Sendable {
         return it
     }
 
+    /// Unset mastered state: bring a retired word back into rotation.
+    @discardableResult
+    public func unretire(id: Int64, now: Date = Date()) throws -> WordItem? {
+        guard var it = try find(id: id), Scheduler.isMastered(it.review) else { return nil }
+        // Reset to a short review interval so it comes back soon.
+        it.review.intervalDays = 1
+        it.review.due = now.addingTimeInterval(86_400)
+        it.review.state = .review
+        try update(it)
+        return it
+    }
+
     public func count() throws -> Int {
         var n = 0
         try run("SELECT COUNT(*) FROM words", []) { n = Int(sqlite3_column_int64($0, 0)) }

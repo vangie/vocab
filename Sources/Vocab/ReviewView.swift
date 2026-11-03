@@ -183,6 +183,7 @@ private struct QuestionScreen: View {
                 MeaningPrompt(q: q)
                 Options(session: session, q: q)
             case .spelling: SpellingCard(session: session, q: q)
+            case .dictation: DictationCard(session: session, q: q)
             case .syllables:
                 Text("选择正确的音节划分").foregroundStyle(.secondary)
                 WordTitle(q: q, session: session)
@@ -195,8 +196,8 @@ private struct QuestionScreen: View {
                 Text(h).italic().foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(density == .normal ? 3 : 2)
                     .font(.callout).padding(.top, 4)
             }
-            if q.type == .spelling {
-                // Feedback is part of SpellingCard (same slot as the help row).
+            if q.type == .spelling || q.type == .dictation {
+                // Feedback is part of Spelling/DictationCard (same slot as the help row).
             } else if q.type != .recall {
                 // Always laid out (hidden before the reveal) so nothing moves when the answer appears.
                 let shown = session.phase == .answered
@@ -650,6 +651,90 @@ private struct SpellingHelp: View {
     @ViewBuilder private var giveUpButton: some View {
         let b = Button { session.giveUpSpelling() } label: { Label("不会，看答案", systemImage: "eye") }
             .help("显示正确拼写，计为 忘了，稍后再考（⌘↩）")
+        if active { b.keyboardShortcut(.return, modifiers: .command) } else { b }
+    }
+}
+
+/// Dictation: audio-only prompt, user spells the word. Reuses spelling feedback and comparison.
+private struct DictationCard: View {
+    @ObservedObject var session: ReviewSession
+    let q: ReviewQuestion
+    @FocusState private var focused: Bool
+    var body: some View {
+        let answered = session.phase == .answered
+        VStack(spacing: 14) {
+            // Large speaker button as the main prompt (audio only, no word shown until after answering)
+            ZStack {
+                Button { session.speak() } label: {
+                    VStack(spacing: 8) {
+                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 36))
+                        Text("听音拼写").font(.system(size: 14)).foregroundStyle(.secondary)
+                    }
+                }.speakerHover()
+                .buttonStyle(.borderless).help("播放读音（⌘R）").keyboardShortcut("r", modifiers: .command)
+                .opacity(answered ? 0 : 1).allowsHitTesting(!answered).accessibilityHidden(answered)
+                if answered {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(q.word).font(.system(size: 24, weight: .semibold)).fixedSize()
+                            .wordLink(q.word, session: session, restUnderline: false)
+                        PhoneticTag(session: session, word: q.word, audio: q.audio, size: 16).fixedSize()
+                    }
+                }
+            }
+            .frame(minHeight: 60)
+            MeaningPrompt(q: q)
+            if session.retrying && !answered {
+                Text("再拼一次，加深印象").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            ZStack(alignment: .top) {
+                SpellingComparison(session: session, q: q).opacity(answered ? 1 : 0).allowsHitTesting(answered)
+                if !answered {
+                    TextField("拼写这个单词，↩ 提交", text: $session.typed)
+                        .textFieldStyle(.roundedBorder).font(.system(size: 22))
+                        .multilineTextAlignment(.center).frame(maxWidth: 320)
+                        .autocorrectionDisabled().focused($focused)
+                        .onSubmit { session.submitSpelling() }
+                        .onKeyPress(.tab) { session.hint(); return .handled }
+                        .onAppear { DispatchQueue.main.async { focused = true }; session.speak() }
+                        .padding(.top, 4)
+                }
+            }
+            ZStack(alignment: .top) {
+                DictationHelp(session: session, q: q, active: !answered)
+                    .opacity(answered ? 0 : 1).allowsHitTesting(!answered).accessibilityHidden(answered)
+                AnswerBanner(session: session, q: q, active: answered)
+                    .opacity(answered ? 1 : 0).allowsHitTesting(answered).accessibilityHidden(!answered)
+            }
+        }
+    }
+}
+
+private struct DictationHelp: View {
+    @ObservedObject var session: ReviewSession
+    let q: ReviewQuestion
+    let active: Bool
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(session.hintsUsed > 0 ? SpellingHint.mask(q.word, shown: session.hintsUsed) : " ")
+                .font(.system(size: 15, design: .monospaced)).foregroundStyle(.secondary).frame(height: 18)
+            HStack(spacing: 12) {
+                Button { session.speak() } label: { Label("重播", systemImage: "speaker.wave.2") }
+                    .help("再听一遍（⌘R）")
+                Button { session.hint() } label: { Label("提示", systemImage: "lightbulb") }
+                    .help("显示下一个字母（Tab）")
+                    .disabled(session.hintsUsed >= SpellingHint.maxHints(q.word))
+                giveUpButton
+                Button { session.retire() } label: { Label("已认识，斩", systemImage: "checkmark.seal") }
+                    .help("已掌握：不再复习这个词（⌘K）")
+            }
+            .controlSize(.large).font(.system(size: 15))
+            Text("↩ 提交 · Tab 提示 · ⌘↩ 看答案")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+    @ViewBuilder private var giveUpButton: some View {
+        let b = Button { session.giveUpSpelling() } label: { Label("不会", systemImage: "eye") }
+            .help("显示答案（⌘↩）")
         if active { b.keyboardShortcut(.return, modifiers: .command) } else { b }
     }
 }

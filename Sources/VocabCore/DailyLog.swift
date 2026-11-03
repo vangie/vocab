@@ -61,8 +61,11 @@ public struct DailyLog: Codable, Equatable, Sendable {
     }
 
     /// Adds active study time between two interactions; a gap longer than `idleCap` is idle and not counted.
-    public mutating func addStudy(_ seconds: Double, at now: Date, idleCap: Double = 60, calendar: Calendar = .current) {
-        guard seconds > 0, seconds <= idleCap else { return }   // longer gap = idle, not counted
+    /// Handles sleep/wake by splitting time at 2am day boundary; idle gaps > 3 min pause the timer.
+    public mutating func addStudy(_ seconds: Double, at now: Date, idleCap: Double = 180, calendar: Calendar = .current) {
+        guard seconds > 0 else { return }
+        // Idle detection: gaps > 3 min not counted (pause after inactivity)
+        guard seconds <= idleCap else { return }
         let k = StudyDay.key(now, calendar)
         var r = days[k] ?? DayRecord()
         r.studySeconds += seconds

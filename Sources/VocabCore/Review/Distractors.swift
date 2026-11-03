@@ -135,9 +135,22 @@ public enum Distractors {
         return d <= 2 || phoneticKey(a) == phoneticKey(b) || (commonPrefix(a, b) >= 3 && d <= 3)
     }
 
+    /// Chinese gloss similarity for better distractor selection: shared characters and bigram overlap.
+    public static func chineseGlossSimilarity(_ a: String?, _ b: String?) -> Double {
+        guard let a, let b, !a.isEmpty, !b.isEmpty else { return 0 }
+        let ca = Set(a.filter { GlossExtractor.hasCJK(String($0)) })
+        let cb = Set(b.filter { GlossExtractor.hasCJK(String($0)) })
+        guard !ca.isEmpty, !cb.isEmpty else { return 0 }
+        let charOverlap = Double(ca.intersection(cb).count) / Double(ca.union(cb).count)
+        let ba = GlossExtractor.bigrams(a), bb = GlossExtractor.bigrams(b)
+        let bigramOverlap = ba.isEmpty || bb.isEmpty ? 0 : Double(ba.intersection(bb).count) / Double(ba.union(bb).count)
+        return (charOverlap + bigramOverlap) / 2
+    }
+
     /// Should `candidate` stay as a distractor for `target`? Curated confusables always stay.
     /// Otherwise drop thesaurus synonyms and near-identical glosses; when the spelling link is weak,
     /// also drop any Chinese gloss sharing a two-character word (likely a second right answer).
+    /// Prefer candidates with moderate Chinese gloss similarity (plausible but distinguishable).
     public static func keep(target: String, candidate: String, targetGloss: Gloss, candidateGloss: Gloss,
                             synonyms: Set<String> = []) -> Bool {
         let t = target.lowercased(), c = candidate.lowercased()
@@ -147,7 +160,9 @@ public enum Distractors {
         if GlossExtractor.nearIdentical(targetGloss.chinese, candidateGloss.chinese) { return false }
         if GlossExtractor.nearIdentical(targetGloss.english, candidateGloss.english) { return false }
         if looksAlike(t, c) { return true }
-        return !GlossExtractor.overlaps(targetGloss.chinese, candidateGloss.chinese)
+        let overlap = GlossExtractor.overlaps(targetGloss.chinese, candidateGloss.chinese)
+        let sim = chineseGlossSimilarity(targetGloss.chinese, candidateGloss.chinese)
+        return !overlap && sim < 0.7  // reject high similarity (too confusing) but accept moderate
     }
 
     /// Words from a thesaurus entry's plain text ("modify, alter, make alterations to, change, …").

@@ -39,6 +39,7 @@ public struct WordMaterials: Sendable {
         var s: Set<QuestionType> = [.recall]
         let haveMeaning = !gloss.isEmpty
         if haveMeaning { s.insert(.spelling) }
+        if haveMeaning && audio != nil { s.insert(.dictation) }  // dictation needs audio
         if haveMeaning && distractors.count >= 3 { s.formUnion([.meaningToWord, .wordToMeaning]) }
         // 音节拆分 is no longer asked.
         if !morphemes.isEmpty { s.insert(.roots) }
@@ -183,7 +184,7 @@ public final class QuestionFactory: @unchecked Sendable {
                     .shuffled(using: &rng).prefix(3)
                 shuffle([(mm.morpheme.meaning, mm.morpheme.display)] + others.map { ($0.meaning, $0.display) })
             }
-        case .recall, .spelling: break
+        case .recall, .spelling, .dictation: break  // dictation: like spelling but audio-only prompt
         }
         return q
     }
