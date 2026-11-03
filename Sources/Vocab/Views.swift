@@ -192,17 +192,19 @@ struct SearchField: NSViewRepresentable {
             case #selector(NSResponder.moveDown(_:)): parent.onMove(1); return true
             case #selector(NSResponder.moveUp(_:)): parent.onMove(-1); return true
             case #selector(NSResponder.insertNewline(_:)): parent.onCommit(); return true
-            case #selector(NSResponder.paste(_:)):
+            case #selector(NSText.paste(_:)):
                 // Detect multi-word paste for reading mode
                 if let pasteString = NSPasteboard.general.string(forType: .string) {
                     let wordCount = pasteString.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
                     if wordCount > 2 {
                         // Multi-word text: enter reading mode
-                        LookupModel.shared.search(pasteString, isReading: true)
+                        Task { @MainActor in
+                            LookupModel.shared.search(pasteString, isReading: true)
+                        }
                         return true
                     }
                 }
-                return false  // single word: normal paste
+                return false  // single word: normal paste behavior
             default: return false
             }
         }

@@ -184,15 +184,21 @@ final class FSRSVerificationTests: XCTestCase {
 }
 
 final class InlineDrillTests: XCTestCase {
-    func testDrillStateSteps() {
-        var drill = ReviewSession.InlineDrillState(
-            word: "test", 
-            gloss: Gloss(chinese: "测试"), 
-            audio: nil
-        )
-        XCTAssertEqual(drill.step, .showWord, "Starts at showWord")
-        XCTAssertEqual(drill.typeAttempts, 0)
-        XCTAssertEqual(drill.targetAttempts, 2, "Requires 2 correct typings")
+    func testWrongAnswersMarkedForFinalPass() {
+        var q = ReviewQueue(ids: [1, 2, 3])
+        
+        // Answer wrong
+        q.answer(correct: false)
+        XCTAssertTrue(q.missedWords.contains(1), "Wrong answer marked for final pass")
+        XCTAssertEqual(q.wrong[1], 1, "Wrong count tracked")
+        
+        // Answer correctly later in main pass
+        XCTAssertEqual(q.current, 2, "Wrong word requeued")
+        q.answer(correct: true)
+        q.answer(correct: true)
+        q.answer(correct: true)  // word 1 again
+        
+        XCTAssertFalse(q.missedWords.contains(1), "Cleared from missed when answered correctly")
     }
 }
 

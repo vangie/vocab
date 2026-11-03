@@ -509,6 +509,26 @@ struct WordbookView: View {
 
 }
 
+// MARK: - Mastered Toggle (SwiftUI view for hand cursor)
+
+private struct MasteredToggle: View {
+    let word: WordItem
+    let isMastered: Bool
+    let row: Int
+    weak var coordinator: WordTable.Coordinator?
+    
+    var body: some View {
+        Text("已斩 ↺")
+            .font(.system(size: NSFont.systemFontSize))
+            .foregroundStyle(Color.green)
+            .handCursor()
+            .onTapGesture {
+                coordinator?.toggleMastered(itemID: word.id, word: word.word)
+            }
+            .help("点击恢复复习（已掌握 → 学习中）")
+    }
+}
+
 // MARK: - Table (AppKit)
 
 struct WordTable: NSViewRepresentable {
@@ -700,28 +720,26 @@ struct WordTable: NSViewRepresentable {
                 t.textColor = d.isEmpty ? .tertiaryLabelColor : .secondaryLabelColor
                 t.toolTip = w.sourceTitle
             case "familiarity":
-                // Mastered toggle: click to retire/unretire (hand cursor via tracking area)
+                // Mastered toggle: clickable text with hand cursor
                 let isMastered = Scheduler.isMastered(w.review)
                 if isMastered {
-                    // Make "已斩" clickable to unretire
-                    t.stringValue = "已斩 ↺"
-                    t.textColor = .systemGreen
-                    t.toolTip = "点击恢复复习（已掌握 → 学习中）"
-                    // Add click handler via tag
-                    cell.tag = row
-                    if let existing = cell.subviews.first(where: { $0 is NSClickGestureRecognizer }) {
-                        cell.removeGestureRecognizer(existing as! NSGestureRecognizer)
-                    }
-                    let click = NSClickGestureRecognizer(target: self, action: #selector(toggleMastered(_:)))
-                    cell.addGestureRecognizer(click)
-                    // Hand cursor via tracking area
-                    cell.trackingAreas.forEach { cell.removeTrackingArea($0) }
-                    cell.addTrackingArea(NSTrackingArea(rect: cell.bounds, options: [.activeInKeyWindow, .cursorUpdate, .inVisibleRect], owner: self))
+                    // Create SwiftUI view with clickable toggle
+                    let toggleView = MasteredToggle(word: w, isMastered: true, row: row, coordinator: self)
+                    let hostingView = NSHostingView(rootView: toggleView)
+                    hostingView.translatesAutoresizingMaskIntoConstraints = false
+                    // Clear existing subviews
+                    cell.subviews.forEach { $0.removeFromSuperview() }
+                    cell.addSubview(hostingView)
+                    NSLayoutConstraint.activate([
+                        hostingView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+                        hostingView.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
+                        hostingView.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+                    ])
+                    return cell
                 } else {
                     t.stringValue = w.familiarity.title
                     t.textColor = .secondaryLabelColor
                     t.toolTip = nil
-                    cell.trackingAreas.forEach { cell.removeTrackingArea($0) }
                 }
             case "added": t.stringValue = w.added.formatted(date: .numeric, time: .omitted)
             case "due":
@@ -737,23 +755,17 @@ struct WordTable: NSViewRepresentable {
             NSWorkspace.shared.open(u)
         }
         
-        override func cursorUpdate(with event: NSEvent) {
-            NSCursor.pointingHand.set()
-        }
-        
-        @objc func toggleMastered(_ gesture: NSClickGestureRecognizer) {
-            guard let view = gesture.view as? NSTableCellView, view.tag < sorted.count else { return }
-            let item = sorted[view.tag]
-            let isMastered = Scheduler.isMastered(item.review)
-            
+        func toggleMastered(itemID: Int64, word: String) {
             Task { @MainActor in
                 do {
+                    let item = sorted.first { $0.id == itemID }
+                    let isMastered = item.map { Scheduler.isMastered($0.review) } ?? false
                     if isMastered {
-                        _ = try WordbookModel.shared.store?.unretire(id: item.id)
-                        WordbookModel.shared.flash("已恢复复习：\(item.word)")
+                        _ = try WordbookModel.shared.store?.unretire(id: itemID)
+                        WordbookModel.shared.flash("已恢复复习：\(word)")
                     } else {
-                        _ = try WordbookModel.shared.store?.retire(id: item.id)
-                        WordbookModel.shared.flash("已标记为已掌握：\(item.word)")
+                        _ = try WordbookModel.shared.store?.retire(id: itemID)
+                        WordbookModel.shared.flash("已标记为已掌握：\(word)")
                     }
                     WordbookModel.shared.reload()
                     table?.reloadData()
